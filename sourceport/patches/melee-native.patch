@@ -145565,7 +145565,7 @@ index 01a904b92..4a2714437 100644
          HSD_JObjReqAnimAll(jobj, 0.0f);
          HSD_GObj_SetupProc(gobj, ifTime_UpdateTimers, 17);
 diff --git a/src/melee/if/soundtest.c b/src/melee/if/soundtest.c
-index e2ceb9eb3..bb1c9000f 100644
+index e2ceb9eb3..9685f3ed1 100644
 --- a/src/melee/if/soundtest.c
 +++ b/src/melee/if/soundtest.c
 @@ -2,6 +2,7 @@
@@ -145753,7 +145753,24 @@ index e2ceb9eb3..bb1c9000f 100644
  /// .data (defined at the end of this file, so that the functions above
  /// address each block through its own symbol).
  /* 803F9EF0 */ extern char lbl_803F9EF0[];
-@@ -276,400 +130,6 @@ struct un_803FA258_t {
+@@ -258,6 +112,16 @@ struct un_803FA258_t {
+ /* 803F9FA4 */
+ /* 803FA128 */ extern int un_803FA128[76];
+ /* 803FA258 */ extern struct un_803FA258_t un_803FA258;
++#ifdef MU_NATIVE
++/* On the console un_803FA258 follows un_803FA128 directly, and the code reaches it as
++ * un_803FA128 + 0x130. The PC linker places the two blocks apart (0.9.118: un_803FA258 first), so
++ * the debug menu's VS match read stray memory for its players (model scale 0: the
++ * ftchangeparam.c:11 assert) and the save-data editor wrote over it. Every field the overlay uses
++ * lives in un_803FA258, so the overlay starts 0x130 before it. */
++#define DEBUG_DATA() ((struct un_803FA128_t*) ((u8*) &un_803FA258 - 0x130))
++#else
++#define DEBUG_DATA() ((struct un_803FA128_t*) un_803FA128)
++#endif
+ /* 803FA3E8 */ extern char* un_803FA3E8[3];
+ /* 803FA3F4 */ extern char un_803FA3F4[];
+ /* 803FA404 */ extern char un_803FA404[];
+@@ -276,400 +140,6 @@ struct un_803FA258_t {
  /* 803FA4CC */ extern char un_803FA4CC[];
  /* 803FA640 */ extern char un_803FA640[];
  /* 803FA658 */ extern struct un_80304138_objalloc_t_x8 un_803FA658[8];
@@ -146154,7 +146171,7 @@ index e2ceb9eb3..bb1c9000f 100644
  
  /// .sdata
  /* 804D5850 */ static int un_804D5850 = 127;
-@@ -681,7 +141,7 @@ struct un_803FA258_t {
+@@ -681,7 +151,7 @@ struct un_803FA258_t {
  /* 804D5870 */ static char un_804D5870[] = "AUTO";
  /* 804D5878 */ static char un_804D5878[] = "OFF";
  /* 804D587C */ static char un_804D587C[] = "ON";
@@ -146163,7 +146180,7 @@ index e2ceb9eb3..bb1c9000f 100644
  /* 804D5888 */ static char* un_804D5888[2] = { un_803FA3F4, un_803FA404 };
  /* 804D5890 */ static char un_804D5890[] = "Master";
  /* 804D5898 */ static char un_804D5898[] = "Develop";
-@@ -691,88 +151,35 @@ struct un_803FA258_t {
+@@ -691,88 +161,35 @@ struct un_803FA258_t {
  /* 804D58B8 */ static char un_804D58B8[] = "u16   :";
  /* 804D58C0 */ static char un_804D58C0[] = "Addr  :";
  /* 804D58C8 */ static char un_804D58C8[] = "u8    :";
@@ -146269,7 +146286,7 @@ index e2ceb9eb3..bb1c9000f 100644
  }
  
  bool un_802FF884(char* arg0)
-@@ -808,7 +215,12 @@ bool un_802FF88C(enum soundtest_callback_arg0 arg0)
+@@ -808,7 +225,12 @@ bool un_802FF88C(enum soundtest_callback_arg0 arg0)
  
  bool un_802FF934(enum soundtest_callback_arg0 arg0)
  {
@@ -146282,7 +146299,7 @@ index e2ceb9eb3..bb1c9000f 100644
  }
  
  bool un_802FF958(enum soundtest_callback_arg0 arg0)
-@@ -837,10 +249,10 @@ bool un_802FF9DC(enum soundtest_callback_arg0 arg0)
+@@ -837,10 +259,10 @@ bool un_802FF9DC(enum soundtest_callback_arg0 arg0)
  
      i = un_804D6DB4 = 0;
      for (; i < un_804D6DB0; i++) {
@@ -146295,7 +146312,7 @@ index e2ceb9eb3..bb1c9000f 100644
      un_803F9FA4.entries[7].x18 = (f32) total;
      return 0;
  }
-@@ -849,7 +261,7 @@ bool un_802FFB58(enum soundtest_callback_arg0 arg0)
+@@ -849,7 +271,7 @@ bool un_802FFB58(enum soundtest_callback_arg0 arg0)
  {
      if (arg0 == 1) {
          lbAudioAx_80023694();
@@ -146304,7 +146321,7 @@ index e2ceb9eb3..bb1c9000f 100644
      } else if (arg0 == 0) {
          lbAudioAx_80023694();
      }
-@@ -905,10 +317,6 @@ bool fn_802FFCC8(enum soundtest_callback_arg0 arg0)
+@@ -905,10 +327,6 @@ bool fn_802FFCC8(enum soundtest_callback_arg0 arg0)
      return false;
  }
  
@@ -146315,7 +146332,7 @@ index e2ceb9eb3..bb1c9000f 100644
  void un_802FFCD0(int count, void* data)
  {
      int* arr = data;
-@@ -917,9 +325,6 @@ void un_802FFCD0(int count, void* data)
+@@ -917,9 +335,6 @@ void un_802FFCD0(int count, void* data)
          arr[i] = arr[count];
      }
  }
@@ -146325,7 +146342,16 @@ index e2ceb9eb3..bb1c9000f 100644
  
  void un_802FFD94(int arg0, void* arg1, soundtest_callback arg2)
  {
-@@ -1076,12 +481,7 @@ bool un_80300248(enum soundtest_callback_arg0 arg0)
+@@ -985,7 +400,7 @@ void un_802FFEE0(struct UnkSoundTestData0* arg0)
+ void un_802FFF2C(StartMeleeData* arg0)
+ {
+     StartMeleeRules* r = &arg0->rules;
+-    struct un_803FA128_t* s = (struct un_803FA128_t*) un_803FA128;
++    struct un_803FA128_t* s = DEBUG_DATA();
+     struct un_803FA128_x130_t* sp;
+     s32 i;
+     u16 timer;
+@@ -1076,12 +491,7 @@ bool un_80300248(enum soundtest_callback_arg0 arg0)
  
  bool un_80300290(enum soundtest_callback_arg0 arg0)
  {
@@ -146339,7 +146365,43 @@ index e2ceb9eb3..bb1c9000f 100644
      return 0;
  }
  
-@@ -1164,1074 +564,19 @@ bool un_80300410(enum soundtest_callback_arg0 arg0)
+@@ -1098,7 +508,7 @@ bool un_803002FC(enum soundtest_callback_arg0 update_scene)
+ 
+ bool un_80300338(enum soundtest_callback_arg0 arg0)
+ {
+-    struct un_803FA128_t* data = (struct un_803FA128_t*) un_803FA128;
++    struct un_803FA128_t* data = DEBUG_DATA();
+     u8* src;
+ 
+     src = gmMainLib_8045A6C0;
+@@ -1113,7 +523,7 @@ bool un_80300338(enum soundtest_callback_arg0 arg0)
+ 
+ bool un_80300378(enum soundtest_callback_arg0 arg0)
+ {
+-    struct un_803FA128_t* data = (struct un_803FA128_t*) un_803FA128;
++    struct un_803FA128_t* data = DEBUG_DATA();
+     u8* ptr;
+ 
+     data->x220 &= 0xFFFE;
+@@ -1131,7 +541,7 @@ bool un_80300378(enum soundtest_callback_arg0 arg0)
+ 
+ bool un_803003C4(enum soundtest_callback_arg0 arg0)
+ {
+-    struct un_803FA128_t* data = (struct un_803FA128_t*) un_803FA128;
++    struct un_803FA128_t* data = DEBUG_DATA();
+     u8* ptr;
+ 
+     data->x220 &= 0xFFFC;
+@@ -1149,7 +559,7 @@ bool un_803003C4(enum soundtest_callback_arg0 arg0)
+ 
+ bool un_80300410(enum soundtest_callback_arg0 arg0)
+ {
+-    struct un_803FA128_t* data = (struct un_803FA128_t*) un_803FA128;
++    struct un_803FA128_t* data = DEBUG_DATA();
+ 
+     if (arg0 == 1) {
+         u8* dst;
+@@ -1164,1074 +574,19 @@ bool un_80300410(enum soundtest_callback_arg0 arg0)
      return 0;
  }
  
@@ -147427,7 +147489,7 @@ index e2ceb9eb3..bb1c9000f 100644
  
  /* 803F9FA4 */ struct SoundTestMenuData un_803F9FA4 = {
      {
-@@ -2352,770 +697,3 @@ bool un_80301E08(enum soundtest_callback_arg0 update_scene)
+@@ -2352,770 +707,3 @@ bool un_80301E08(enum soundtest_callback_arg0 update_scene)
      { 5, un_80300410, un_804D58C8, NULL, &un_803FA258.xF4, 0.0f, 0.0f, 1.0f },
      { 9, NULL, NULL, NULL, NULL, 0.0f, 0.0f, 0.0f },
  };
