@@ -2083,6 +2083,10 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       if (g_launcher_test) mod_manager::test_get();
       if (g_launcher_test && std::getenv("MELEE_LAUNCHER_TEST_CHANGELOG")) host::updater::check(MELEE_PORT_VERSION);
       if (g_launcher_test && std::getenv("MELEE_LAUNCHER_TEST_REPLAY_LIST")) refresh_replays();   // writes the list there
+#ifndef MELEE_NO_SLIPPI
+      // Test runs only: the Replay Viewer with Watch live pressed, for a capture of what it says.
+      if (g_launcher_test && std::getenv("MELEE_LAUNCHER_TEST_WATCH_LIVE")) { select_tab(3); watch_live_toggle(); }
+#endif
       return 0;
     }
     case WM_ERASEBKGND: return 1;        // WM_PAINT paints every pixel from a memory DC
