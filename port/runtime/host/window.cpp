@@ -1228,6 +1228,10 @@ bool input_load_script(const char* path) {
 // MELEE_TEST_XINPUT_SLOW_MS=<n> (tests) makes every question about an empty slot take n ms;
 // MELEE_TEST_XINPUT_EVERY_READ=1 (tests) asks on the reading thread on every read, as before.
 static std::atomic<bool> g_xinput_present[4];
+// Per XInput slot: whether the pad sends a Frame1's grid (input_bindings.h, box_xinput_observe).
+// Advanced by the game's read only; the controls screen reads the copy.
+static BoxXInputDetect g_box_xinput[4];
+static std::atomic<int> g_box_xinput_state[4];
 static DWORD xinput_ask(int idx, XINPUT_STATE* state) {
   static const int slow_ms = [] { const char* v = host::test_env::getenv("MELEE_TEST_XINPUT_SLOW_MS"); return v ? std::atoi(v) : 0; }();
   const DWORD result = yougame::relay_pads::poll(idx, state, [&] {
@@ -1418,12 +1422,21 @@ static void read_devices(PadState out[4], InputDebugSnapshot& debug, bool side_e
   for (int idx = 0; idx < 4; ++idx) {
     PadState& x = xin[idx]; x = {}; x.err = -1;
     XINPUT_STATE xs{};
-    if (!xinput_state(idx, &xs)) continue;
+    if (!xinput_state(idx, &xs)) { g_box_xinput[idx] = {}; g_box_xinput_state[idx].store(0, std::memory_order_relaxed); continue; }
     xin_connected[idx] = true;
     debug.xinput_connected[idx] = true;
     x.err = 0;
     auto& g = xs.Gamepad;
-    auto axis = [](SHORT v) { return (int)xinput_axis(v); };
+    // A Frame1 in XInput mode sends GameCube units on its own grid (box_xinput_observe).
+    const int16_t raw_axes[4] = {g.sThumbLX, g.sThumbLY, g.sThumbRX, g.sThumbRY};
+    const int8_t was_box = g_box_xinput[idx].state;
+    box_xinput_observe(g_box_xinput[idx], raw_axes);
+    const BoxXInputDetect det = g_box_xinput[idx];
+    g_box_xinput_state[idx].store((int)(uint8_t)det.state | ((int)(uint8_t)det.first << 8), std::memory_order_relaxed);
+    if (det.state > 0 && was_box <= 0)
+      host::log("xinput pad %d: a box in XInput mode (Frame1): its sticks and triggers read in GameCube units", idx);
+    if (det.state > 0) { g.bLeftTrigger = box_xinput_trigger(g.bLeftTrigger); g.bRightTrigger = box_xinput_trigger(g.bRightTrigger); }
+    auto axis = [&det](SHORT v) { return (int)box_xinput_axis(det, v); };
     // No deadzone and no trigger floor, as in Dolphin. These used Microsoft's recommended Xbox
     // deadzone, which zeroed both axes whenever both sat inside about 30 of Melee's 80 units: larger
     // than the game's own deadzone, and exactly where a box controller in XInput mode puts some of its
@@ -1859,7 +1872,10 @@ void input_debug_snapshot(InputDebugSnapshot& snapshot) {
     snapshot.xinput_connected[idx] = true;
     xin[idx].err = 0;
     auto& g = xs.Gamepad;
-    auto axis = [](SHORT v) { return (int)xinput_axis(v); };
+    const int packed = g_box_xinput_state[idx].load(std::memory_order_relaxed);
+    BoxXInputDetect det; det.state = (int8_t)(packed & 0xFF); det.first = (int8_t)(packed >> 8);
+    if (det.state > 0) { g.bLeftTrigger = box_xinput_trigger(g.bLeftTrigger); g.bRightTrigger = box_xinput_trigger(g.bRightTrigger); }
+    auto axis = [&det](SHORT v) { return (int)box_xinput_axis(det, v); };
     // Same reading as input_poll: no deadzone, no trigger floor.
     const int sx = axis(g.sThumbLX), sy = axis(g.sThumbLY), cx = axis(g.sThumbRX), cy = axis(g.sThumbRY);
     xin[idx].stick_x = (int8_t)sx; xin[idx].stick_y = (int8_t)sy; xin[idx].sub_x = (int8_t)cx; xin[idx].sub_y = (int8_t)cy;
