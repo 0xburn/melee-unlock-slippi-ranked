@@ -7622,8 +7622,30 @@ bool install_official(int which, const fs::path& retail, const fs::path& xdelta,
 }  // namespace
 
 bool official_cosmetic_disc(const std::string& disc_path) {
-  for (const auto& pin : kAnimeleeDiscs)
-    if (file_matches(fs::u8path(disc_path), pin.size, pin.sha)) return true;
+  // Hashing the 1.4 GB disc took seconds at every start (long enough that an online test peer gave up
+  // waiting). Once it has matched, a note beside it records its size and write time, and the same file
+  // is trusted from then on; any change to it is hashed again.
+  const fs::path disc = fs::u8path(disc_path);
+  std::error_code ec;
+  const uint64_t size = fs::file_size(disc, ec);
+  if (ec) return false;
+  const auto written = fs::last_write_time(disc, ec);
+  if (ec) return false;
+  const std::string stamp = std::to_string(size) + " " +
+                            std::to_string((long long)written.time_since_epoch().count());
+  const fs::path note = disc.wstring() + L".verified";
+  for (const auto& pin : kAnimeleeDiscs) {
+    if (size != pin.size) continue;
+    {
+      std::ifstream in(note);
+      std::string line;
+      if (in && std::getline(in, line) && line == stamp + " " + pin.sha) return true;
+    }
+    if (file_matches(disc, pin.size, pin.sha)) {
+      std::ofstream(note, std::ios::trunc) << stamp << " " << pin.sha << "\n";
+      return true;
+    }
+  }
   return false;
 }
 

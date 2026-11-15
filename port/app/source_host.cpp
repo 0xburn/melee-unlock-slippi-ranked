@@ -270,6 +270,32 @@ std::unordered_set<int32_t> g_pack_skin_served;
 // the player's own Mods-tab skin: that skin was checked against the standard costume, which this file
 // matches. A pack that changes the skeleton keeps its costume, as before.
 bool pack_costume_takes_skins(uint32_t entry) { return g_pack_skin_served.count((int32_t)entry) != 0; }
+// A pack stage rebuilt around the same stage (Animelee CE's legal stages): online it is served as the
+// original stage file with the pack's meshes drawn over it (stage_online_form, stage_graft.h), which
+// the gameplay comparison proves plays the same. Pack entry -> the entry serving that grafted copy,
+// kept in memory in the top of the system-file range.
+std::unordered_map<int32_t, int32_t> g_pack_online_entry;
+struct PackOnlineFile { uint32_t start; std::vector<uint8_t> data; };
+std::vector<PackOnlineFile> g_pack_online_files;
+constexpr uint32_t kPackOnlineBase = 0x6C000000u;   // up to the overlay at 0x70000000; system files stay below
+uint32_t g_pack_online_next = kPackOnlineBase;
+bool read_pack_online(uint32_t offset, void* dst, uint32_t size, bool* ok) {
+  if (offset < kPackOnlineBase || offset >= 0x70000000u || g_pack_online_files.empty()) return false;
+  for (const auto& f : g_pack_online_files) {
+    if (offset < f.start || offset >= f.start + (uint32_t)f.data.size()) continue;
+    // Reads come in 32-byte rounded chunks: the tail past the file reads as zeros, within its slot.
+    const uint32_t at = offset - f.start;
+    const uint32_t slot = ((uint32_t)f.data.size() + 0xFFFFu) & ~0xFFFFu;
+    *ok = size <= slot - at;
+    if (*ok) {
+      const uint32_t have = std::min<uint32_t>(size, (uint32_t)f.data.size() - at);
+      std::memcpy(dst, f.data.data() + at, have);
+      std::memset((uint8_t*)dst + have, 0, size - have);
+    }
+    return true;
+  }
+  return false;
+}
 // Buttons held on any controller at the last pad read, for the stage pick of a disc with alternate
 // stages (host::cosmetics::set_stage_button_probe).
 std::atomic<uint32_t> g_held_buttons{0};
@@ -430,6 +456,9 @@ void compute_pack_skin_verdicts(const std::unordered_map<std::string, int32_t>& 
                                 const std::vector<FstFile>& base_fst) {
   g_pack_skins.clear();
   g_pack_skin_served.clear();
+  g_pack_online_entry.clear();
+  g_pack_online_files.clear();
+  g_pack_online_next = kPackOnlineBase;
   auto& notes = mods::status().pack_skins;
   notes.clear();
   for (const auto& file : g_mod_overlay.files()) {
@@ -471,8 +500,26 @@ void compute_pack_skin_verdicts(const std::unordered_map<std::string, int32_t>& 
                      : stage ? host::cosmetics::stage_safety::matches(clean, pack, &detail)
                              : skins::music_is_valid(pack, &detail);
       verdict.reason = host::cosmetics::online_reason_short(detail);
+      // A stage that is not the same file may still be the same stage: the pack's look drawn over
+      // the original's gameplay, as an installed stage skin gets. Served from memory in that view.
+      std::vector<uint8_t> online;
+      std::string graft_detail;
+      if (stage && !verdict.served &&
+          host::cosmetics::stage_online_form(clean, pack, &online, &graft_detail, file.path) && !online.empty()) {
+        const uint32_t span = ((uint32_t)online.size() + 0xFFFFu) & ~0xFFFFu;
+        if (online.size() < 64u * 1024 * 1024 && (uint64_t)g_pack_online_next + span <= 0x70000000ull) {
+          const int32_t grafted = (int32_t)g_fst.size();
+          g_fst.push_back({g_pack_online_next, (uint32_t)online.size(), false});
+          g_pack_online_files.push_back({g_pack_online_next, std::move(online)});
+          g_pack_online_next += span;
+          g_pack_online_entry[verdict.entry] = grafted;
+          verdict.served = true;
+          verdict.reason = "its look drawn over the standard stage's gameplay";
+          host::log("mods: cosmetic %s online as %s", verdict.path.c_str(), graft_detail.c_str());
+        }
+      }
     }
-    if (verdict.served) g_pack_skin_served.insert(verdict.entry);
+    if (verdict.served && !g_pack_online_entry.count(verdict.entry)) g_pack_skin_served.insert(verdict.entry);
     host::log("mods: cosmetic %s %s online (%s)", verdict.path.c_str(), verdict.served ? "stays on" : "swapped",
               verdict.reason.c_str());
     notes.push_back({verdict.path, verdict.layer, verdict.reason, verdict.served, verdict.identical});
@@ -972,7 +1019,7 @@ void load_system_files(const char* forced_off_by) {
       }
     }
     const uint32_t size = (uint32_t)data.size();
-    if (uint64_t(next) + size > ModOverlay::base) { host::log("slippi menus: off (system files exceed their range)"); return; }
+    if (uint64_t(next) + size > kPackOnlineBase) { host::log("slippi menus: off (system files exceed their range)"); return; }
     files.push_back({path, next, std::move(data)});
     next += (size + 0xFFFFu) & ~0xFFFFu;
   }
@@ -2408,6 +2455,8 @@ int32_t h_disc_entrynum(const char* path) {
   if (it != g_paths.end() && g_retail_view) {
     // The retail copy, or -1 for a file the retail game does not have. A pack costume that only
     // changes looks keeps its own entry, so it is the same file (and the same cached copy) in both views.
+    const auto grafted = g_pack_online_entry.find(it->second);
+    if (grafted != g_pack_online_entry.end()) return grafted->second;
     const int32_t opened = skins::resolve_open(true, it->second, g_view_alias, g_pack_skin_served);
     if (opened != it->second) return opened;
   }
@@ -2482,7 +2531,8 @@ bool jukebox_music_pack_read(uint32_t offset, std::filesystem::path* out) {
 // The jukebox reads songs from where the game would: Slippi system files, the mod overlay, the disc.
 bool jukebox_disc_read(uint32_t offset, void* dst, uint32_t size) {
   bool ok = false;
-  if (!read_cosmetic(offset, dst, size, &ok) && !read_system_file(offset, dst, size, &ok) &&
+  if (!read_cosmetic(offset, dst, size, &ok) && !read_pack_online(offset, dst, size, &ok) &&
+      !read_system_file(offset, dst, size, &ok) &&
       !read_overlay(offset, dst, size, &ok))
     ok = host::disc_read(offset, dst, size);
   return ok;
@@ -2515,7 +2565,8 @@ void h_disc_read(uint32_t offset, void* dst, uint32_t size, MuDiscDone done, voi
   bool ok = false;
   note_stage_file_read(offset);
   const auto began = std::chrono::steady_clock::now();
-  if (!read_cosmetic(offset, dst, size, &ok) && !read_system_file(offset, dst, size, &ok) &&
+  if (!read_cosmetic(offset, dst, size, &ok) && !read_pack_online(offset, dst, size, &ok) &&
+      !read_system_file(offset, dst, size, &ok) &&
       !read_overlay(offset, dst, size, &ok))
     ok = host::disc_read(offset, dst, size);
   if (!ok) host::log("disc: read %08X+%X failed", offset, size);
