@@ -32,16 +32,19 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CODE_HISTORY = '[\n  {\n    "connectCode": "PEER#001",\n    "lastPlayed": ""\n  }\n]'
 
 
-def bot_script(index):
+def bot_script(index, hand=False):
     """Online Play > Direct > pick a character, then in each match: run left (off the stage) from
-    a point in every 4-second cycle that comes later for a higher member index."""
+    a point in every 4-second cycle that comes later for a higher member index. hand: also push the
+    character select hand into the left panel, move down two buttons, press A, then B twice."""
     run_from = 20 + 50 * index
+    hand_steps = ["400 sx=-127", "560", "600 sy=-127", "606", "640 sy=-127", "646",
+                  "700 A", "706", "900 B", "906", "960 B", "966"] if hand else []
     return "\n".join([
         "# The online menu's first page has the cursor on Slippi: A opens Slippi's page (Unranked,",
         "# Direct, Teams, Party), one row down is Direct. On the Direct CSS (scene 8) move onto a",
         "# character and pick it. No Start: the room starts the search and locks the pick in.",
         "500 A", "510", "620 sy=-80", "628", "700 A", "710",
-        "@scene 8", "60 sx=61 sy=127", "77", "100 A", "110",
+        "@scene 8", "60 sx=61 sy=127", "77", "100 A", "110", *hand_steps,
         "@match", "@loop 240", "0", f"{run_from} sx=-127", "238", ""])
 
 
@@ -136,6 +139,7 @@ def main():
     ap.add_argument("--min-games", type=int, default=3)
     ap.add_argument("--out", type=Path, default=ROOT / ".tmp/arena-room")
     ap.add_argument("--iso")
+    ap.add_argument("--hand-test", type=int, default=-1, help="this member pushes its CSS hand into the left panel")
     ap.add_argument("--no-viewer", action="store_true",
                     help="watchers keep the live recording without opening a viewer (rooms of 6+ within the 8-game cap)")
     ap.add_argument("--capture", type=int, default=0,
@@ -177,7 +181,7 @@ def main():
             (user / "arena").mkdir(parents=True, exist_ok=True)
             (user / "arena" / "panel.txt").write_text(f"{looks[i]} 0\n")
         script = d / "bot.txt"
-        script.write_text(bot_script(i))
+        script.write_text(bot_script(i, hand=i == args.hand_test))
         settings = d / "settings.ini"
         shots = args.capture & (1 << i)
         settings.write_text("startup 0\nvolume 0\nslippi_spectator 0\n" + ("backend d3d11\n" if shots else ""))
@@ -342,8 +346,27 @@ def check(args, out):
         for lg in sorted((out / f"m{i}" / "user" / "arena").glob("live-*.log")):
             text = lg.read_text(errors="replace")
             held = text.count("replay: waiting for frame")
+            came = text.count("replay: frame ")
             if held:
-                print(f"    m{i} viewer of {lg.stem}: held {held} time(s) for a frame still on its way")
+                print(f"    m{i} viewer of {lg.stem}: held {held} time(s) for a frame still on its way, {came} came")
+            # A game still going when the run stopped leaves its viewer waiting: only a finished
+            # game (its live file got its Game End) counts.
+            member_log = (out / f"m{i}" / "log.txt")
+            finished = member_log.is_file() and f"game {lg.stem[5:]} over:" in member_log.read_text(errors="replace")
+            if held > came and finished and "replay: playback finished" not in text:
+                problems.append(f"m{i} viewer of {lg.stem} waited for a frame that never came")
+    # How close to live the viewers played: each says when it caught up with the live game.
+    for i in range(args.players):
+        for lg in sorted((out / f"m{i}" / "user" / "arena").glob("live-*.log")):
+            caught = [l for l in lg.read_text(errors="replace").splitlines() if "caught up with the live game" in l]
+            if caught:
+                print(f"    m{i} viewer of {lg.stem}: {caught[0].split('replay: ')[-1]}")
+    if args.hand_test >= 0:
+        hl = (out / f"m{args.hand_test}" / "log.txt").read_text(errors="replace")
+        steps = [l.split("arena panel: ")[-1] for l in hl.splitlines() if "arena panel:" in l]
+        print(f"    m{args.hand_test} hand: " + "; ".join(steps))
+        if not any("went into the left panel" in l for l in steps):
+            problems.append(f"m{args.hand_test}: the hand never went into the panel")
     watchers = args.players > 2   # two members both fight every game: nobody watches
     if watchers and viewed == 0 and lived == 0:
         problems.append("no viewer or live recording to compare")

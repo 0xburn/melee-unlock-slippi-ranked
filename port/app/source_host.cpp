@@ -1641,6 +1641,8 @@ constexpr uint8_t CMD_LAB_SAVE = 0xF2, CMD_LAB_LOAD = 0xF3, CMD_LAB_ADVANTAGE = 
 constexpr uint8_t CMD_PRACTICE_CPU = 0xF6;   // the practice CPU's settings (port/runtime/hle/practice_cpu.h)
 constexpr uint8_t CMD_FRAME_EVENT = 0xE8;   // replay frame data for the coach (shim/mu_framedata.c, host/replay_coach.h)
 constexpr uint8_t CMD_REPLAY_DEFENSE = 0xE9;   // a takeover's opponents once the game leaves the replay (shim/mu_replay_defend.c)
+constexpr uint8_t CMD_ARENA_HAND = 0xEF;      // the online CSS hand (shim/mu_slippi_css.c): an arena room's side panels
+constexpr uint8_t CMD_ARENA_PICK = 0xEE;      // the online CSS pick (shim/mu_slippi_sss.c): an arena room's portraits
 constexpr uint8_t CMD_ARENA_PAIRING = 0xED;   // an arena room's pairing count (shim/mu_slippi_css.c, hle/slippi_arena.h)
 constexpr uint8_t CMD_GHOST_AI = 0xEA;         // a pro AI's controller for this frame (hle/ghost_ai.h)
 constexpr uint8_t CMD_STAGE_SONGS = 0xEB;      // a stage's main and alternate songs (gr/ground.c, hle/jukebox.h)
@@ -1950,6 +1952,14 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
             const auto* bytes = reinterpret_cast<const uint8_t*>(&act);
             reply.assign(bytes, bytes + sizeof act);
           }
+          return true;
+        }
+        if (c == CMD_ARENA_HAND && n == 4) {   // shim/mu_slippi_css.c: the CSS hand, in tenths
+          slippi::arena::set_css_hand((int16_t)(p[0] << 8 | p[1]), (int16_t)(p[2] << 8 | p[3]));
+          return true;
+        }
+        if (c == CMD_ARENA_PICK && n == 3) {   // shim/mu_slippi_sss.c: the character select's pick
+          slippi::arena::set_css_pick(p[2] ? p[0] : 0xFF, p[1]);
           return true;
         }
         if (c == CMD_ARENA_PAIRING && n == 0) {   // shim/mu_slippi_css.c: an arena room's new pairing
@@ -3201,6 +3211,25 @@ uint8_t replay_gate(int32_t frame, uint8_t phase) {
   if (!g_replay) return 0;
   if (phase == 0) {
     replay_hold_for_live_frame(frame);
+    // A recording still being written plays as close to live as it can: a viewer that opened late
+    // (an arena watcher's window starts after the game does) runs unpaced and unheard until it is
+    // within a frame of the newest one, then plays at normal speed again.
+    static bool catching_up = false;
+    if (!g_replay->IsProcessingComplete() && !replay_control::status().seeking) {
+      const int32_t behind = g_replay->GetLatestIndex() - frame;
+      const bool was = catching_up;
+      if (behind > 3) catching_up = true;
+      else if (behind <= 1) catching_up = false;
+      if (catching_up != was) {
+        host::options.fast = catching_up;
+        host::audio_set_muted(catching_up);
+        if (!catching_up) host::log("replay: caught up with the live game at frame %d", frame);
+      }
+    } else if (catching_up) {
+      catching_up = false;
+      host::options.fast = false;
+      host::audio_set_muted(false);
+    }
     return replay_control::gate(frame) == replay_control::Gate::GoBack ? 1 : 0;
   }
   return replay_control::go_back() == replay_control::Gate::Restored ? 2 : 0;

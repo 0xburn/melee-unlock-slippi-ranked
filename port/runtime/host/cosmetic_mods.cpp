@@ -7746,4 +7746,36 @@ bool merge_fighter_sounds(const std::vector<uint8_t>& clean, const std::vector<u
 }
 }  // namespace testing
 
+bool standard_portrait(int css_character, int costume, std::vector<uint8_t>* rgba, int* width, int* height) {
+  static std::mutex lock;
+  static bool tried = false;
+  static std::vector<uint8_t> file;
+  static std::map<int, SelectPortrait> frames;
+  std::lock_guard<std::mutex> lk(lock);
+  if (!tried) {
+    tried = true;
+    uint32_t offset = 0, size = 0;
+    if (host::disc_find_file("MnSlChr.usd", &offset, &size) && size && size <= kMaxAssetBytes) {
+      file.resize(size);
+      if (!host::disc_read(offset, file.data(), size) || !select_portraits(file, &frames)) { file.clear(); frames.clear(); }
+    }
+  }
+  if (frames.empty() || costume < 0) return false;
+  if (css_character == 19) css_character = 18;   // Sheik is in Zelda's cell
+  int frame = -1;
+  if (css_character == 3) {
+    frame = 3 + 30 * std::min(costume, 3);       // Mr. Game & Watch: one costume file, a cell per colour
+  } else {
+    SlotName slot;
+    if (!find_slot(costume_slot_file(css_character, costume), &slot)) return false;
+    frame = portrait_frame(slot);
+  }
+  const auto it = frames.find(frame);
+  if (frame < 0 || it == frames.end()) return false;
+  *rgba = decode_portrait(file.data() + 0x20, it->second);
+  *width = (int)it->second.width;
+  *height = (int)it->second.height;
+  return !rgba->empty();
+}
+
 }  // namespace host::cosmetics

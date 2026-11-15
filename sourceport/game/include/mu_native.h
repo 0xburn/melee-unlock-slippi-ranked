@@ -792,6 +792,8 @@ void* mu_slippi_sss_slpcss(void);            /* NULL until the CSS registered it
 int mu_slippi_sss_frozen(void);              /* frozen Stadium cave byte */
 void mu_slippi_sss_frozen_flip(void);        /* CursorOnHoverStadium Z */
 void mu_slippi_sss_lock_in(int stage_behavior);          /* FN_TX_LOCK_IN: -2 random, -1 unset, 0+ pick */
+void mu_slippi_sss_report_pick(int chosen);
+void mu_slippi_css_hand(int port, float x, float y);   /* the CSS hand, each frame (arena rooms' side panels) */             /* the CSS pick to the host when it changes (arena rooms) */
 void mu_slippi_sss_find_match(void);                     /* FN_TX_FIND_MATCH (B4, typed code) */
 void mu_slippi_sss_run_callback(int stage_behavior);     /* r13-0x5018 lock-in callback */
 #endif

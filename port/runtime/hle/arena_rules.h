@@ -33,6 +33,8 @@ struct Member {
   std::string code;    // Slippi connect code
   std::string name;
   uint16_t wins = 0, losses = 0;
+  uint8_t character = kNone;   // picked on the character select (Slippi's external id), kNone not yet
+  uint8_t costume = 0;
 };
 
 struct Room {
@@ -64,6 +66,8 @@ struct Room {
 
 // ---- reading ----
 const Member* find(const Room& room, uint8_t id);
+// A member's pick on the character select, for the others' panels. False when nothing changed.
+bool set_character(Room& room, uint8_t id, uint8_t character, uint8_t costume);
 Role role(const Room& room, uint8_t id);
 int ring_size(const Room& room);                   // 2 or 4
 int ring_slot(const Room& room, uint8_t id);       // the slot, or -1

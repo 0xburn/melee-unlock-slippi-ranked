@@ -7,7 +7,7 @@
 namespace slippi::arena {
 namespace {
 
-constexpr uint8_t kWireVersion = 1;
+constexpr uint8_t kWireVersion = 2;
 
 std::string clean(const std::string& s, size_t max, bool upper) {
   std::string out;
@@ -165,6 +165,20 @@ struct Reader {
 }  // namespace
 
 // ---------------------------------------------------------------- reading
+bool set_character(Room& r, uint8_t id, uint8_t character, uint8_t costume) {
+  if (character != kNone && character >= 33) return false;   // the external ids (a mod disc has a few more)
+  if (costume > 15) return false;
+  for (Member& m : r.members) {
+    if (m.id != id) continue;
+    if (m.character == character && m.costume == costume) return false;
+    m.character = character;
+    m.costume = costume;
+    bump(r);
+    return true;
+  }
+  return false;
+}
+
 const Member* find(const Room& r, uint8_t id) {
   for (const Member& m : r.members) if (m.id == id) return &m;
   return nullptr;
@@ -453,7 +467,8 @@ std::vector<uint8_t> encode(const Room& r) {
   put16(o, r.switch_votes);
   o.push_back((uint8_t)r.members.size());
   for (const Member& m : r.members) {
-    o.push_back(m.id); put16(o, m.wins); put16(o, m.losses); put_str(o, m.code); put_str(o, m.name);
+    o.push_back(m.id); put16(o, m.wins); put16(o, m.losses); o.push_back(m.character); o.push_back(m.costume);
+    put_str(o, m.code); put_str(o, m.name);
   }
   o.push_back((uint8_t)r.line.size());
   o.insert(o.end(), r.line.begin(), r.line.end());
@@ -481,7 +496,7 @@ bool decode(const uint8_t* data, size_t size, Room& out) {
   if (!in.ok || count > kMaxMembers) return false;
   for (uint8_t i = 0; i < count; ++i) {
     Member m;
-    m.id = in.u8(); m.wins = in.u16(); m.losses = in.u16();
+    m.id = in.u8(); m.wins = in.u16(); m.losses = in.u16(); m.character = in.u8(); m.costume = in.u8();
     m.code = in.str(kMaxCode); m.name = in.str(kMaxName);
     if (!in.ok) return false;
     r.members.push_back(std::move(m));

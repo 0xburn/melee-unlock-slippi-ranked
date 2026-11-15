@@ -90,8 +90,10 @@ static constexpr bool kShowFasterSoundEffects = true;
 #ifndef MELEE_NO_SLIPPI
 #include "arena_panel.h"
 static bool arena_capture() { return arena_panel::wants_capture(); }
+static uint16_t arena_withheld() { return arena_panel::withheld_buttons(); }
 #else
 static bool arena_capture() { return false; }
+static uint16_t arena_withheld() { return 0; }
 #endif
 #include "practice_menu.h"
 // Lab view is hidden until its silhouette packs can ship at a reasonable size: no F3 toggle, no
@@ -3424,6 +3426,32 @@ void settings_context_create(void* window, bool open_at_startup) {
     g_settings_heading_font = io.Fonts->AddFontFromFileTTF(heading_font_path.c_str(), 28.0f);
   if (std::filesystem::exists(heading_font_path))   // the Lab view's percent, drawn large: rasterised at that size
     lab::set_hud_font(io.Fonts->AddFontFromFileTTF(heading_font_path.c_str(), 72.0f));
+#ifndef MELEE_NO_SLIPPI
+  {
+    // The arena room's lettering (gx/arena_panel.h): Arial Black for the corners, records and tags,
+    // Segoe UI Bold and Black for names, Bahnschrift for the small print. A missing one falls back to
+    // the heading font or the body font.
+    auto load = [&](const char* windows_name) -> ImFont* {
+#ifdef _WIN32
+      const std::string path = std::string("C:\\Windows\\Fonts\\") + windows_name;
+      if (std::filesystem::exists(path)) return io.Fonts->AddFontFromFileTTF(path.c_str(), 32.0f);
+#else
+      (void)windows_name;
+#endif
+      return nullptr;
+    };
+    arena_panel::Fonts fonts;
+    fonts.title = load("ariblk.ttf");
+    fonts.black = load("seguibl.ttf");
+    fonts.bold = load("segoeuib.ttf");
+    fonts.body = load("bahnschrift.ttf");
+    if (!fonts.title) fonts.title = g_settings_heading_font;
+    if (!fonts.black) fonts.black = g_settings_heading_font;
+    if (!fonts.bold) fonts.bold = g_settings_body_font;
+    if (!fonts.body) fonts.body = g_settings_body_font;
+    arena_panel::set_fonts(fonts);
+  }
+#endif
   // ImGui's outline version of the old font, for scaled frames (see settings_old_font). Added last,
   // so the fonts above keep their places, and nothing is rasterised from it until it is used.
   g_settings_old_vector_font = io.Fonts->AddFontDefaultVector();
@@ -5484,6 +5512,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   const bool practice_capture = state.practice_open || practice_force_capture ||
                                 state.practice_release_capture;
   host::window_input_capture(state.open || state.menu_open || practice_capture || replay_bar::wants_cursor() || arena_capture());
+  host::window_withhold_buttons(state.open || state.menu_open ? 0 : arena_withheld());
   state.intervals[state.cursor++ % state.intervals.size()] = ImGui::GetIO().DeltaTime*1000.f;
   if (streamline::reflex_available() || streamline::reflex_latency_ms() > 0.0f)   // Vulkan on NVIDIA too
     state.latencies[state.latency_cursor++ % state.latencies.size()] = streamline::reflex_latency_ms();
@@ -11067,6 +11096,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   // "not captured" while the top said "captured", so the pointer was shown and hidden every frame.
   host::window_input_capture(state.open || state.menu_open || practice_capture ||
                              state.practice_release_capture || replay_bar::wants_cursor() || arena_capture());
+  host::window_withhold_buttons(state.open || state.menu_open ? 0 : arena_withheld());
   if (!state.fill_window && !state.open && !state.menu_open && options.show_player_nicknames)
     draw_player_nicknames();
   if (!state.fill_window && !state.open && !state.menu_open) draw_combo_counter();

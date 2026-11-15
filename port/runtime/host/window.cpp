@@ -93,6 +93,7 @@ std::atomic<bool> g_escape_press{false};
 std::atomic<bool> g_capturing{false};   // a control rebind is waiting for its key (input_begin_capture)
 MessageCallback g_on_message;
 std::atomic<bool> g_ui_capture{false};
+std::atomic<uint16_t> g_ui_withheld{0};
 std::mutex g_ui_pad_mutex;
 PadState g_ui_pad{};
 PadState g_ui_pads[4]{};
@@ -507,6 +508,7 @@ constexpr UINT kCursorRefresh = WM_APP + 7;
 void window_input_capture(bool capture) {
   if (g_ui_capture.exchange(capture) != capture && g_hwnd) PostMessageW(g_hwnd, kCursorRefresh, capture ? 1 : 0, 0);
 }
+void window_withhold_buttons(uint16_t mask) { g_ui_withheld.store(mask, std::memory_order_relaxed); }
 bool window_ui_gamecube_pad(PadState& pad) { std::lock_guard<std::mutex> lock(g_ui_pad_mutex); pad = g_ui_pad; return g_ui_gamecube; }
 bool window_ui_pads(PadState pads[4]) {
   std::lock_guard<std::mutex> lock(g_ui_pad_mutex);
@@ -1640,6 +1642,8 @@ void input_poll(PadState out[4]) {
         g_ui_pads[i] = pads[i];
         if (pads[i].err == 0) g_ui_has_pad = true;
       }
+      if (const uint16_t withheld = g_ui_withheld.load(std::memory_order_relaxed))
+        for (int i = 0; i < 4; ++i) pads[i].button &= static_cast<uint16_t>(~withheld);
       if (g_ui_capture.load()) {
         // UI capture is global, not player-one-only. Keeping ports 2-4 live made menu navigation
         // leak into Training and, during handoff, into the first online gameplay inputs.

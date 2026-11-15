@@ -184,6 +184,35 @@ static u32 arena_pairing(int* test_room)
     return (u32) reply[0] << 24 | (u32) reply[1] << 16 | (u32) reply[2] << 8 | reply[3];
 }
 
+#define CMD_ARENA_HAND 0xEF
+/* mnCharSel_CursorThink, after the hand moved: the online CSS's own player's hand goes to the host
+ * (x, y as the screen's units, 0.1 steps) when it moved, for an arena room's side panels: a hand
+ * pushed against the left or right edge goes into that panel. */
+void mu_slippi_css_hand(int port, float x, float y)
+{
+    static int last = 0x7FFFFFFF;
+    static unsigned char reply[4096];
+    unsigned char payload[4];
+    unsigned int got = 0;
+    int ix, iy, packed;
+
+    if (!mu_slippi_css_online() || ctrl_port == NULL || port != *ctrl_port) {
+        return;
+    }
+    ix = (int) (x * 10.0f);
+    iy = (int) (y * 10.0f);
+    packed = (ix & 0xFFFF) << 16 | (iy & 0xFFFF);
+    if (packed == last) {
+        return;
+    }
+    last = packed;
+    payload[0] = (unsigned char) (ix >> 8);
+    payload[1] = (unsigned char) ix;
+    payload[2] = (unsigned char) (iy >> 8);
+    payload[3] = (unsigned char) iy;
+    mu_online_abi_command(CMD_ARENA_HAND, payload, sizeof payload, reply, sizeof reply, &got);
+}
+
 /* ---- HandleInputsOnCSS helpers ---- */
 
 /* FN_TX_LOCK_IN and FN_TX_FIND_MATCH are shared with name entry and the SSS (mu_slippi_sss.c),
@@ -226,6 +255,8 @@ int mu_slippi_css_inputs(unsigned int trigger)
     MuSlippiMenuState* st = mu_slippi_state();
     const MuMatchState* m = &dt.msrb;
     u8 prev, cur;
+
+    mu_slippi_sss_report_pick(*char_chosen != 0);   /* an arena room's portraits */
 
     /* Sounds: lock-in 1 -> 0 "back"; ANY -> ERROR "error"; CONNECTED -> ANY "back". */
     prev = dt.prev_lock_in;

@@ -42,6 +42,7 @@ void shutdown();
 // ---- the panel (UI thread) ----
 enum class Act : uint8_t {
   ToggleLine = 1, Ask = 2, Answer = 3, GiveUp = 4, SetMode = 5, ProposeSwitch = 6, VoteSwitch = 7, Leave = 8,
+  SetCharacter = 9,              // arg the character, text[0] the costume (sent by the room itself)
   OpenRoom = 20, AddCode = 21,   // the host's own (AddCode carries a connect code)
 };
 void act(Act a, uint8_t arg = 0, const std::string& text = {});
@@ -59,6 +60,16 @@ struct View {
 View view();
 // True while this game is in a room (any thread).
 bool in_room();
+// True while a Slippi search or a connected pair is up (any thread): then Z belongs to the game
+// ("Z to cancel") unless this game is in a room.
+bool search_busy();
+// The online character select's pick (the game shim, cmd 0xEE): Slippi's external character id, or
+// kNone while no character is picked, and the costume. Shown as this member's portrait in the room.
+void set_css_pick(uint8_t character, uint8_t costume);
+// The online character select's hand (the game shim, cmd 0xEF), in tenths of the screen's units
+// (x -350 at the left edge, 260 or 290 at the right), and when it last moved.
+void set_css_hand(int16_t x10, int16_t y10);
+bool css_hand(float* x, float* y);   // false before the first report
 
 // ---- tests ----
 // The member's last few log-worthy events, for hidden runs (also in the log as "arena: ...").

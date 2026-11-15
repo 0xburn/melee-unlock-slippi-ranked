@@ -584,6 +584,7 @@ void window_input_capture(bool capture) {
   // The pointer is hidden over the game and shown while a menu has input; applied by window_pump.
   g_ui_capture.store(capture);
 }
+void window_withhold_buttons(uint16_t mask) { g_ui_withheld.store(mask, std::memory_order_relaxed); }
 bool window_ui_gamecube_pad(PadState& pad) { std::lock_guard<std::mutex> lock(g_ui_pad_mutex); pad = g_ui_pad; return g_ui_gamecube; }
 bool window_ui_pads(PadState pads[4]) {
   std::lock_guard<std::mutex> lock(g_ui_pad_mutex);

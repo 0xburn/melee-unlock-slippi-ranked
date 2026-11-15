@@ -12,6 +12,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -75,6 +76,8 @@ std::vector<uint8_t> g_table;             // its command table event, for a send
 bool g_wait_room = false;                 // a member's game ended: wait for the room to say what is next
 void* g_yield_to = nullptr;               // this room joins the room at the other end of that link
 uint64_t g_next_match_ms = 0, g_next_pings_ms = 0;
+std::atomic<bool> g_search_busy{false};
+std::atomic<uint16_t> g_css_pick{0xFF00};   // character << 8 | costume, kNone character: none
 uint64_t g_test_wait_since = 0;
 // The game being passed on to the room, and who was in the ring when it began. The room moves on
 // at its Game End report, which can arrive before the feed's last messages: those still go to the
@@ -177,8 +180,9 @@ void broadcast_room() {
           (int)g_room.ring[0], (int)g_room.ring[1], g_room.line.size(), g_room.games);
 }
 
-bool apply_action(uint8_t who, Act a, uint8_t arg) {
+bool apply_action(uint8_t who, Act a, uint8_t arg, uint8_t extra = 0) {
   switch (a) {
+    case Act::SetCharacter: return set_character(g_room, who, arg, extra);
     case Act::ToggleLine: return toggle_line(g_room, who);
     case Act::Ask: return ask(g_room, who);
     case Act::Answer: return answer(g_room, who, (Answer)arg);
@@ -247,7 +251,7 @@ void host_message(Link& from, const std::vector<uint8_t>& m) {
       return;
     }
     case kAction:
-      if (from.id != kNone && m.size() >= 3) apply_action(from.id, (Act)m[1], m[2]);
+      if (from.id != kNone && m.size() >= 3) apply_action(from.id, (Act)m[1], m[2], m.size() >= 4 ? m[3] : 0);
       return;
     case kReport: {
       // Only the players of the game report it.
@@ -411,10 +415,12 @@ void do_act(const Pending& p) {
   }
   if (!g_active) return;
   if (g_hosting) {
-    if (apply_action(g_self, p.a, p.arg)) event("action %d by the host", (int)p.a);
+    if (apply_action(g_self, p.a, p.arg, p.text.empty() ? 0 : (uint8_t)p.text[0]) && p.a != Act::SetCharacter)
+      event("action %d by the host", (int)p.a);
     return;
   }
   std::vector<uint8_t> m = {kAction, (uint8_t)p.a, p.arg};
+  if (p.a == Act::SetCharacter) m.push_back(p.text.empty() ? 0 : (uint8_t)p.text[0]);
   send_to_host(m);
 }
 
@@ -743,6 +749,20 @@ bool test_mode() { return g_test.on; }
 void set_recording_codes(std::vector<uint8_t> codes) { g_codes = std::move(codes); }
 void set_viewer_launcher(std::function<void*(const std::string&)> launch) { g_launch_viewer = std::move(launch); }
 
+// This member's pick on the character select goes to the room (twice a second, when it changed),
+// so every panel can show each player's portrait.
+void report_character() {
+  static uint64_t next = 0;
+  if (now_ms() < next || g_self == kNone) return;
+  next = now_ms() + 500;
+  const uint16_t pick = g_css_pick.load();
+  uint8_t character = (uint8_t)(pick >> 8), costume = (uint8_t)(pick & 0xFF);
+  if (character == kNone && !online::local_css_selection(&character, &costume)) return;
+  const Member* me = find(g_room, g_self);
+  if (!me || (me->character == character && me->costume == costume)) return;
+  do_act({Act::SetCharacter, character, std::string(1, (char)costume)});
+}
+
 void tick() {
   {
     std::deque<Pending> todo;
@@ -750,9 +770,18 @@ void tick() {
     if (g_code.empty() && !todo.empty()) online::local_identity(&g_code, &g_name);   // a real room: the Slippi account
     for (const Pending& p : todo) do_act(p);
   }
+  {
+    static int every = 0;
+    if (++every >= 10) {
+      every = 0;
+      const online::ArenaMatchStatus st = online::arena_match_status();
+      g_search_busy.store(st.state >= (int)Matchmaking::INITIALIZING && st.state <= (int)Matchmaking::CONNECTION_SUCCESS);
+    }
+  }
   if (!g_active) return;
   service_links();
   send_pings();
+  report_character();
   run_test_plan();
   broadcast_room();
   steer_match();
@@ -838,6 +867,22 @@ void shutdown() {
 void act(Act a, uint8_t arg, const std::string& text) {
   std::lock_guard<std::mutex> lk(g_mutex);
   g_pending.push_back({a, arg, text});
+}
+
+bool search_busy() { return g_search_busy.load(); }
+
+std::atomic<uint32_t> g_css_hand{0xFFFFFFFFu};
+void set_css_hand(int16_t x10, int16_t y10) { g_css_hand.store((uint32_t)(uint16_t)x10 << 16 | (uint16_t)y10); }
+bool css_hand(float* x, float* y) {
+  const uint32_t v = g_css_hand.load();
+  if (v == 0xFFFFFFFFu) return false;
+  *x = (int16_t)(v >> 16) / 10.0f;
+  *y = (int16_t)(v & 0xFFFF) / 10.0f;
+  return true;
+}
+
+void set_css_pick(uint8_t character, uint8_t costume) {
+  g_css_pick.store((uint16_t)(character << 8 | costume));
 }
 
 bool in_room() {

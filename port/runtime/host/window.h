@@ -12,6 +12,9 @@ constexpr uint32_t kSdlEventMessage = 0x7FFF0001u;
 #endif
 void window_set_message_callback(MessageCallback cb);
 void window_input_capture(bool capture);
+// GameCube buttons held back from the game while the overlay uses them (0: none). The overlay still
+// reads them through window_ui_pads.
+void window_withhold_buttons(uint16_t mask);
 struct PadState;
 bool window_ui_gamecube_pad(PadState& pad);
 // Last routed state for every in-game port, captured before UI input suppression. This lets an

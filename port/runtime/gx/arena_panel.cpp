@@ -1,17 +1,27 @@
 // The arena room in the side bars (see arena_panel.h).
+//
+// Drawn to the room sheet Chandler picked (the combined look and its four options), measured in the
+// sheet's pixels: a bar there is 152 pixels wide, and everything scales with the real bar. The
+// sheet's lettering is Arial Black (corner titles, records, tags), a heavy sans for names and
+// Bahnschrift for the small print; each font's size here is the sheet's CSS size times the font's
+// line height in ems, because ImGui sizes a font by that height and CSS by the em.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "arena_panel.h"
+#include "cosmetic_mods.h"
 #include "host.h"
 #include "slippi_arena.h"
 #include "slippi_online.h"
 #include "yougame_link.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -28,11 +38,22 @@ namespace ar = slippi::arena;
 constexpr uint16_t kDLeft = 0x0001, kDRight = 0x0002, kDDown = 0x0004, kDUp = 0x0008, kZ = 0x0010, kR = 0x0020,
                    kA = 0x0100, kB = 0x0200, kX = 0x0400, kY = 0x0800, kStart = 0x1000;
 
-// Colours of the game's own menus: steel panels, gold tags, the red and blue corners.
-constexpr ImU32 kInk = IM_COL32(8, 10, 18, 255), kWhite = IM_COL32(255, 255, 255, 255), kDim = IM_COL32(154, 166, 192, 255),
-                kGold = IM_COL32(243, 194, 46, 255), kGoldDark = IM_COL32(201, 138, 12, 255), kRed = IM_COL32(216, 52, 60, 255),
-                kBlue = IM_COL32(58, 86, 216, 255), kSteel = IM_COL32(26, 33, 51, 235), kLine = IM_COL32(74, 86, 116, 255),
-                kGrey = IM_COL32(127, 138, 163, 255), kRecord = IM_COL32(255, 210, 74, 255);
+// The sheet's colours.
+constexpr ImU32 kWhite = IM_COL32(255, 255, 255, 255), kBlack = IM_COL32(0, 0, 0, 255),
+                kLineCol = IM_COL32(154, 166, 192, 255),      // --line #9aa6c0
+                kGold = IM_COL32(243, 194, 46, 255),          // --gold #f3c22e
+                kGold2 = IM_COL32(201, 138, 12, 255),         // --gold2 #c98a0c
+                kRed = IM_COL32(216, 52, 60, 255),            // --red #d8343c
+                kBlue = IM_COL32(58, 86, 216, 255),           // --blue #3a56d8
+                kSlotBg = IM_COL32(26, 33, 51, 255),          // .slot #1a2133
+                kSlotLine = IM_COL32(74, 86, 116, 255),       // #4a5674
+                kIconLine = IM_COL32(223, 229, 242, 255),     // #dfe5f2
+                kHintText = IM_COL32(207, 214, 230, 255),     // #cfd6e6
+                kDimText = IM_COL32(154, 166, 192, 255),      // .dim #9aa6c0
+                kInk = IM_COL32(35, 23, 0, 255),              // #231700
+                kPaper = IM_COL32(232, 236, 245, 255),        // #e8ecf5
+                kRecordCol = IM_COL32(255, 210, 74, 255),     // .rec #ffd24a
+                kFoot = IM_COL32(18, 24, 38, 255);            // .foot #121826
 
 enum class Page { None, Rules, Code };
 
@@ -48,15 +69,48 @@ struct State {
   std::vector<std::string> recent;
   int recent_pick = -1;         // a recent code highlighted (-1: the keyboard)
   uint16_t prev = 0;
-  int prev_dir = 0, prev_c = 0;
+  int prev_dir = 0;
   double dir_at = 0;
   double shown_at = -1;         // when the bars began to slide in
   bool was_visible = false;
-  uint32_t seen_prompt = 0;
+  // The hand: pushed against the left (1) or right (2) edge of the character select it goes into
+  // that side's panel; the button under it lights up and A presses it.
+  int side = 0;
+  int push_side = 0, push_frames = 0;
+  uint8_t hover = 0, hover_member = 0xFF;   // a Do and, for a player card, whose
+  float pop[2] = {0, 0};                    // Hidden: how far each panel has slid in (0..1)
+  double pop_seen[2] = {-10, -10};          // when the hand was last near that side
+  double last_time = 0;
 } g;
 
+// What a lit-up button does.
+enum class Do : uint8_t { None, Rules, AddCode, Spot, Ask, Doubles, Opt0, Opt1, Opt2, Member, Leave };
+struct Item { int side; float y0, y1; Do what; uint8_t member; };
+std::vector<Item> g_items, g_last_items;   // this frame's buttons, and last frame's (to move the hand over)
+float g_mid = 0;                            // the window's middle: left panel or right panel
+// A button at x between y0 and y1: true while the hand is on it.
+bool hot(float x, float y0, float y1, Do what, uint8_t member = 0xFF) {
+  const int side = x < g_mid ? 1 : 2;
+  g_items.push_back({side, y0, y1, what, member});
+  return g.side == side && g.hover == (uint8_t)what && (what != Do::Member || g.hover_member == member);
+}
+Do do_of(char chip, const std::string& label) {
+  switch (chip) {
+    case 'Y': return Do::Rules;
+    case 'Z': return Do::AddCode;
+    case 'X': return Do::Spot;
+    case 'R': return Do::Doubles;
+    case 'B': return Do::Leave;
+    case 'A': return label.rfind("Ask", 0) == 0 ? Do::Ask : Do::None;
+    default: return Do::None;
+  }
+}
+
+Fonts g_fonts;
+
 const char* const kLookNames[kLookCount] = {"Corners + cards", "Card", "Split", "Corners", "Ring"};
-const char* const kModeNames[3] = {"Winner stays", "Take turns", "Ask"};
+const char* const kModeNames[3] = {"WINNER STAYS", "TAKE TURNS", "ASK"};
+const char* const kModeWords[3] = {"Winner stays", "Take turns", "Ask"};
 const char* const kKeys[5] = {"ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ#", "0123456789", "<>"};   // last row: delete, done
 
 std::filesystem::path settings_file() {
@@ -90,152 +144,320 @@ void load_recent() {
     }
 }
 
-// ---- drawing ----
+// ---------------------------------------------------------------- drawing basics
 ImDrawList* dl() { return ImGui::GetForegroundDrawList(); }
-float g_k = 1.0f;   // scale: 1 at a 152-pixel bar
+float g_k = 1.0f;   // sheet pixels to window pixels: 1 at a 152-pixel bar
 float px(float v) { return v * g_k; }
 
-void text(float x, float y, float size, ImU32 c, const std::string& s, bool shadow = true) {
-  if (shadow) dl()->AddText(ImGui::GetFont(), px(size), ImVec2(x + px(1), y + px(1)), IM_COL32(0, 0, 0, 220), s.c_str());
-  dl()->AddText(ImGui::GetFont(), px(size), ImVec2(x, y), c, s.c_str());
+enum class Face { Title, Black, Bold, Body };
+ImFont* font_of(Face f) {
+  ImFont* p = f == Face::Title ? g_fonts.title : f == Face::Black ? g_fonts.black : f == Face::Bold ? g_fonts.bold : g_fonts.body;
+  return p ? p : ImGui::GetFont();
 }
-float text_w(float size, const std::string& s) { return ImGui::GetFont()->CalcTextSizeA(px(size), 10000.f, 0.f, s.c_str()).x; }
-void text_center(float cx, float y, float size, ImU32 c, const std::string& s) { text(cx - text_w(size, s) * .5f, y, size, c, s); }
-std::string fit(const std::string& s, float size, float w) {
-  if (text_w(size, s) <= w) return s;
+// A font's line height in ems (hhea ascent + descent): ImGui's size is that height.
+float em_ratio(Face f) {
+  ImFont* p = font_of(f);
+  if (p == g_fonts.title && g_fonts.title) return 1.4102f;   // Arial Black
+  if (p == g_fonts.black && g_fonts.black) return 1.3506f;   // Segoe UI Black
+  if (p == g_fonts.bold && g_fonts.bold) return 1.3301f;     // Segoe UI Bold
+  if (p == g_fonts.body && g_fonts.body) return 1.2002f;     // Bahnschrift
+  return 1.15f;
+}
+float size_of(Face f, float css) { return px(css) * em_ratio(f); }
+
+struct Ink {
+  Face face = Face::Body;
+  float css = 12;             // the sheet's font-size
+  ImU32 col = kWhite;
+  bool italic = false;        // the sheet's Arial Black italic
+  float shadow = 0;           // text-shadow 0 Npx 0 #000
+  bool glow = false;          // and 0 0 3px #000
+  float spacing = 0;          // letter-spacing, sheet pixels
+};
+
+float text_w(const Ink& k, const std::string& s) {
+  const float w = font_of(k.face)->CalcTextSizeA(size_of(k.face, k.css), 1e6f, 0.f, s.c_str()).x;
+  return w + (s.empty() ? 0 : px(k.spacing) * (float)(s.size() - 1));
+}
+// The glyph box's top for text set in a line box of `line` sheet pixels starting at y.
+float line_top(const Ink& k, float y, float line) { return y + (px(line) - size_of(k.face, k.css)) * .5f; }
+
+void raw_text(const Ink& k, float x, float y, ImU32 col, const std::string& s) {
+  ImFont* f = font_of(k.face);
+  const float size = size_of(k.face, k.css);
+  if (k.spacing == 0) { dl()->AddText(f, size, ImVec2(x, y), col, s.c_str()); return; }
+  float pen = x;
+  for (char c : s) {
+    const char one[2] = {c, 0};
+    dl()->AddText(f, size, ImVec2(pen, y), col, one);
+    pen += f->CalcTextSizeA(size, 1e6f, 0.f, one).x + px(k.spacing);
+  }
+}
+// Text with the sheet's shadow, slanted when italic (the vertices are sheared about the line).
+void text(const Ink& k, float x, float y, const std::string& s) {
+  if (s.empty()) return;
+  ImDrawList* d = dl();
+  const int start = d->VtxBuffer.Size;
+  const float a = (float)((k.col >> IM_COL32_A_SHIFT) & 0xFF) / 255.0f;
+  const ImU32 shade = IM_COL32(0, 0, 0, (int)(230 * a));
+  if (k.glow)
+    for (int i = 0; i < 4; ++i) raw_text(k, x + px(i < 2 ? (i ? 1.f : -1.f) : 0), y + px(i >= 2 ? (i == 2 ? 1.f : -1.f) : 0), IM_COL32(0, 0, 0, (int)(110 * a)), s);
+  if (k.shadow > 0) raw_text(k, x, y + px(k.shadow), shade, s);
+  raw_text(k, x, y, k.col, s);
+  if (k.italic) {
+    const float base = y + size_of(k.face, k.css) * .78f;
+    for (int i = start; i < d->VtxBuffer.Size; ++i) d->VtxBuffer[i].pos.x += (base - d->VtxBuffer[i].pos.y) * 0.21f;
+  }
+}
+void text_center(const Ink& k, float cx, float y, const std::string& s) { text(k, cx - text_w(k, s) * .5f, y, s); }
+std::string fit(const Ink& k, const std::string& s, float w) {
+  if (text_w(k, s) <= w) return s;
   std::string t = s;
-  while (!t.empty() && text_w(size, t + ".") > w) t.pop_back();
+  while (!t.empty() && text_w(k, t + ".") > w) t.pop_back();
   return t + ".";
 }
 
-// The game's slanted tag (NEXT UP, JUST WATCHING ...).
-float tag(float x, float y, const char* label, ImU32 top, ImU32 bottom, ImU32 ink = IM_COL32(35, 23, 0, 255)) {
-  const float h = px(15), w = text_w(10.5f, label) + px(22);
-  const ImVec2 pts[4] = {ImVec2(x, y), ImVec2(x + w, y), ImVec2(x + w - px(8), y + h), ImVec2(x, y + h)};
-  dl()->AddConvexPolyFilled(pts, 4, bottom);
-  const ImVec2 hi[4] = {ImVec2(x, y), ImVec2(x + w, y), ImVec2(x + w - px(4), y + h * .5f), ImVec2(x, y + h * .5f)};
-  dl()->AddConvexPolyFilled(hi, 4, top);
-  text(x + px(6), y + px(1.5f), 10.5f, ink, label, false);
+// Colours of the vertices drawn since `start`, from `top` at y0 to `bottom` at y1 (the sheet's
+// vertical linear-gradients), alpha included.
+ImU32 mix(ImU32 a, ImU32 b, float t) {
+  t = std::clamp(t, 0.0f, 1.0f);
+  auto ch = [&](int s) { return (int)(((a >> s) & 0xFF) * (1 - t) + ((b >> s) & 0xFF) * t + .5f); };
+  return (ImU32)(ch(0) | ch(8) << 8 | ch(16) << 16 | ch(24) << 24);
+}
+void shade(int start, float y0, float y1, ImU32 top, ImU32 bottom) {
+  ImDrawList* d = dl();
+  for (int i = start; i < d->VtxBuffer.Size; ++i) {
+    const float t = y1 > y0 ? (d->VtxBuffer[i].pos.y - y0) / (y1 - y0) : 0.f;
+    d->VtxBuffer[i].col = mix(top, bottom, t);
+  }
+}
+void shade_x(int start, float x0, float x1, ImU32 left, ImU32 right) {
+  ImDrawList* d = dl();
+  for (int i = start; i < d->VtxBuffer.Size; ++i) {
+    const float t = x1 > x0 ? (d->VtxBuffer[i].pos.x - x0) / (x1 - x0) : 0.f;
+    d->VtxBuffer[i].col = mix(left, right, t);
+  }
+}
+void rect_gradient(float x0, float y0, float x1, float y1, float r, ImU32 top, ImU32 bottom) {
+  const int start = dl()->VtxBuffer.Size;
+  dl()->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), kWhite, r);
+  shade(start, y0, y1, top, bottom);
+}
+// box-shadow 0 0 Npx colour: a few widening outlines fading out.
+void glow(float x0, float y0, float x1, float y1, float r, ImU32 col, float spread) {
+  const int steps = 5;
+  for (int i = steps; i >= 1; --i) {
+    const float e = spread * i / steps;
+    const float a = (float)((col >> IM_COL32_A_SHIFT) & 0xFF) * (1.0f - (float)(i - 1) / steps) * 0.35f;
+    dl()->AddRect(ImVec2(x0 - e, y0 - e), ImVec2(x1 + e, y1 + e), (col & ~IM_COL32_A_MASK) | ((ImU32)a << IM_COL32_A_SHIFT), r + e, 0, spread / steps + px(.5f));
+  }
+}
+void drop_shadow(float x0, float y0, float x1, float y1, float r) {   // 0 2px 4px rgba(0,0,0,.6)
+  for (int i = 3; i >= 1; --i) {
+    const float e = px(1.3f * i);
+    dl()->AddRectFilled(ImVec2(x0 - e * .5f, y0 + px(2) - e * .5f), ImVec2(x1 + e * .5f, y1 + px(2) + e), IM_COL32(0, 0, 0, 40), r + e);
+  }
+}
+
+// ---------------------------------------------------------------- portraits
+// Each player's picture: the game's own character select portrait of the character and costume they
+// picked (the disc's MnSlChr.usd), as one texture each, shown square from its top like the sheet.
+struct Portrait { ImTextureData* tex = nullptr; bool tried = false; float u0 = 0, v0 = 0, u1 = 1, v1 = 1; };
+std::map<int, Portrait> g_portraits;
+ImGuiContext* g_portrait_context = nullptr;
+
+ImTextureData* portrait(uint8_t character, uint8_t costume) {
+  if (character == ar::kNone || character >= 26) return nullptr;
+  if (g_portrait_context != ImGui::GetCurrentContext()) {
+    g_portrait_context = ImGui::GetCurrentContext();
+    for (auto& p : g_portraits)
+      if (p.second.tex) {
+        if (p.second.tex->Status == ImTextureStatus_Destroyed || p.second.tex->TexID == ImTextureID_Invalid)
+          p.second.tex->Status = ImTextureStatus_WantCreate;
+        ImGui::RegisterUserTexture(p.second.tex);
+      }
+  }
+  Portrait& p = g_portraits[character * 16 + (costume & 15)];
+  if (!p.tried) {
+    p.tried = true;
+    std::vector<uint8_t> rgba;
+    int w = 0, h = 0;
+    if (host::cosmetics::standard_portrait(character, costume, &rgba, &w, &h) && w > 0 && h > 0) {
+      p.tex = IM_NEW(ImTextureData)();
+      p.tex->Create(ImTextureFormat_RGBA32, w, h);
+      std::memcpy(p.tex->GetPixels(), rgba.data(), rgba.size());
+      p.tex->UsedRect = ImTextureRect{0, 0, (unsigned short)w, (unsigned short)h};
+      ImGui::RegisterUserTexture(p.tex);
+      // The face: a square from the top of the drawn figure, centred on it (the sheet crops each
+      // portrait to the head the way the character select's own cards frame it).
+      int top = -1;
+      for (int y = 0; y < h && top < 0; ++y)
+        for (int x = 0; x < w; ++x) if (rgba[((size_t)y * w + x) * 4 + 3] > 128) { top = y; break; }
+      if (top < 0) top = 0;
+      const int side = std::min({(int)(w * 0.64f), w, h});
+      double sum = 0, count = 0;
+      for (int y = top; y < std::min(h, top + side); ++y)
+        for (int x = 0; x < w; ++x) if (rgba[((size_t)y * w + x) * 4 + 3] > 128) { sum += x; count += 1; }
+      const int cx = count > 0 ? (int)(sum / count) : w / 2;
+      const int x0 = std::clamp(cx - side / 2, 0, w - side);
+      const int y0 = std::clamp(top - (int)(h * 0.02f), 0, h - side);
+      p.u0 = (float)x0 / w; p.u1 = (float)(x0 + side) / w;
+      p.v0 = (float)y0 / h; p.v1 = (float)(y0 + side) / h;
+    }
+  }
+  return p.tex;
+}
+Portrait* portrait_of(uint8_t character, uint8_t costume) {
+  if (!portrait(character, costume)) return nullptr;
+  return &g_portraits[character * 16 + (costume & 15)];
+}
+
+// The sheet's .ic: a white 2px frame with a black hairline and a drop shadow, the face inside on
+// the ground the sheet's crops had behind them (the red or blue card in a corner, the roster's
+// slate tile in a card).
+enum class Ground { Slate, Red, Blue };
+void icon(float x, float y, float s, const Member* m, bool gold_frame = false, Ground ground = Ground::Slate) {
+  const float r = px(5);
+  drop_shadow(x, y, x + s, y + s, r);
+  dl()->AddRectFilled(ImVec2(x - px(1), y - px(1)), ImVec2(x + s + px(1), y + s + px(1)), kBlack, r + px(1));
+  if (ground == Ground::Red) rect_gradient(x, y, x + s, y + s, r, IM_COL32(222, 66, 66, 255), IM_COL32(120, 22, 28, 255));
+  else if (ground == Ground::Blue) rect_gradient(x, y, x + s, y + s, r, IM_COL32(70, 100, 222, 255), IM_COL32(26, 40, 120, 255));
+  else rect_gradient(x, y, x + s, y + s, r, IM_COL32(108, 126, 168, 255), IM_COL32(40, 50, 80, 255));
+  Portrait* pt = m ? portrait_of(m->character, m->costume) : nullptr;
+  ImTextureData* t = pt ? pt->tex : nullptr;
+  if (t) {
+    const float in = px(2);
+    dl()->AddImageRounded(t->GetTexRef(), ImVec2(x + in, y + in), ImVec2(x + s - in, y + s - in), ImVec2(pt->u0, pt->v0),
+                          ImVec2(pt->u1, pt->v1), kWhite, r - px(1));
+  } else if (m) {
+    Ink k{Face::Title, s * .42f / g_k, IM_COL32(200, 208, 226, 255), true, 2};
+    const std::string letter = m->name.empty() ? "?" : std::string(1, (char)std::toupper((unsigned char)m->name[0]));
+    text_center(k, x + s * .5f, y + (s - size_of(k.face, k.css)) * .5f, letter);
+  }
+  dl()->AddRect(ImVec2(x, y), ImVec2(x + s, y + s), gold_frame ? kGold : kIconLine, r, 0, px(2));
+}
+
+// The sheet's .tag: Arial Black italic 11px on a 17px slanted strip.
+float tag(float x, float y, const char* label, ImU32 top, ImU32 bottom, ImU32 ink) {
+  const Ink k{Face::Title, 11, ink, true, 0, false, .4f};
+  const float h = px(17), w = text_w(k, label) + px(7 + 14);
+  const int start = dl()->VtxBuffer.Size;
+  const ImVec2 pts[4] = {ImVec2(x, y), ImVec2(x + w, y), ImVec2(x + w - px(9), y + h), ImVec2(x, y + h)};
+  dl()->AddConvexPolyFilled(pts, 4, kWhite);
+  shade(start, y, y + h, top, bottom);
+  text(k, x + px(7), line_top(k, y, 17), label);
   return w;
 }
-void tag_gold(float x, float y, const char* l) { tag(x, y, l, IM_COL32(255, 228, 128, 255), kGoldDark); }
-void tag_grey(float x, float y, const char* l) { tag(x, y, l, IM_COL32(201, 208, 222, 255), IM_COL32(127, 138, 163, 255)); }
+void tag_gold(float x, float y, const char* l) { tag(x, y, l, IM_COL32(255, 228, 128, 255), kGold2, kInk); }
+void tag_grey(float x, float y, const char* l) { tag(x, y, l, IM_COL32(201, 208, 222, 255), IM_COL32(127, 138, 163, 255), kInk); }
 void tag_red(float x, float y, const char* l) { tag(x, y, l, IM_COL32(255, 128, 136, 255), IM_COL32(184, 31, 40, 255), kWhite); }
 
-// A player's badge: a disc with the first letter (stock icons come later).
-void badge(float cx, float cy, float r, ImU32 ring, const std::string& name) {
-  dl()->AddCircleFilled(ImVec2(cx, cy), r, IM_COL32(34, 40, 60, 255));
-  dl()->AddCircle(ImVec2(cx, cy), r, ring, 0, px(2));
-  const std::string letter = name.empty() ? "?" : std::string(1, name[0]);
-  text_center(cx, cy - px(r > px(20) ? 12 : 7), r > px(20) ? 24 : 13, kWhite, letter);
-}
-
-void button_glyph(float x, float y, char b) {
+// The sheet's .gc button chips: X and Y grey kidney, A green disc, Z purple square, B red disc.
+void button_chip(float x, float y, char b, float alpha = 1.0f) {
+  const float s = px(16);
   ImU32 c = IM_COL32(174, 180, 191, 255), ink = IM_COL32(21, 24, 31, 255);
-  if (b == 'Z') { c = IM_COL32(123, 82, 214, 255); ink = kWhite; }
+  float r = px(8);
   if (b == 'A') { c = IM_COL32(23, 178, 107, 255); ink = kWhite; }
   if (b == 'B') { c = IM_COL32(220, 60, 60, 255); ink = kWhite; }
-  if (b == 'C') { c = kGold; }
-  dl()->AddCircleFilled(ImVec2(x + px(7), y + px(7)), px(7.5f), c);
-  const std::string s(1, b);
-  text(x + px(7) - text_w(9.5f, s) * .5f, y + px(1.5f), 9.5f, ink, s, false);
+  if (b == 'Z') { c = IM_COL32(123, 82, 214, 255); ink = kWhite; r = px(4); }
+  if (b == 'R' || b == 'S') { c = IM_COL32(110, 118, 134, 255); ink = kWhite; r = px(4); }
+  auto fade = [&](ImU32 col) { return (col & ~IM_COL32_A_MASK) | ((ImU32)(((col >> IM_COL32_A_SHIFT) & 0xFF) * alpha) << IM_COL32_A_SHIFT); };
+  dl()->AddRectFilled(ImVec2(x, y + px(1)), ImVec2(x + s, y + s + px(1)), fade(kBlack), r);
+  dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + s, y + s), fade(c), r);
+  const Ink k{Face::Bold, 10, fade(ink)};
+  const std::string one(1, b == 'S' ? 'S' : b);
+  text_center(k, x + s * .5f, line_top(k, y, 16), one);
 }
-void hint(float x, float y, char b, const std::string& label, float w) {
-  button_glyph(x, y, b);
-  text(x + px(19), y + px(1), 11, IM_COL32(207, 214, 230, 255), fit(label, 11, w - px(19)));
+// One row of the sheet's .hints: chip, 6px, 11.5px text.
+void hint(float x, float y, char b, const std::string& label, float w, float alpha = 1.0f, bool live = true) {
+  const Do what = live ? do_of(b, label) : Do::None;
+  const bool lit = what != Do::None && hot(x, y - px(3), y + px(19), what);
+  if (lit) {
+    // The sheet's selected option: a gold bar, dark lettering.
+    const int start = dl()->VtxBuffer.Size;
+    dl()->AddRectFilled(ImVec2(x - px(4), y - px(3)), ImVec2(x + w + px(2), y + px(19)), kWhite, px(4));
+    shade_x(start, x - px(4), x + w + px(2), kGold, IM_COL32(233, 168, 26, 255));
+    dl()->AddRect(ImVec2(x - px(4), y - px(3)), ImVec2(x + w + px(2), y + px(19)), IM_COL32(255, 243, 194, 255), px(4), 0, px(1));
+  }
+  button_chip(x, y, b, alpha);
+  const ImU32 col = lit ? kInk : (kHintText & ~IM_COL32_A_MASK) | ((ImU32)(255 * alpha) << IM_COL32_A_SHIFT);
+  const Ink k{lit ? Face::Bold : Face::Body, 11.5f, col};
+  text(k, x + px(22), line_top(k, y, 16), fit(k, label, w - px(22)));
+}
+// Hint rows stacked up from `bottom` (gap 5px), returning the top of the first.
+float hints_up(float x, float w, float bottom, const std::vector<std::pair<char, std::string>>& items, float alpha = 1.0f) {
+  float y = bottom - items.size() * px(16) - (items.empty() ? 0 : (items.size() - 1) * px(5));
+  const float top = y;
+  for (const auto& it : items) { hint(x, y, it.first, it.second, w, alpha); y += px(21); }
+  return top;
 }
 
 std::string record(const Member& m) { return std::to_string(m.wins) + "-" + std::to_string(m.losses); }
 std::string ping_text(const View& v, uint8_t id) {
-  if (v.room.members.empty()) return "";
-  if (id == ar::owner(v.room)) return "host";
+  if (id == ar::owner(v.room)) return "";
   const int ms = id < ar::kMaxMembers ? v.ping_ms[id] : -1;
-  return ms < 0 ? "" : std::to_string(ms) + "ms";
+  return ms < 0 ? "" : std::to_string(ms) + " ms";
 }
 
-// A member's row card: badge, name, record or ping, a glow for "you".
-void slot_card(float x, float y, float w, const View& v, const Member& m, bool you, bool asking) {
-  const float h = px(32);
-  dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(26, 33, 51, 240), px(5));
-  dl()->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), you ? kGold : kLine, px(5), 0, you ? px(2) : px(1));
-  badge(x + px(16), y + h * .5f, px(11), you ? kGold : IM_COL32(223, 229, 242, 255), m.name);
-  const std::string right = asking ? "asks" : ping_text(v, m.id);
-  const float rw = right.empty() ? 0 : text_w(9.5f, right) + px(4);
-  text(x + px(31), y + px(4), 12.5f, kWhite, fit(m.name, 12.5f, w - px(35) - rw));
-  text(x + px(31), y + px(18), 9.5f, kRecord, record(m), false);
-  if (!right.empty()) text(x + w - rw, y + px(18), 9.5f, asking ? kGold : kDim, right, false);
+// The sheet's .slot: 5px 6px padding, a 34px portrait, the name; "you" glows gold with a YOU chip.
+// The ping sits at the right in small print (the room's player list keeps everyone's ping).
+constexpr float kSlotH = 46;
+void slot_card(float x, float y, float w, const View& v, const Member& m, bool you, bool asking, float icon_css = 34) {
+  const float h = px(icon_css + 12), r = px(5);
+  const bool lit = hot(x, y, y + h, Do::Member, m.id);
+  if (you) glow(x, y, x + w, y + h, r, IM_COL32(243, 194, 46, 128), px(8));
+  dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), kSlotBg, r);
+  dl()->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), you || lit ? kGold : kSlotLine, r, 0, lit ? px(2) : px(1));
+  const float is = px(icon_css);
+  icon(x + px(6), y + px(6), is, &m);
+  float right = x + w - px(6);
+  if (you) {
+    const Ink yk{Face::Bold, 9, kInk};
+    const float tw = text_w(yk, "YOU") + px(8), th = px(14);
+    dl()->AddRectFilled(ImVec2(right - tw, y + h * .5f - th * .5f), ImVec2(right, y + h * .5f + th * .5f), kGold, px(3));
+    text_center(yk, right - tw * .5f, line_top(yk, y + h * .5f - th * .5f, 14), "YOU");
+    right -= tw + px(4);
+  } else if (asking) {
+    const Ink ak{Face::Bold, 9.5f, kGold};
+    const float tw = text_w(ak, "asks");
+    text(ak, right - tw, line_top(ak, y, kSlotH), "asks");
+    right -= tw + px(4);
+  }
+  if (lit) {   // the hand on a player: their ping
+    const std::string p = ping_text(v, m.id);
+    if (!p.empty()) {
+      const Ink pk{Face::Body, 9.5f, kDimText};
+      const float tw = text_w(pk, p);
+      text(pk, right - tw, line_top(pk, y, icon_css + 12), p);
+      right -= tw + px(4);
+    }
+  }
+  const Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
+  const float nx = x + px(6) + is + px(7);
+  text(nk, nx, line_top(nk, y, icon_css + 12), fit(nk, m.name, right - nx));
 }
 void open_spot(float x, float y, float w) {
-  const float h = px(28);
-  for (float t = x; t < x + w; t += px(8)) {   // dashed outline
-    dl()->AddLine(ImVec2(t, y), ImVec2(std::min(t + px(4), x + w), y), kLine, px(1));
-    dl()->AddLine(ImVec2(t, y + h), ImVec2(std::min(t + px(4), x + w), y + h), kLine, px(1));
+  const float h = px(kSlotH);
+  for (float t = x; t < x + w; t += px(7)) {
+    dl()->AddLine(ImVec2(t, y), ImVec2(std::min(t + px(4), x + w), y), kSlotLine, px(1));
+    dl()->AddLine(ImVec2(t, y + h), ImVec2(std::min(t + px(4), x + w), y + h), kSlotLine, px(1));
   }
-  dl()->AddLine(ImVec2(x, y), ImVec2(x, y + h), kLine, px(1));
-  dl()->AddLine(ImVec2(x + w, y), ImVec2(x + w, y + h), kLine, px(1));
-  text_center(x + w * .5f, y + px(8), 10, IM_COL32(111, 123, 152, 255), "open spot");
+  for (float t = y; t < y + h; t += px(7)) {
+    dl()->AddLine(ImVec2(x, t), ImVec2(x, std::min(t + px(4), y + h)), kSlotLine, px(1));
+    dl()->AddLine(ImVec2(x + w, t), ImVec2(x + w, std::min(t + px(4), y + h)), kSlotLine, px(1));
+  }
+  const Ink k{Face::Body, 11, IM_COL32(111, 123, 152, 255)};
+  text_center(k, x + w * .5f, line_top(k, y, kSlotH), "open spot");
 }
 
-// One corner: title, a big badge per fighter on that side, name, record, streak.
-float corner(float x0, float x1, float y0, bool red, const View& v, int side, bool live) {
-  const Room& r = v.room;
-  const float w = x1 - x0;
-  const ImU32 col = red ? kRed : kBlue;
-  const float h = px(r.doubles ? 150 : 132);
-  const ImU32 top = red ? IM_COL32(216, 52, 60, 150) : IM_COL32(58, 86, 216, 160);
-  dl()->AddRectFilledMultiColor(ImVec2(x0, y0), ImVec2(x1, y0 + h), top, top, IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0));
-  dl()->AddLine(red ? ImVec2(x1 - px(1.5f), y0) : ImVec2(x0 + px(1.5f), y0), red ? ImVec2(x1 - px(1.5f), y0 + h) : ImVec2(x0 + px(1.5f), y0 + h), col, px(3));
-  text_center(x0 + w * .5f, y0 + px(8), 14, kWhite, red ? "RED CORNER" : "BLUE CORNER");
-  if (live && red) tag_red(x1 - px(44), y0 + px(26), "LIVE");
-  const int slots = r.doubles ? 2 : 1;
-  float y = y0 + px(28);
-  for (int k = 0; k < slots; ++k) {
-    const int slot = r.doubles ? side * 2 + k : side;
-    const Member* m = ar::find(r, r.ring[slot]);
-    if (!m) { text_center(x0 + w * .5f, y + px(24), 11, kDim, "waiting..."); y += px(60); continue; }
-    const float rad = px(r.doubles ? 17 : 28);
-    badge(x0 + w * .5f, y + rad, rad, m->id == v.self ? kGold : IM_COL32(223, 229, 242, 255), m->name);
-    y += rad * 2 + px(4);
-    text_center(x0 + w * .5f, y, 13, kWhite, fit(m->name, 13, w - px(8)));
-    y += px(15);
-    std::string line = record(*m);
-    if (r.streak_id == m->id && r.streak >= 2) line += "   x" + std::to_string(r.streak) + " streak";
-    const std::string p = ping_text(v, m->id);
-    text_center(x0 + w * .5f, y, 12, kGold, line);
-    y += px(14);
-    if (!p.empty()) { text_center(x0 + w * .5f, y, 9.5f, kDim, p); y += px(12); }
-    y += px(4);
-  }
-  return y0 + h;
+// The sheet's .steel panel: a #39445f to #1c2336 fade, a 2px border, a dark hairline inside.
+void steel(float x0, float y0, float x1, float y1, ImU32 border) {
+  rect_gradient(x0, y0, x1, y1, px(6), IM_COL32(57, 68, 95, 255), IM_COL32(28, 35, 54, 255));
+  dl()->AddRect(ImVec2(x0 + px(2), y0 + px(2)), ImVec2(x1 - px(2), y1 - px(2)), IM_COL32(10, 13, 21, 255), px(5), 0, px(1));
+  dl()->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), border, px(6), 0, px(2));
 }
 
-// Members in the line (with an open spot after), or watching.
-float line_cards(float x, float y, float w, const View& v, bool with_open_spot) {
-  tag_gold(x, y, "NEXT UP");
-  y += px(19);
-  for (uint8_t id : v.room.line) {
-    const Member* m = ar::find(v.room, id);
-    if (!m) continue;
-    slot_card(x, y, w, v, *m, id == v.self, v.room.asker == id);
-    y += px(36);
-  }
-  if (with_open_spot) { open_spot(x, y, w); y += px(32); }
-  return y;
-}
-float watch_cards(float x, float y, float w, const View& v) {
-  tag_grey(x, y, "JUST WATCHING");
-  y += px(19);
-  bool any = false;
-  for (const Member& m : v.room.members) {
-    if (ar::role(v.room, m.id) != Role::Watching) continue;
-    slot_card(x, y, w, v, m, m.id == v.self, v.room.asker == m.id);
-    y += px(36);
-    any = true;
-  }
-  if (!any) { text(x + px(2), y, 10, kDim, "nobody"); y += px(14); }
-  return y;
-}
-
+// ---------------------------------------------------------------- the room's state, in words
 // The prompt that needs this member's answer, if any: 1 an ask to answer, 2 a doubles vote.
 int prompt_kind(const View& v) {
   const Room& r = v.room;
@@ -248,97 +470,181 @@ int prompt_kind(const View& v) {
   return 0;
 }
 
-void prompt_box(float x, float y, float w, const View& v, int kind) {
+// The X action of the sheet's bottom-right hint, for this member.
+std::pair<char, std::string> x_action(const View& v) {
+  const Role role = ar::role(v.room, v.self);
+  if (role == Role::Fighter)
+    return {'X', v.room.leaving_slot != ar::kNone && v.room.ring[v.room.leaving_slot] == v.self ? "Keep my spot" : "Give up my spot"};
+  if (role == Role::InLine) return {'X', "Just watch"};
+  return {'X', "Get in line"};
+}
+
+// Words wrapped to a width.
+std::vector<std::string> wrap(const Ink& k, const std::string& words, float w) {
+  std::vector<std::string> lines;
+  std::string word, line;
+  for (size_t i = 0; i <= words.size(); ++i) {
+    const char c = i < words.size() ? words[i] : ' ';
+    if (c != ' ') { word += c; continue; }
+    const std::string trial = line.empty() ? word : line + " " + word;
+    if (text_w(k, trial) > w && !line.empty()) { lines.push_back(line); line = word; }
+    else line = trial;
+    word.clear();
+  }
+  if (!line.empty()) lines.push_back(line);
+  return lines;
+}
+
+// The sheet's one plain sentence for a member waiting to play: what happens next for them.
+std::string next_sentence(const View& v) {
   const Room& r = v.room;
-  std::vector<std::string> options;
+  if (ar::role(r, v.self) != Role::InLine) return "";
+  const size_t at = (size_t)(std::find(r.line.begin(), r.line.end(), v.self) - r.line.begin());
+  if (at > 0) return "You are number " + std::to_string(at + 1) + " in line.";
+  if (r.mode == ar::Mode::WinnerStays) return "You play the winner next.";
+  if (r.mode == ar::Mode::TakeTurns) {
+    int out = -1;
+    for (int s = 0; s < ar::ring_size(r); ++s)
+      if (r.ring[s] != ar::kNone && (out < 0 || r.tenure[s] > r.tenure[out])) out = s;
+    const Member* m = out >= 0 ? ar::find(r, r.ring[out]) : nullptr;
+    return m ? "You play the next game. " + m->name + " has been in longest and steps out." : "You play the next game.";
+  }
+  return "You are first in line. Ask to play next.";
+}
+
+// The ask prompt (and the doubles vote): the sheet's .steel.ask box.
+float prompt_height(float w, const View& v, int kind, std::vector<std::string>* lines_out, std::vector<std::string>* options_out) {
+  const Room& r = v.room;
   std::string question;
   if (kind == 1) {
     const Member* a = ar::find(r, r.asker);
     question = (a ? a->name : std::string("Someone")) + " asks to play next. Give up your spot?";
-    options = {"Yes", "Yes, and I play the winner", "No"};
+    *options_out = {"Yes", "Yes, and I play the winner", "No"};
   } else {
     question = r.doubles ? "Back to singles?" : "Switch the four of you to doubles?";
-    options = {"Yes", "No"};
+    *options_out = {"Yes", "No"};
   }
-  // The question, wrapped to the box.
-  std::vector<std::string> lines;
-  {
-    std::string word, line;
-    for (size_t i = 0; i <= question.size(); ++i) {
-      const char c = i < question.size() ? question[i] : ' ';
-      if (c != ' ') { word += c; continue; }
-      const std::string trial = line.empty() ? word : line + " " + word;
-      if (text_w(11.5f, trial) > w - px(14) && !line.empty()) { lines.push_back(line); line = word; }
-      else line = trial;
-      word.clear();
-    }
-    if (!line.empty()) lines.push_back(line);
+  const Ink qk{Face::Bold, 12, kWhite};
+  std::string word, line;
+  for (size_t i = 0; i <= question.size(); ++i) {
+    const char c = i < question.size() ? question[i] : ' ';
+    if (c != ' ') { word += c; continue; }
+    const std::string trial = line.empty() ? word : line + " " + word;
+    if (text_w(qk, trial) > w - px(16) && !line.empty()) { lines_out->push_back(line); line = word; }
+    else line = trial;
+    word.clear();
   }
-  const float h = px(10) + lines.size() * px(14) + options.size() * px(19) + px(6);
-  dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(28, 35, 54, 245), px(6));
-  dl()->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), kGold, px(6), 0, px(2));
-  float yy = y + px(6);
-  for (const std::string& l : lines) { text(x + px(7), yy, 11.5f, kWhite, l); yy += px(14); }
-  yy += px(2);
+  if (!line.empty()) lines_out->push_back(line);
+  float h = px(7) + lines_out->size() * px(15) + px(5);
+  for (const std::string& o : *options_out) {
+    const Ink ok{Face::Body, 11.5f, kHintText};
+    h += px(2) + (text_w(ok, o) > w - px(26) ? px(28) : px(14) + px(8));
+  }
+  return h + px(6);
+}
+void prompt_box(float x, float y, float w, const View& v, int kind) {
+  std::vector<std::string> lines, options;
+  const float h = prompt_height(w, v, kind, &lines, &options);
+  glow(x, y, x + w, y + h, px(6), IM_COL32(243, 194, 46, 90), px(10));
+  steel(x, y, x + w, y + h, kGold);
+  const Ink qk{Face::Bold, 12, kWhite};
+  float yy = y + px(7);
+  for (const std::string& l : lines) { text(qk, x + px(8), line_top(qk, yy, 15), l); yy += px(15); }
+  yy += px(5);
   for (size_t i = 0; i < options.size(); ++i) {
-    const bool sel = g.focus && g.page == Page::None && g.row == (int)i;
-    if (sel) dl()->AddRectFilled(ImVec2(x + px(5), yy), ImVec2(x + w - px(5), yy + px(17)), kGold, px(4));
-    text(x + px(10), yy + px(2), 11, sel ? IM_COL32(35, 23, 0, 255) : IM_COL32(207, 214, 230, 255), fit(options[i], 11, w - px(20)), !sel);
-    yy += px(19);
+    const bool two = text_w(Ink{Face::Body, 11.5f, kHintText}, options[i]) > w - px(26);
+    const float oh = two ? px(28) : px(22);
+    yy += px(2);
+    const bool sel = hot(x, yy, yy + oh, (Do)((int)Do::Opt0 + (int)i));
+    Ink ok{sel ? Face::Bold : Face::Body, 11.5f, sel ? kInk : kHintText};
+    if (sel) {
+      const int start = dl()->VtxBuffer.Size;
+      dl()->AddRectFilled(ImVec2(x + px(7), yy), ImVec2(x + w - px(7), yy + oh), kWhite, px(4));
+      shade_x(start, x + px(7), x + w - px(7), kGold, IM_COL32(233, 168, 26, 255));
+      dl()->AddRect(ImVec2(x + px(7), yy), ImVec2(x + w - px(7), yy + oh), IM_COL32(255, 243, 194, 255), px(4), 0, px(1));
+    }
+    if (!two) text(ok, x + px(13), line_top(ok, yy, 22), options[i]);
+    else {
+      // "Yes, and I play the winner" in two lines, as the sheet wraps it.
+      const std::string& o = options[i];
+      const size_t cut = o.find(' ', o.size() / 2);
+      text(ok, x + px(13), yy + px(1), o.substr(0, cut));
+      text(ok, x + px(13), yy + px(14), cut == std::string::npos ? "" : o.substr(cut + 1));
+    }
+    yy += oh;
   }
 }
 
-// The keyboard, the recent codes and the rules: one box in the right bar while open.
+// ---------------------------------------------------------------- the pages: rules, add a friend
 void page_box(float x, float y, float w, const View& v) {
+  const Ink head{Face::Title, 13, kWhite, true, 2};
+  const Ink small{Face::Body, 10, kGold, false, 0, false, 1.5f};
   if (g.page == Page::Rules) {
-    const float h = px(116);
-    dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(28, 35, 54, 245), px(6));
-    dl()->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), kGold, px(6), 0, px(2));
-    text(x + px(7), y + px(5), 12, kGold, "RULES");
-    const std::string values[3] = {kModeNames[(int)v.room.mode], kLookNames[(int)g.look], g.tabs ? "Tabs" : "Shown"};
+    const float h = px(150);
+    glow(x, y, x + w, y + h, px(6), IM_COL32(243, 194, 46, 90), px(10));
+    steel(x, y, x + w, y + h, kGold);
+    text(small, x + px(8), y + px(8), "ROOM");
+    text(head, x + px(8), y + px(20), "RULES");
+    const std::string values[3] = {kModeWords[(int)v.room.mode], kLookNames[(int)g.look], g.tabs ? "Tabs" : "Shown"};
     const char* labels[3] = {"Mode", "Look", "Panel"};
     for (int i = 0; i < 3; ++i) {
-      const float yy = y + px(24) + i * px(26);
-      if (g.row == i) dl()->AddRectFilled(ImVec2(x + px(4), yy - px(1)), ImVec2(x + w - px(4), yy + px(23)), IM_COL32(243, 194, 46, 60), px(4));
-      text(x + px(8), yy, 9.5f, kDim, labels[i], false);
-      text(x + px(8), yy + px(10), 11.5f, kWhite, std::string("< ") + values[i] + " >");
+      const float yy = y + px(44) + i * px(28);
+      if (g.row == i) {
+        const int start = dl()->VtxBuffer.Size;
+        dl()->AddRectFilled(ImVec2(x + px(6), yy - px(2)), ImVec2(x + w - px(6), yy + px(25)), kWhite, px(4));
+        shade_x(start, x + px(6), x + w - px(6), kGold, IM_COL32(233, 168, 26, 255));
+      }
+      const Ink lk{Face::Body, 9.5f, g.row == i ? kInk : kDimText};
+      const Ink vk{Face::Bold, 12, g.row == i ? kInk : kWhite};
+      text(lk, x + px(12), yy, labels[i]);
+      text(vk, x + px(12), yy + px(10), std::string("< ") + values[i] + " >");
     }
-    hint(x + px(6), y + h - px(19), 'B', "Back", w - px(12));
+    hint(x + px(8), y + h - px(22), 'B', "Back", w - px(16), 1.0f, false);
     return;
   }
   if (g.page == Page::Code) {
-    const float h = px(78) + g.recent.size() * px(17) + px(100);
-    dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(28, 35, 54, 245), px(6));
-    dl()->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), kGold, px(6), 0, px(2));
-    text(x + px(7), y + px(5), 12, kGold, "ADD A FRIEND");
-    text(x + px(7), y + px(20), 9.5f, kDim, "They enter your code too.", false);
-    float yy = y + px(36);
-    dl()->AddRectFilled(ImVec2(x + px(6), yy), ImVec2(x + w - px(6), yy + px(20)), IM_COL32(5, 7, 11, 255), px(3));
-    text(x + px(10), yy + px(3), 12.5f, kWhite, g.code + ((int)(ImGui::GetTime() * 2) % 2 ? "_" : " "));
-    yy += px(26);
+    const float h = px(92) + g.recent.size() * px(18) + px(96);
+    glow(x, y, x + w, y + h, px(6), IM_COL32(243, 194, 46, 90), px(10));
+    steel(x, y, x + w, y + h, kGold);
+    text(small, x + px(8), y + px(8), "ROOM");
+    text(head, x + px(8), y + px(20), "ADD A FRIEND");
+    const Ink dim{Face::Body, 10, kDimText};
+    text(dim, x + px(8), y + px(40), "They enter your code too.");
+    float yy = y + px(56);
+    dl()->AddRectFilled(ImVec2(x + px(7), yy), ImVec2(x + w - px(7), yy + px(22)), IM_COL32(5, 7, 11, 255), px(3));
+    dl()->AddRect(ImVec2(x + px(7), yy), ImVec2(x + w - px(7), yy + px(22)), kSlotLine, px(3));
+    const Ink ck{Face::Bold, 13, kWhite};
+    text(ck, x + px(12), line_top(ck, yy, 22), g.code + ((int)(ImGui::GetTime() * 2) % 2 ? "_" : " "));
+    yy += px(28);
     for (size_t i = 0; i < g.recent.size(); ++i) {
       const bool sel = g.recent_pick == (int)i;
-      if (sel) dl()->AddRectFilled(ImVec2(x + px(5), yy), ImVec2(x + w - px(5), yy + px(16)), kGold, px(3));
-      text(x + px(10), yy + px(1.5f), 10.5f, sel ? IM_COL32(35, 23, 0, 255) : IM_COL32(207, 214, 230, 255), g.recent[i], !sel);
-      yy += px(17);
+      if (sel) {
+        const int start = dl()->VtxBuffer.Size;
+        dl()->AddRectFilled(ImVec2(x + px(6), yy), ImVec2(x + w - px(6), yy + px(17)), kWhite, px(3));
+        shade_x(start, x + px(6), x + w - px(6), kGold, IM_COL32(233, 168, 26, 255));
+      }
+      const Ink rk{Face::Bold, 11, sel ? kInk : kHintText};
+      text(rk, x + px(12), line_top(rk, yy, 17), g.recent[i]);
+      yy += px(18);
     }
     yy += px(4);
-    const float cell = (w - px(12)) / 10.0f;
+    const float cell = (w - px(14)) / 10.0f;
     for (int r = 0; r < 5; ++r) {
       const std::string keys = kKeys[r];
       for (size_t c = 0; c < keys.size(); ++c) {
-        const float kx = x + px(6) + c * (r == 4 ? cell * 5 : cell), ky = yy + r * px(17);
+        const float kx = x + px(7) + c * (r == 4 ? cell * 5 : cell), ky = yy + r * px(17);
         const float kw = r == 4 ? cell * 5 - px(2) : cell - px(2);
         const bool sel = g.recent_pick < 0 && g.key_row == r && g.key_col == (int)c;
         dl()->AddRectFilled(ImVec2(kx, ky), ImVec2(kx + kw, ky + px(15)), sel ? kGold : IM_COL32(45, 54, 78, 255), px(2));
         const std::string label = r == 4 ? (c == 0 ? "DEL" : "OK") : std::string(1, keys[c]);
-        text(kx + kw * .5f - text_w(9.5f, label) * .5f, ky + px(2), 9.5f, sel ? IM_COL32(35, 23, 0, 255) : kWhite, label, false);
+        const Ink kk{Face::Bold, 9.5f, sel ? kInk : kWhite};
+        text_center(kk, kx + kw * .5f, line_top(kk, ky, 15), label);
       }
     }
   }
 }
 
-// ---- input ----
+// ---------------------------------------------------------------- input
 void send_act(Act a, uint8_t arg = 0, const std::string& text = {}) { ar::act(a, arg, text); }
 
 void type_key(char c) {
@@ -352,11 +658,62 @@ void submit_code() {
   g.page = Page::None;
   g.code.clear();
 }
+void open_code_page() { g.page = Page::Code; g.code.clear(); g.recent_pick = -1; g.key_row = 0; g.key_col = 0; load_recent(); }
+
+// The character select's hand reaches the panels: held against the left or right edge of the
+// screen for a moment it goes into that side's panel. There the stick moves it over the buttons
+// (each lights up gold), A presses, X, Y and Z do what their chips say, and B or the stick back
+// toward the picture lets the hand out again. While the hand is in a panel the game sees nothing.
+constexpr float kLeftEdge = -34.8f, kRightEdge = 25.8f;   // the hand's limits: -35, and 26 (29 with m-ex)
+constexpr int kPushFrames = 10;
+float g_bar_y0 = 0, g_bar_y1 = 1;
+
+void leave_panel() {
+  if (g.side) host::log("arena panel: the hand left the panel");
+  g.side = 0; g.push_side = 0; g.push_frames = 0;
+}
+
+// The button under the hand's height on that side, from last frame's buttons.
+void hover_nearest(int side, float hand_y) {
+  const float y = g_bar_y0 + (25.0f - hand_y) / 47.0f * (g_bar_y1 - g_bar_y0);
+  const Item* best = nullptr;
+  float best_d = 1e9f;
+  for (const Item& it : g_last_items) {
+    if (it.side != side) continue;
+    const float d = std::fabs((it.y0 + it.y1) * .5f - y);
+    if (d < best_d) { best_d = d; best = &it; }
+  }
+  g.hover = best ? (uint8_t)best->what : 0;
+  g.hover_member = best ? best->member : ar::kNone;
+}
+
+void press(Do what, const View& v) {
+  const Role role = v.active ? ar::role(v.room, v.self) : Role::Absent;
+  switch (what) {
+    case Do::Rules: if (v.active) { g.page = Page::Rules; g.row = 0; } break;
+    case Do::AddCode: open_code_page(); break;
+    case Do::Spot:
+      if (!v.active) break;
+      if (role == Role::Fighter) send_act(Act::GiveUp, 0);
+      else send_act(Act::ToggleLine);
+      break;
+    case Do::Ask: if (v.active && role != Role::Fighter && v.room.asker == ar::kNone) send_act(Act::Ask); break;
+    case Do::Doubles: if (v.active && !v.room.switch_pending && v.room.members.size() >= 4) send_act(Act::ProposeSwitch); break;
+    case Do::Opt0: case Do::Opt1: case Do::Opt2: {
+      const int prompt = v.active ? prompt_kind(v) : 0;
+      const int i = (int)what - (int)Do::Opt0;
+      if (prompt == 1) send_act(Act::Answer, (uint8_t)(i == 0 ? ar::Answer::Yes : i == 1 ? ar::Answer::YesAndPlayWinner : ar::Answer::No));
+      if (prompt == 2) send_act(Act::VoteSwitch, i == 0 ? 1 : 0);
+      break;
+    }
+    case Do::Leave: leave_panel(); break;
+    default: break;
+  }
+}
 
 void handle_input(const Frame& f, const View& v) {
   const uint16_t pressed = f.buttons & ~g.prev;
   g.prev = f.buttons;
-  // Directions from the D-pad or the stick, with a repeat.
   int dir = 0;
   if ((f.buttons & kDUp) || f.stick_y > 60) dir = 1;
   else if ((f.buttons & kDDown) || f.stick_y < -60) dir = 2;
@@ -365,15 +722,8 @@ void handle_input(const Frame& f, const View& v) {
   int step = 0;
   if (dir && (dir != g.prev_dir || f.time - g.dir_at > 0.18)) { step = dir; g.dir_at = f.time + (dir != g.prev_dir ? 0.2 : 0); }
   g.prev_dir = dir;
-  // The C-stick flicks the room menu open and shut.
-  const int c = (std::abs(f.sub_x) > 64 || std::abs(f.sub_y) > 64) ? 1 : 0;
-  const bool flick = c && !g.prev_c;
-  g.prev_c = c;
-  if (flick) { g.focus = !g.focus; g.page = Page::None; g.row = 0; return; }
-  if (!g.focus) return;
 
   if (g.page == Page::Code) {
-    // Keyboard typing too.
     for (ImWchar ch : ImGui::GetIO().InputQueueCharacters)
       if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '#') type_key((char)ch);
     if (ImGui::IsKeyPressed(ImGuiKey_Backspace) && !g.code.empty()) g.code.pop_back();
@@ -394,7 +744,10 @@ void handle_input(const Frame& f, const View& v) {
       else type_key(kKeys[g.key_row][g.key_col]);
     }
     if (pressed & kStart) submit_code();
-    if (pressed & kB) { if (!g.code.empty()) g.code.pop_back(); else g.page = Page::None; }
+    if (pressed & kB) {
+      if (!g.code.empty()) g.code.pop_back();
+      else g.page = Page::None;
+    }
     return;
   }
   if (g.page == Page::Rules) {
@@ -409,261 +762,539 @@ void handle_input(const Frame& f, const View& v) {
     if (pressed & kB) { g.page = Page::None; g.row = 0; }
     return;
   }
-  // The room menu's own buttons.
-  const int prompt = v.active ? prompt_kind(v) : 0;
-  if (prompt) {
-    const int options = prompt == 1 ? 3 : 2;
-    if (step == 1) g.row = std::max(0, g.row - 1);
-    if (step == 2) g.row = std::min(options - 1, g.row + 1);
-    if (pressed & kA) {
-      if (prompt == 1) send_act(Act::Answer, (uint8_t)(g.row == 0 ? ar::Answer::Yes : g.row == 1 ? ar::Answer::YesAndPlayWinner : ar::Answer::No));
-      else send_act(Act::VoteSwitch, g.row == 0 ? 1 : 0);
-      g.row = 0;
-      return;
+
+  float hx = 0, hy = 0;
+  const bool have_hand = ar::css_hand(&hx, &hy);
+  if (g.side == 0) {
+    // In: the hand held against an edge, the stick still pushing out.
+    int want = 0;
+    if (have_hand && hx <= kLeftEdge && f.stick_x < -50) want = 1;
+    if (have_hand && hx >= kRightEdge && f.stick_x > 50) want = 2;
+    if (want && want == g.push_side) ++g.push_frames;
+    else { g.push_side = want; g.push_frames = want ? 1 : 0; }
+    if (want && g.push_frames >= kPushFrames) {
+      g.side = want;
+      g.push_frames = 0;
+      hover_nearest(want, hy);
+      host::log("arena panel: the hand went into the %s panel (on button %d)", want == 1 ? "left" : "right", (int)g.hover);
+      g.prev_dir = dir;
+      g.dir_at = f.time + 0.25;   // the push that brought the hand in moves nothing
     }
+    return;
   }
-  if (pressed & kB) { g.focus = false; return; }
-  if (pressed & kY) { g.page = Page::Rules; g.row = 0; return; }
-  if (pressed & kZ) { g.page = Page::Code; g.code.clear(); g.recent_pick = -1; g.key_row = 0; g.key_col = 0; load_recent(); return; }
-  if (!v.active) return;
-  const Role role = ar::role(v.room, v.self);
-  if (pressed & kX) {
-    if (role == Role::Fighter) send_act(Act::GiveUp, 0);
-    else send_act(Act::ToggleLine);
+  // In a panel: up and down over its buttons, in their order on screen.
+  std::vector<const Item*> items;
+  for (const Item& it : g_last_items) if (it.side == g.side) items.push_back(&it);
+  std::sort(items.begin(), items.end(), [](const Item* x, const Item* y) { return x->y0 < y->y0; });
+  if (items.empty()) { leave_panel(); return; }
+  int at = -1;
+  for (size_t i = 0; i < items.size(); ++i)
+    if ((uint8_t)items[i]->what == g.hover && (items[i]->what != Do::Member || items[i]->member == g.hover_member)) at = (int)i;
+  if (at < 0) { at = 0; g.hover = (uint8_t)items[0]->what; g.hover_member = items[0]->member; }
+  if (step == 1 || step == 2) {
+    at = std::clamp(at + (step == 1 ? -1 : 1), 0, (int)items.size() - 1);
+    g.hover = (uint8_t)items[at]->what;
+    g.hover_member = items[at]->member;
   }
-  if ((pressed & kA) && !prompt && role != Role::Fighter && v.room.asker == ar::kNone) send_act(Act::Ask);
-  if ((pressed & kR) && !v.room.switch_pending) send_act(Act::ProposeSwitch);
+  // Out: B, or the stick back toward the picture.
+  if ((pressed & kB) || (g.side == 1 && step == 4) || (g.side == 2 && step == 3)) { leave_panel(); return; }
+  if (pressed & kA) { host::log("arena panel: A on button %d", (int)g.hover); press((Do)g.hover, v); }
+  if (pressed & kX) press(Do::Spot, v);
+  if (pressed & kY) press(Do::Rules, v);
+  if (pressed & kZ) press(Do::AddCode, v);
+  if (pressed & kR) press(Do::Doubles, v);
 }
 
-// ---- the looks ----
+// ---------------------------------------------------------------- the looks
 struct Bars { float lx0, lx1, rx0, rx1, y0, y1; };
 
-// What the room is doing for this member ("Connecting to P2", "Watching"), one line in a bar.
-void status_line(float x0, float x1, float y, const View& v) {
-  if (!v.status.empty()) text(x0, y, 9.5f, kDim, fit(v.status, 9.5f, x1 - x0), false);
+// The legend at the foot of a bar: the sheet's hints. They are buttons: the hand pushed into the
+// panel lights one up and A presses it (and X, Y and Z work while the hand is in the panel).
+float legend(float x, float w, float bottom, std::vector<std::pair<char, std::string>> items) {
+  return hints_up(x, w, bottom, items, 1.0f);
 }
+float z_line(float, float, float above) { return above; }
 
-void bottom_hints(float x0, float x1, float y, const std::vector<std::pair<char, std::string>>& items) {
-  float yy = y - items.size() * px(17);
-  for (const auto& it : items) { hint(x0, yy, it.first, it.second, x1 - x0); yy += px(17); }
-}
-
-std::vector<std::pair<char, std::string>> action_hints(const View& v) {
-  std::vector<std::pair<char, std::string>> out;
-  if (!g.focus) {
-    out.push_back({'C', prompt_kind(v) ? "C-stick to answer" : "C-stick: room menu"});
-    return out;
+// One corner of the combined look: the sheet's .corner (title, 80px portrait, name, record and
+// streak) over its red or blue fade, with the 3px edge toward the picture. Returns its bottom.
+float corner(float x0, float x1, float y0, bool red, const View& v, int side, bool tall_to = 0, float tall_y1 = 0) {
+  const Room& r = v.room;
+  const float w = x1 - x0, cx = x0 + w * .5f;
+  const int fighters = r.doubles ? 2 : 1;
+  const float icon_css = r.doubles ? 52 : (tall_to ? 88 : 80);
+  // Height: 12 + title 15 + 11 + icon + 8 + name 18 + 5 + record 21 + 12 (the sheet's boxes).
+  float h = px(12 + 15 + 11) + px(icon_css) + px(8 + 18 + 5 + 21 + 12);
+  if (r.doubles) h += px(18);   // a second name under the pair
+  const float y1 = tall_to ? tall_y1 : y0 + h;
+  const ImU32 c0 = red ? IM_COL32(216, 52, 60, 140) : IM_COL32(58, 86, 216, 153);
+  const ImU32 c1 = red ? IM_COL32(216, 52, 60, 15) : IM_COL32(58, 86, 216, 15);
+  {
+    const int start = dl()->VtxBuffer.Size;
+    const float y85 = y0 + (y1 - y0) * .85f;
+    dl()->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y85), kWhite);
+    shade(start, y0, y85, c0, c1);
+    dl()->AddRectFilled(ImVec2(x0, y85), ImVec2(x1, y1), c1);
   }
-  const Role role = ar::role(v.room, v.self);
-  if (role == Role::Fighter) out.push_back({'X', v.room.leaving_slot != ar::kNone && v.room.ring[v.room.leaving_slot] == v.self ? "Keep my spot" : "Give up my spot"});
-  else if (role == Role::InLine) out.push_back({'X', "Just watch"});
-  else out.push_back({'X', "Get in line"});
-  if (role != Role::Fighter && v.room.asker == ar::kNone) out.push_back({'A', "Ask to play next"});
-  if (v.room.members.size() >= 4 && !v.room.switch_pending) out.push_back({'R', v.room.doubles ? "Back to singles" : "Doubles (all 4 agree)"});
-  out.push_back({'B', "Close"});
-  return out;
-}
-
-void draw_combined(const Bars& b, const View& v, bool corners_only) {
-  const float lw = b.lx1 - b.lx0, rw = b.rx1 - b.rx0, pad = px(8);
-  const float ly = corner(b.lx0, b.lx1, b.y0, true, v, 0, v.room.in_game);
-  const float ry = corner(b.rx0, b.rx1, b.y0, false, v, 1, v.room.in_game);
-  if (!corners_only) {
-    line_cards(b.lx0 + pad, ly + px(8), lw - pad * 2, v, v.room.line.size() < 2);
-    watch_cards(b.rx0 + pad, ry + px(8), rw - pad * 2, v);
+  if (red) dl()->AddRectFilled(ImVec2(x1 - px(3), y0), ImVec2(x1, y1), kRed);
+  else dl()->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + px(3), y1), kBlue);
+  float y = y0 + px(12);
+  const Ink title{Face::Title, 15, kWhite, true, 2};
+  text_center(title, cx, line_top(title, y, 15), red ? "RED CORNER" : "BLUE CORNER");
+  y += px(15 + 11);
+  const Member* m[2] = {nullptr, nullptr};
+  for (int k = 0; k < fighters; ++k) m[k] = ar::find(r, r.ring[r.doubles ? side * 2 + k : side]);
+  const float is = px(icon_css);
+  if (fighters == 1) {
+    icon(cx - is * .5f, y, is, m[0], false, red ? Ground::Red : Ground::Blue);
   } else {
-    // Corners: the line and the stands as two short lists in the bars' feet.
-    float y = ly + px(8);
-    tag_gold(b.lx0 + pad, y, "NEXT UP");
-    y += px(19);
-    for (uint8_t id : v.room.line) { const Member* m = ar::find(v.room, id); if (m) { text(b.lx0 + pad, y, 11.5f, kWhite, fit(m->name, 11.5f, lw - pad * 2)); y += px(15); } }
-    if (v.room.line.empty()) text(b.lx0 + pad, y, 10, kDim, "open spot");
-    y = ry + px(8);
-    tag_grey(b.rx0 + pad, y, "JUST WATCHING");
-    y += px(19);
-    bool any = false;
-    for (const Member& m : v.room.members) if (ar::role(v.room, m.id) == Role::Watching) { text(b.rx0 + pad, y, 11.5f, kWhite, fit(m.name, 11.5f, rw - pad * 2)); y += px(15); any = true; }
-    if (!any) text(b.rx0 + pad, y, 10, kDim, "nobody");
+    const float gap = px(6);
+    icon(cx - is - gap * .5f, y, is, m[0], false, red ? Ground::Red : Ground::Blue);
+    icon(cx + gap * .5f, y, is, m[1], false, red ? Ground::Red : Ground::Blue);
   }
-  const int prompt = prompt_kind(v);
-  const int my_slot = ar::ring_slot(v.room, v.self);
-  const bool left_side = my_slot == 0 || (my_slot == 1 && v.room.doubles);
-  if (prompt) prompt_box(left_side ? b.lx0 + pad : b.rx0 + pad, b.y1 - px(170), (left_side ? lw : rw) - pad * 2, v, prompt);
-  bottom_hints(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8), {{'Y', "Rules"}, {'Z', "Add a friend's code"}});
-  const float mode_y = b.y1 - px(8) - action_hints(v).size() * px(17) - px(14);
-  text(b.rx0 + pad, mode_y, 9.5f, kGold, std::string(v.room.doubles ? "DOUBLES  " : "") + kModeNames[(int)v.room.mode], false);
-  status_line(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8) - 2 * px(17) - px(14), v);
-  bottom_hints(b.rx0 + pad, b.rx1 - pad, b.y1 - px(8), action_hints(v));
+  y += is + px(8);
+  const Ink big{Face::Black, 15, kWhite, false, 1};
+  for (int k = 0; k < fighters; ++k) {
+    const std::string name = m[k] ? m[k]->name : std::string("...");
+    text_center(big, cx, line_top(big, y, 18), fit(big, name, w - px(16)));
+    y += px(18);
+  }
+  y += px(5);
+  // The record, the streak beside it, the ping under it (small).
+  const Member* lead = m[0];
+  if (lead) {
+    const Ink wl{Face::Title, 21, kGold, true, 2};
+    const Ink sm{Face::Body, 10, kPaper, false, 1, false, .5f};
+    const std::string rec = record(*lead);
+    std::string streak;
+    for (int k = 0; k < fighters; ++k)
+      if (m[k] && r.streak_id == m[k]->id && r.streak >= 2) streak = "x" + std::to_string(r.streak) + " STREAK";
+    const float rw = text_w(wl, rec), sw = streak.empty() ? 0 : text_w(sm, streak) + px(5);
+    const float left = cx - (rw + sw) * .5f;
+    text(wl, left, line_top(wl, y, 21), rec);
+    if (!streak.empty()) text(sm, left + rw + px(5), y + px(21) - size_of(sm.face, sm.css) * .95f, streak);
+    const bool lit = hot(x0 + px(4), y0, y1, Do::Member, lead->id);
+    if (lit) dl()->AddRect(ImVec2(cx - is * .5f - px(3), y0 + px(12 + 15 + 11) - px(3)),
+                           ImVec2(cx + is * .5f + px(3), y0 + px(12 + 15 + 11) + is + px(3)), kGold, px(7), 0, px(2));
+    const std::string p = lit ? ping_text(v, lead->id) : std::string();
+    if (!p.empty()) {
+      const Ink pk{Face::Body, 9.5f, IM_COL32(232, 236, 245, 170)};
+      text_center(pk, cx, y + px(23), p);
+    }
+  }
+  return y1;
 }
 
+void draw_combined(const Bars& b, const View& v, bool corners_look) {
+  const Room& r = v.room;
+  const float lw = b.lx1 - b.lx0, rw = b.rx1 - b.rx0;
+  const float pad = px(8), bottom = b.y1 - px(10);
+  // Corners (the option): tall corners down to a foot box, as the sheet's Corners frame.
+  if (corners_look) {
+    const float foot_h = px(9 + 17 + 6 + 32 + 10 + 37 + 10);   // tag, a row, two hint rows (the sheet's .foot)
+    const float fy = b.y1 - foot_h;
+    corner(b.lx0, b.lx1, b.y0, true, v, 0, true, fy);
+    corner(b.rx0, b.rx1, b.y0, false, v, 1, true, fy);
+    for (int s = 0; s < 2; ++s) {
+      const float x0 = s ? b.rx0 : b.lx0, x1 = s ? b.rx1 : b.lx1;
+      dl()->AddRectFilled(ImVec2(x0, fy), ImVec2(x1, b.y1), kFoot);
+      dl()->AddRectFilled(ImVec2(x0, fy), ImVec2(x1, fy + px(2)), kSlotLine);
+    }
+    float y = fy + px(9);
+    tag_gold(b.lx0 + pad, y, "NEXT UP");
+    y += px(17 + 6);
+    const Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
+    if (!r.line.empty()) {
+      const Member* m = ar::find(r, r.line[0]);
+      if (m) { icon(b.lx0 + pad, y, px(32), m); text(nk, b.lx0 + pad + px(39), line_top(nk, y, 32), fit(nk, m->name, lw - pad * 2 - px(39))); }
+    } else {
+      const Ink dk{Face::Body, 11, IM_COL32(111, 123, 152, 255)};
+      text(dk, b.lx0 + pad, line_top(dk, y, 32), "open spot");
+    }
+    hints_up(b.lx0 + pad, lw - pad * 2, bottom, {x_action(v)}, g.focus ? 1.f : .55f);
+    y = fy + px(9);
+    tag_grey(b.rx0 + pad, y, "WATCHING");
+    y += px(17 + 6);
+    const Member* w0 = nullptr;
+    for (const Member& m : r.members) if (ar::role(r, m.id) == Role::Watching) { w0 = &m; break; }
+    if (w0) { icon(b.rx0 + pad, y, px(32), w0); text(nk, b.rx0 + pad + px(39), line_top(nk, y, 32), fit(nk, w0->name, rw - pad * 2 - px(39))); }
+    else { const Ink dk{Face::Body, 11, IM_COL32(111, 123, 152, 255)}; text(dk, b.rx0 + pad, line_top(dk, y, 32), "nobody"); }
+    hints_up(b.rx0 + pad, rw - pad * 2, bottom, {{'Y', "Rules"}, {'Z', "Add a friend's code"}}, g.focus ? 1.f : .55f);
+    if (!g.focus) z_line(b.rx0 + pad, rw - pad * 2, fy - px(4));
+    const int prompt = prompt_kind(v);
+    if (prompt) {
+      const int my_slot = ar::ring_slot(r, v.self);
+      const bool left = my_slot == 0 || (my_slot == 1 && r.doubles);
+      std::vector<std::string> l, o;
+      const float w = (left ? lw : rw) - pad * 2;
+      const float h = prompt_height(w, v, prompt, &l, &o);
+      prompt_box(left ? b.lx0 + pad : b.rx0 + pad, fy - px(10) - h, w, v, prompt);
+    }
+    return;
+  }
+
+  // The combined look (the default): corners on top, the line and the stands as cards under them.
+  const float ly = corner(b.lx0, b.lx1, b.y0, true, v, 0);
+  const float ry = corner(b.rx0, b.rx1, b.y0, false, v, 1);
+  // Left under: NEXT UP and the line, with an open spot after it.
+  float y = ly + px(10);
+  tag_gold(b.lx0 + pad, y, "NEXT UP");
+  y += px(17);
+  for (uint8_t id : r.line) {
+    const Member* m = ar::find(r, id);
+    if (!m) continue;
+    y += px(6);
+    slot_card(b.lx0 + pad, y, lw - pad * 2, v, *m, id == v.self, r.asker == id);
+    y += px(kSlotH);
+    if (y > b.y1 - px(190)) break;   // a long line: the first few (the Card look lists everyone)
+  }
+  if (r.line.size() < 2) { y += px(6); open_spot(b.lx0 + pad, y, lw - pad * 2); y += px(kSlotH); }
+  // Right under: WATCHING, only when someone is just watching.
+  float wy = ry + px(10);
+  bool any = false;
+  for (const Member& m : r.members) {
+    if (ar::role(r, m.id) != Role::Watching) continue;
+    if (!any) { tag_grey(b.rx0 + pad, wy, "WATCHING"); wy += px(17); any = true; }
+    wy += px(6);
+    slot_card(b.rx0 + pad, wy, rw - pad * 2, v, m, m.id == v.self, r.asker == m.id);
+    wy += px(kSlotH);
+    if (wy > b.y1 - px(170)) break;
+  }
+  // Left foot: the prompt (under your own corner) or the plain sentence, then Y and Z.
+  const int prompt = prompt_kind(v);
+  const int my_slot = ar::ring_slot(r, v.self);
+  const bool prompt_left = my_slot != 1 || r.doubles;   // the blue corner's player answers on the right
+  float lfoot = legend(b.lx0 + pad, lw - pad * 2, bottom,
+                       prompt && prompt_left && g.focus ? std::vector<std::pair<char, std::string>>{{'A', "Choose"}}
+                                                        : std::vector<std::pair<char, std::string>>{{'Y', "Rules"}, {'Z', "Add a friend's code"}});
+  lfoot = z_line(b.lx0 + pad, lw - pad * 2, lfoot);
+  if (prompt && prompt_left) {
+    std::vector<std::string> l, o;
+    const float w = lw - pad * 2;
+    const float h = prompt_height(w, v, prompt, &l, &o);
+    prompt_box(b.lx0 + pad, lfoot - px(7) - h, w, v, prompt);
+  } else {
+    const Ink dk{Face::Body, 11, kDimText};
+    const std::vector<std::string> lines = wrap(dk, next_sentence(v), lw - pad * 2);
+    float sy = lfoot - px(8) - lines.size() * px(15);
+    for (const std::string& l : lines) { text(dk, b.lx0 + pad, line_top(dk, sy, 15), l); sy += px(15); }
+  }
+  // Right foot: the mode in gold capitals, then this member's X action (and A to ask when free).
+  std::vector<std::pair<char, std::string>> right = {x_action(v)};
+  const Role role = ar::role(r, v.self);
+  if (g.side == 2 && role != Role::Fighter && r.asker == ar::kNone) right.push_back({'A', "Ask to play next"});
+  if (g.side == 2 && r.members.size() >= 4 && !r.switch_pending) right.push_back({'R', r.doubles ? "Back to singles" : "Doubles"});
+  if (g.side == 2) right.push_back({'B', "Close"});
+  float rfoot = legend(b.rx0 + pad, rw - pad * 2, bottom, right);
+  const Ink cap{Face::Body, 10, kGold, false, 0, false, 1.5f};
+  text(cap, b.rx0 + pad, rfoot - px(6) - px(12), std::string(r.doubles ? "DOUBLES  " : "") + kModeNames[(int)r.mode]);
+  if (prompt && !prompt_left) {
+    std::vector<std::string> l, o;
+    const float w = rw - pad * 2;
+    const float h = prompt_height(w, v, prompt, &l, &o);
+    prompt_box(b.rx0 + pad, rfoot - px(26) - h, w, v, prompt);
+  }
+}
+
+// The sheet's .row (Card look): a portrait, the name and the record in gold at the right.
+void card_row(float x, float y, float w, const View& v, const Member& m) {
+  icon(x, y, px(34), &m, m.id == v.self);
+  const Ink rk{Face::Bold, 12, kRecordCol, false, 0, false, .5f};
+  const std::string rec = record(m);
+  const float rw = text_w(rk, rec);
+  text(rk, x + w - rw, line_top(rk, y, 34), rec);
+  const Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
+  text(nk, x + px(41), line_top(nk, y, 34), fit(nk, m.name, w - px(41) - rw - px(4)));
+}
+
+// The sheet's .mode: small gold capitals, then the mode in Arial Black italic, two lines when it
+// does not fit (the Card's "WINNER / STAYS"). Returns its height.
+float mode_block(float x, float y, float w, const char* small_caps, const View& v) {
+  const Ink sm{Face::Body, 10, kGold, false, 0, false, 1.5f};
+  const Ink md{Face::Title, 15, kWhite, true, 2};
+  text(sm, x, y, fit(sm, small_caps, w));
+  const std::string mode = std::string(v.room.doubles ? "DOUBLES " : "") + kModeNames[(int)v.room.mode];
+  float yy = y + px(13);
+  if (text_w(md, mode) <= w) { text(md, x, line_top(md, yy, 16), mode); return px(13 + 16); }
+  std::string first = mode, rest;
+  const size_t cut = mode.rfind(' ');
+  if (cut != std::string::npos) { first = mode.substr(0, cut); rest = mode.substr(cut + 1); }
+  text(md, x, line_top(md, yy, 16), first);
+  if (!rest.empty()) text(md, x, line_top(md, yy + px(16), 16), rest);
+  return px(13 + 32);
+}
+
+// Card (right bar only) and Ring (the ring box at bar width).
 void draw_card(const Bars& b, const View& v, bool ring_box) {
-  const float x = b.rx0 + px(6), w = b.rx1 - b.rx0 - px(12);
-  dl()->AddRectFilled(ImVec2(b.rx0 + px(3), b.y0 + px(4)), ImVec2(b.rx1 - px(3), b.y1 - px(4)), kSteel, px(6));
-  dl()->AddRect(ImVec2(b.rx0 + px(3), b.y0 + px(4)), ImVec2(b.rx1 - px(3), b.y1 - px(4)), IM_COL32(154, 166, 192, 255), px(6), 0, px(2));
-  float y = b.y0 + px(12);
-  text(x + px(2), y, 9.5f, kGold, "ARENA", false);
-  if (v.room.in_game) tag_red(b.rx1 - px(48), y, "LIVE");
-  y += px(11);
-  text(x + px(2), y, 14, kWhite, std::string(v.room.doubles ? "DOUBLES - " : "") + kModeNames[(int)v.room.mode]);
-  y += px(22);
+  const Room& r = v.room;
+  const float x0 = b.rx0 + px(8), x1 = b.rx1 - px(8), y0 = b.y0 + px(10), y1 = b.y1 - px(10);
+  if (!ring_box) steel(x0, y0, x1, y1, kLineCol);
+  const float x = ring_box ? x0 : x0 + px(8), w = ring_box ? x1 - x0 : x1 - x0 - px(16);
+  float y = (ring_box ? y0 : y0 + px(10));
+  y += mode_block(x, y, w - px(4), "ARENA", v) + px(2);
+  const Ink nk{Face::Bold, 12, kWhite, false, 1, true};
   if (ring_box) {
-    const float h = px(78);
-    dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(44, 54, 84, 255), px(9));
-    dl()->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), kRed, px(9), 0, px(2));
-    dl()->AddRect(ImVec2(x + px(3), y + px(3)), ImVec2(x + w - px(3), y + h - px(3)), kBlue, px(7), 0, px(2));
+    // The sheet's .ringbox: a deep blue ring with red, white and blue ropes round it.
+    const float bx0 = x + px(7), bx1 = x + w - px(7), by0 = y + px(14), bh = px(94);
+    const float rr = px(11);
+    dl()->AddRect(ImVec2(bx0 - px(5), by0 - px(5)), ImVec2(bx1 + px(5), by0 + bh + px(5)), kBlue, rr + px(5), 0, px(2));
+    dl()->AddRect(ImVec2(bx0 - px(3), by0 - px(3)), ImVec2(bx1 + px(3), by0 + bh + px(3)), kIconLine, rr + px(3), 0, px(2));
+    dl()->AddRect(ImVec2(bx0 - px(1), by0 - px(1)), ImVec2(bx1 + px(1), by0 + bh + px(1)), kRed, rr + px(1), 0, px(2));
+    rect_gradient(bx0, by0, bx1, by0 + bh, rr, IM_COL32(70, 85, 124, 255), IM_COL32(27, 35, 56, 255));
+    dl()->AddRect(ImVec2(bx0, by0), ImVec2(bx1, by0 + bh), kIconLine, rr, 0, px(2));
     for (int side = 0; side < 2; ++side) {
-      const Member* m = ar::find(v.room, v.room.ring[v.room.doubles ? side * 2 : side]);
-      const float cx = x + w * (side ? .76f : .24f);
+      const Member* m = ar::find(r, r.ring[r.doubles ? side * 2 : side]);
+      // The sheet's ring: portrait (40), 5px, VS, 5px, portrait, centred in the box.
+      const float row = px(40 + 5 + 22 + 5 + 40), left = (bx0 + bx1) * .5f - row * .5f;
+      const float cx = side ? left + row - px(20) : left + px(20);
+      icon(cx - px(20), by0 + px(10), px(40), m, m && m->id == v.self);
       if (m) {
-        badge(cx, y + px(26), px(15), m->id == v.self ? kGold : kWhite, m->name);
-        text_center(cx, y + px(45), 11, kWhite, fit(m->name, 11, w * .45f));
-        text_center(cx, y + px(59), 9.5f, kRecord, record(*m));
+        text_center(nk, cx, by0 + px(54), fit(nk, m->name, (bx1 - bx0) * .45f));
+        const Ink rk{Face::Bold, 11, kRecordCol};
+        text_center(rk, cx, by0 + px(70), record(*m));
       }
     }
-    text_center(x + w * .5f, y + px(20), 13, kGold, "VS");
-    y += h + px(10);
+    const Ink vs{Face::Title, 13, kGold, true, 1};
+    text_center(vs, (bx0 + bx1) * .5f, by0 + px(22), "VS");
+    y = by0 + bh + px(18);
   } else {
+    y += px(10);
     tag_red(x, y, "IN THE RING");
-    y += px(19);
-    for (int s = 0; s < ar::ring_size(v.room); ++s) {
-      const Member* m = ar::find(v.room, v.room.ring[s]);
-      if (m) { slot_card(x, y, w, v, *m, m->id == v.self, false); y += px(36); }
+    y += px(17 + 2);
+    for (int s = 0; s < ar::ring_size(r); ++s) {
+      const Member* m = ar::find(r, r.ring[s]);
+      if (m) { y += px(6); card_row(x, y, w, v, *m); y += px(34); }
     }
+    y += px(10);
   }
-  y = line_cards(x, y, w, v, v.room.line.size() < 2) + px(6);
-  y = watch_cards(x, y, w, v);
+  tag_gold(x, y, ring_box ? "THE LINE" : "NEXT UP");
+  y += px(17);
+  for (uint8_t id : r.line) {
+    const Member* m = ar::find(r, id);
+    if (!m) continue;
+    y += px(6);
+    if (ring_box) { slot_card(x, y, w, v, *m, id == v.self, r.asker == id); y += px(kSlotH); }
+    else { card_row(x, y, w, v, *m); y += px(34); }
+    if (y > y1 - px(200)) break;
+  }
+  if (r.line.empty()) { y += px(6); open_spot(x, y, w); y += px(kSlotH); }
+  bool any = false;
+  for (const Member& m : r.members) {
+    if (ar::role(r, m.id) != Role::Watching) continue;
+    if (!any) { y += px(ring_box ? 12 : 10); tag_grey(x, y, ring_box ? "STANDS" : "WATCHING"); y += px(17); any = true; }
+    y += px(6);
+    if (ring_box) { slot_card(x, y, w, v, m, m.id == v.self, r.asker == m.id); y += px(kSlotH); }
+    else { card_row(x, y, w, v, m); y += px(34); }
+    if (y > y1 - px(170)) break;
+  }
+  std::vector<std::pair<char, std::string>> items = {x_action(v), {'Y', "Rules"}, {'Z', "Add a friend's code"}};
   const int prompt = prompt_kind(v);
-  if (prompt) prompt_box(x, b.y1 - px(250), w, v, prompt);
-  auto items = action_hints(v);
-  items.insert(items.begin(), {'Z', "Add a friend's code"});
-  items.insert(items.begin(), {'Y', "Rules"});
-  status_line(x + px(2), x + w, b.y1 - px(12) - items.size() * px(17) - px(14), v);
-  bottom_hints(x + px(2), x + w, b.y1 - px(12), items);
+  if (prompt && g.focus) items = {{'A', "Choose"}};
+  if (g.focus) items.push_back({'B', "Close"});
+  float foot = legend(x, w, ring_box ? y1 : y1 - px(10), items);
+  foot = z_line(x, w, foot);
+  if (prompt) {
+    std::vector<std::string> l, o;
+    const float h = prompt_height(w, v, prompt, &l, &o);
+    prompt_box(x, foot - px(7) - h, w, v, prompt);
+  } else if (!v.status.empty()) {
+    const Ink dk{Face::Body, 11, kDimText};
+    text(dk, x, foot - px(8) - px(15), fit(dk, v.status, w));
+  }
 }
 
+// Split: who fights and the score on the left, who waits on the right.
 void draw_split(const Bars& b, const View& v) {
+  const Room& r = v.room;
   const float lw = b.lx1 - b.lx0, rw = b.rx1 - b.rx0, pad = px(8);
+  const float x = b.lx0 + pad, w = lw - pad * 2;
   float y = b.y0 + px(10);
-  const Member* host = ar::find(v.room, ar::owner(v.room));
-  text(b.lx0 + pad, y, 9.5f, kGold, (host ? host->name : std::string("ROOM")) + "'S ROOM", false);
-  y += px(11);
-  text(b.lx0 + pad, y, 14, kWhite, kModeNames[(int)v.room.mode]);
-  y += px(24);
-  tag_red(b.lx0 + pad, y, "IN THE RING");
-  y += px(19);
-  for (int s = 0; s < ar::ring_size(v.room); ++s) {
-    const Member* m = ar::find(v.room, v.room.ring[s]);
-    if (m) { slot_card(b.lx0 + pad, y, lw - pad * 2, v, *m, m->id == v.self, false); y += px(36); }
+  const Member* host = ar::find(r, ar::owner(r));
+  std::string caps = (host ? host->name : std::string("ROOM")) + "'S ROOM";
+  for (char& c : caps) c = (char)std::toupper((unsigned char)c);
+  y += mode_block(x, y, w, caps.c_str(), v) + px(12);
+  tag_red(x, y, "IN THE RING");
+  y += px(17);
+  for (int s = 0; s < ar::ring_size(r); ++s) {
+    const Member* m = ar::find(r, r.ring[s]);
+    if (m) { y += px(6); slot_card(x, y, w, v, *m, m->id == v.self, false, 36); y += px(48); }
   }
-  const Member* a = ar::find(v.room, v.room.ring[0]);
-  const Member* c = ar::find(v.room, v.room.ring[v.room.doubles ? 2 : 1]);
-  if (a && c) text_center(b.lx0 + lw * .5f, y + px(4), 24, kWhite, std::to_string(a->wins) + " - " + std::to_string(c->wins));
-  float ry = line_cards(b.rx0 + pad, b.y0 + px(10), rw - pad * 2, v, true) + px(8);
-  watch_cards(b.rx0 + pad, ry, rw - pad * 2, v);
+  const Member* a = ar::find(r, r.ring[0]);
+  const Member* c = ar::find(r, r.ring[r.doubles ? 2 : 1]);
+  if (a && c) {
+    const Ink sc{Face::Title, 28, kWhite, true, 2};
+    const Ink dash{Face::Title, 17, kGold, true, 2};
+    const std::string l = std::to_string(a->wins), rr = std::to_string(c->wins);
+    const float tw = text_w(sc, l) + px(6) + text_w(dash, "-") + px(6) + text_w(sc, rr);
+    float sx = x + w * .5f - tw * .5f;
+    const float sy = y + px(14);
+    text(sc, sx, line_top(sc, sy, 28), l); sx += text_w(sc, l) + px(6);
+    text(dash, sx, line_top(dash, sy, 28), "-"); sx += text_w(dash, "-") + px(6);
+    text(sc, sx, line_top(sc, sy, 28), rr);
+  }
+  float lfoot = legend(x, w, b.y1 - px(10), {{'Y', "Rules"}, {'Z', "Add a friend's code"}});
+  lfoot = z_line(x, w, lfoot);
+  if (!v.status.empty()) { const Ink dk{Face::Body, 11, kDimText}; text(dk, x, lfoot - px(8) - px(15), fit(dk, v.status, w)); }
+  // Right: the line, then the watchers.
+  const float rx = b.rx0 + pad, rwid = rw - pad * 2;
+  float ry = b.y0 + px(10);
+  tag_gold(rx, ry, "THE LINE");
+  ry += px(17);
+  for (uint8_t id : r.line) {
+    const Member* m = ar::find(r, id);
+    if (!m) continue;
+    ry += px(6);
+    slot_card(rx, ry, rwid, v, *m, id == v.self, r.asker == id);
+    ry += px(kSlotH);
+    if (ry > b.y1 - px(200)) break;
+  }
+  if (r.line.size() < 2) { ry += px(6); open_spot(rx, ry, rwid); ry += px(kSlotH); }
+  bool any = false;
+  for (const Member& m : r.members) {
+    if (ar::role(r, m.id) != Role::Watching) continue;
+    if (!any) { ry += px(14); tag_grey(rx, ry, "WATCHING"); ry += px(17); any = true; }
+    ry += px(6);
+    slot_card(rx, ry, rwid, v, m, m.id == v.self, r.asker == m.id);
+    ry += px(kSlotH);
+    if (ry > b.y1 - px(170)) break;
+  }
   const int prompt = prompt_kind(v);
-  if (prompt) prompt_box(b.rx0 + pad, b.y1 - px(250), rw - pad * 2, v, prompt);
-  status_line(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8) - 2 * px(17) - px(14), v);
-  bottom_hints(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8), {{'Y', "Rules"}, {'Z', "Add a friend's code"}});
-  bottom_hints(b.rx0 + pad, b.rx1 - pad, b.y1 - px(8), action_hints(v));
+  std::vector<std::pair<char, std::string>> items = {x_action(v)};
+  if (prompt && g.focus) items = {{'A', "Choose"}};
+  if (g.focus) items.push_back({'B', "Close"});
+  const float rfoot = legend(rx, rwid, b.y1 - px(10), items);
+  if (prompt) {
+    std::vector<std::string> l, o;
+    const float h = prompt_height(rwid, v, prompt, &l, &o);
+    prompt_box(rx, rfoot - px(7) - h, rwid, v, prompt);
+  }
 }
 
 void draw_not_in_room(const Bars& b) {
-  // Not in a room: a small tab at the right edge until the player opens it (no clutter for anyone
-  // who never uses rooms).
-  if (!g.focus) {
-    const float tw = px(30), th = px(64), x = b.rx1 - tw - px(4), y = b.y0 + (b.y1 - b.y0) * .42f;
-    dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + tw, y + th), IM_COL32(26, 33, 51, 200), px(5));
-    dl()->AddRect(ImVec2(x, y), ImVec2(x + tw, y + th), IM_COL32(154, 166, 192, 160), px(5));
-    text_center(x + tw * .5f, y + px(6), 8.5f, kGold, "ARE");
-    text_center(x + tw * .5f, y + px(17), 8.5f, kGold, "NA");
-    button_glyph(x + tw * .5f - px(7), y + th - px(22), 'C');
+  // Not in a room: a small tab at the right edge (no clutter for anyone who never uses rooms).
+  // The hand pushed into the right edge opens it: "Add a friend's code" starts a room.
+  if (g.page != Page::None) return;
+  const bool open = g.side == 2;
+  const float tw = open ? b.rx1 - b.rx0 - px(16) : px(34), th = open ? px(86) : px(78);
+  const float x = b.rx1 - tw - px(open ? 8 : 4), y = b.y0 + (b.y1 - b.y0) * .42f;
+  steel(x, y, x + tw, y + th, open ? kGold : IM_COL32(154, 166, 192, 200));
+  if (!open) {
+    const Ink k{Face::Title, 8.5f, kGold, true, 1};
+    text_center(k, x + tw * .5f, y + px(8), "ARE");
+    text_center(k, x + tw * .5f, y + px(20), "NA");
+    hot(x, y, y + th, Do::AddCode);   // so the hand lands on it
     return;
   }
-  const float x = b.rx0 + px(6), w = b.rx1 - b.rx0 - px(12);
-  const float y = b.y0 + px(12), h = px(92);
-  dl()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), kSteel, px(6));
-  dl()->AddRect(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(154, 166, 192, 255), px(6), 0, px(1.5f));
-  text(x + px(7), y + px(6), 9.5f, kGold, "ARENA", false);
-  text(x + px(7), y + px(18), 11.5f, kWhite, fit("Friends watch and", 11.5f, w - px(12)));
-  text(x + px(7), y + px(32), 11.5f, kWhite, fit("rotate in", 11.5f, w - px(12)));
-  hint(x + px(6), y + px(52), 'Z', "Add a friend's code", w - px(10));
-  hint(x + px(6), y + px(70), 'B', "Close", w - px(10));
+  const Ink sm{Face::Body, 10, kGold, false, 0, false, 1.5f};
+  const Ink md{Face::Title, 13, kWhite, true, 2};
+  text(sm, x + px(8), y + px(8), "ARENA");
+  text(md, x + px(8), y + px(20), "PLAY WITH FRIENDS");
+  hint(x + px(10), y + th - px(26), 'Z', "Add a friend's code", tw - px(16));
 }
 
-void draw_tabs(const Bars& b, const View& v, bool* hovered) {
-  const ImVec2 mouse = ImGui::GetIO().MousePos;
-  const float tw = px(24), th = px(88);
-  const float lx = b.lx0, rx = b.rx1 - tw, ty = b.y0 + (b.y1 - b.y0) * .3f;
-  *hovered = (mouse.x >= lx && mouse.x <= lx + tw * 3 && mouse.y >= ty && mouse.y <= ty + th) ||
-             (mouse.x >= rx - tw * 2 && mouse.x <= rx + tw && mouse.y >= ty && mouse.y <= ty + th);
+void draw_tabs(const Bars& b, const View& v, const float alpha[2]) {
+  // Hidden: a slim red and blue edge where each panel waits; it slides out when the hand comes.
+  const float tw = px(10), th = px(96), ty = b.y0 + (b.y1 - b.y0) * .3f;
   for (int side = 0; side < 2; ++side) {
-    const float x = side ? rx : lx;
-    dl()->AddRectFilled(ImVec2(x, ty), ImVec2(x + tw, ty + th), side ? kBlue : kRed, px(5));
-    // Left: the room; right: how many are in it.
-    text_center(x + tw * .5f, ty + px(8), 12, kWhite, side ? std::to_string(v.room.members.size()) : "R");
-    text_center(x + tw * .5f, ty + px(26), 9, kWhite, side ? "IN" : "OOM");
-    button_glyph(x + tw * .5f - px(7), ty + th - px(20), 'C');
+    const float a = alpha[side];
+    if (a <= 0.01f) continue;
+    const float x = side ? b.rx1 - tw : b.lx0;
+    const int start = dl()->VtxBuffer.Size;
+    dl()->AddRectFilled(ImVec2(x, ty), ImVec2(x + tw, ty + th), kWhite, px(4));
+    const ImU32 top = side ? IM_COL32(58, 86, 216, (int)(230 * a)) : IM_COL32(216, 52, 60, (int)(230 * a));
+    const ImU32 bottom = side ? IM_COL32(30, 44, 110, (int)(230 * a)) : IM_COL32(110, 26, 30, (int)(230 * a));
+    shade(start, ty, ty + th, top, bottom);
+    (void)v;
   }
 }
 
 }  // namespace
 
-bool wants_capture() { return g.focus; }
+void set_fonts(const Fonts& fonts) { g_fonts = fonts; }
+bool wants_capture() { return g.side != 0 || g.page != Page::None; }
+uint16_t withheld_buttons() { return 0; }
 
 void frame(const Frame& f) {
-  if (yougame::active()) return;   // rooms are a Slippi Direct feature; YouGame has its own rooms
+  if (yougame::active()) { leave_panel(); g.page = Page::None; return; }   // rooms are a Slippi Direct feature
   load();
   const View v = ar::view();
   const bool visible = f.on_online_menus && !(v.active && v.room.in_game && ar::role(v.room, v.self) == Role::Fighter);
   if (!visible) {
     g.was_visible = false;
-    g.focus = false;
+    leave_panel();
+    g.page = Page::None;
     g.prev = f.buttons;
+    g_last_items.clear();
     return;
   }
-  if (!g.was_visible) { g.was_visible = true; g.shown_at = f.time; }
-  handle_input(f, v);
+  if (!g.was_visible) { g.was_visible = true; g.shown_at = f.time; g.pop[0] = g.pop[1] = 0; }
   // The bars beside the picture; a picture that fills the window gets panels over its edges.
   Bars b;
   float bar = f.game_x0;
   const bool overlay = bar < 90.0f;
   if (overlay) bar = std::min(f.display_w * 0.17f, 220.0f);
   g_k = std::clamp(bar / 152.0f, 0.6f, 3.0f);
-  b.lx0 = overlay ? 0 : 0; b.lx1 = bar;
+  g_mid = f.display_w * .5f;
+  g_bar_y0 = f.game_y0; g_bar_y1 = f.game_y1;
+  b.lx0 = 0; b.lx1 = bar;
   b.rx0 = f.display_w - bar; b.rx1 = f.display_w;
   b.y0 = f.game_y0; b.y1 = f.game_y1;
+  handle_input(f, v);
+  g.focus = g.side != 0 || g.page != Page::None;
+  // Hidden: each panel slides out when the hand comes near its side (or is in it), and back in a
+  // moment after it leaves; the mouse over an edge does the same.
+  const double dt = std::clamp(f.time - g.last_time, 0.0, 0.1);
+  g.last_time = f.time;
+  float hand_x = 0, hand_y = 0;
+  const bool have_hand = ar::css_hand(&hand_x, &hand_y);
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  for (int s = 0; s < 2; ++s) {
+    const bool near = g.side == s + 1 || (g.page != Page::None && s == 1) ||
+                      (have_hand && (s == 0 ? hand_x <= -30.0f : hand_x >= 21.0f)) ||
+                      (s == 0 ? mouse.x >= 0 && mouse.x < bar : mouse.x > f.display_w - bar && mouse.x <= f.display_w);
+    if (near) g.pop_seen[s] = f.time;
+    const bool out = f.time - g.pop_seen[s] < 0.6;
+    g.pop[s] = std::clamp(g.pop[s] + (float)(dt / 0.28) * (out ? 1.f : -1.f), 0.f, 1.f);
+  }
   if (overlay) {
     dl()->AddRectFilled(ImVec2(b.lx0, b.y0), ImVec2(b.lx1, b.y1), IM_COL32(0, 0, 0, 150));
     dl()->AddRectFilled(ImVec2(b.rx0, b.y0), ImVec2(b.rx1, b.y1), IM_COL32(0, 0, 0, 150));
   }
-  // Slide in from the sides: ease out over a third of a second.
-  const double t = std::clamp((f.time - g.shown_at) / 0.35, 0.0, 1.0);
-  const float slide = (float)(1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t));
-  const float shift = (1.0f - slide) * (bar + px(10));
+  // Slide in from the sides as the character select comes back: ease out over a third of a second.
+  auto ease = [](double t) { t = std::clamp(t, 0.0, 1.0); return (float)(1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)); };
+  const float enter = ease((f.time - g.shown_at) / 0.35);
+  float shown[2] = {enter, enter};
+  if (g.tabs && v.active) {
+    for (int s = 0; s < 2; ++s) shown[s] = std::min(shown[s], ease(g.pop[s]) < 1e-3f ? 0.f : ease(g.pop[s]));
+    const float tab_alpha[2] = {1.f - ease(g.pop[0]), 1.f - ease(g.pop[1])};
+    draw_tabs(b, v, tab_alpha);
+  }
+  g_items.clear();
   ImDrawList* draw = dl();
   const int start = draw->VtxBuffer.Size;
   if (!v.active) {
     draw_not_in_room(b);
-  } else {
-    bool hovered = false;
-    if (g.tabs && !g.focus) draw_tabs(b, v, &hovered);
-    if (!g.tabs || g.focus || hovered) {
-      switch (g.look) {
-        case Look::Combined: draw_combined(b, v, false); break;
-        case Look::Corners: draw_combined(b, v, true); break;
-        case Look::Card: draw_card(b, v, false); break;
-        case Look::Ring: draw_card(b, v, true); break;
-        case Look::Split: draw_split(b, v); break;
-      }
+  } else if (!g.tabs || shown[0] > 0.f || shown[1] > 0.f) {
+    switch (g.look) {
+      case Look::Combined: draw_combined(b, v, false); break;
+      case Look::Corners: draw_combined(b, v, true); break;
+      case Look::Card: draw_card(b, v, false); break;
+      case Look::Ring: draw_card(b, v, true); break;
+      case Look::Split: draw_split(b, v); break;
     }
   }
-  if (g.page != Page::None) page_box(b.rx0 + px(6), b.y0 + px(10), b.rx1 - b.rx0 - px(12), v);
-  // Move what was just drawn: the left half to the left, the right half to the right.
-  if (shift > 0.5f)
+  if (g.page != Page::None) page_box(b.rx0 + px(8), b.y0 + px(10), b.rx1 - b.rx0 - px(16), v);
+  // Move what was just drawn: the left half to the left, the right half to the right, each by how
+  // far its panel is from fully in.
+  const float shift[2] = {(1.0f - shown[0]) * (bar + px(10)), (1.0f - shown[1]) * (bar + px(10))};
+  if (shift[0] > 0.5f || shift[1] > 0.5f)
     for (int i = start; i < draw->VtxBuffer.Size; ++i) {
       ImDrawVert& vert = draw->VtxBuffer[i];
-      vert.pos.x += vert.pos.x < f.display_w * .5f ? -shift : shift;
+      if (vert.pos.x < g_mid) vert.pos.x -= shift[0];
+      else vert.pos.x += shift[1];
     }
+  // The buttons drawn this frame are the ones the hand moves over next frame.
+  g_last_items.swap(g_items);
+  g_items.clear();
 }
 
 }  // namespace arena_panel

@@ -1,7 +1,9 @@
 // The arena room in the black bars beside the game picture, on the online character select
-// (hle/slippi_arena.h). Controller only: the C-stick opens the room menu, which then takes the
-// buttons (X ask / give up / get in line, Y rules, Z add a friend, R doubles, A answer, B close)
-// while the game keeps X, Y, L and R for costumes and skins the rest of the time.
+// (hle/slippi_arena.h). Controller only: a tap of Z opens the room menu, which then takes the
+// buttons (X give up my spot / get in line / just watch, Y rules, Z add a friend's code, A ask or
+// answer, R doubles, B close) while the game keeps X, Y, L and R for costumes and skins and the
+// C-stick for its camera. Z is the room's in a room (the room runs the search there, so the game's
+// "Z to cancel" has nothing to do) and while no search is running; a plain Direct search keeps it.
 //
 // Looks: the combined one (corners on top, the line and the stands under them) is the default;
 // Card, Split, Corners and Ring are the others. Every look slides in from the sides when the
@@ -9,6 +11,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include <cstdint>
+
+struct ImFont;
 
 namespace arena_panel {
 
@@ -24,9 +28,16 @@ struct Frame {
   bool on_online_menus = false;  // the online character select (or waiting there)
 };
 
+// The panel's lettering, loaded with the overlay's fonts (any may be null: ImGui's current font).
+struct Fonts { ImFont* title = nullptr; ImFont* black = nullptr; ImFont* bold = nullptr; ImFont* body = nullptr; };
+void set_fonts(const Fonts& fonts);
+
 // UI thread, once per overlay frame, inside ImGui. Draws nothing outside the online menus.
 void frame(const Frame& f);
 // True while the room menu has the controller (the game must not see those presses).
 bool wants_capture();
+// GameCube buttons the game must not see even while the menu is shut: Z, which opens the room
+// (in a room the room runs the search, so the game's "Z to cancel" has nothing to do there).
+uint16_t withheld_buttons();
 
 }  // namespace arena_panel

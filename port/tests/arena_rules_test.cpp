@@ -433,6 +433,22 @@ TEST(wire_round_trip) {
   bytes = encode(d);
   CHECK(decode(bytes.data(), bytes.size(), back) && back.doubles && same(d, back));
 }
+TEST(character_picks_travel_with_the_room) {
+  Room r = room_of(3);
+  CHECK(r.members[1].character == kNone);
+  const uint32_t rev = r.rev;
+  CHECK(set_character(r, 1, 8, 2));              // Mario, third costume
+  CHECK(r.rev == rev + 1);
+  CHECK(!set_character(r, 1, 8, 2));             // the same pick again changes nothing
+  CHECK(!set_character(r, 1, 200, 0));           // no such character
+  CHECK(!set_character(r, 9, 8, 0));             // no such member
+  CHECK(set_character(r, 1, kNone, 0));          // picked nothing again
+  set_character(r, 2, 25, 4);
+  const std::vector<uint8_t> bytes = encode(r);
+  Room back;
+  CHECK(decode(bytes.data(), bytes.size(), back));
+  CHECK(back.members[2].character == 25 && back.members[2].costume == 4 && back.members[1].character == kNone);
+}
 TEST(wire_refuses_every_truncation_and_garbage) {
   Room r = room_of(5);
   const std::vector<uint8_t> bytes = encode(r);
