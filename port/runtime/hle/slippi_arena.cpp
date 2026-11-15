@@ -5,6 +5,7 @@
 #include "slippi_net.h"
 #include "slippi_online.h"
 #include "host.h"
+#include "yougame_link.h"
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -74,7 +75,19 @@ std::vector<uint8_t> g_table;             // its command table event, for a send
 bool g_wait_room = false;                 // a member's game ended: wait for the room to say what is next
 void* g_yield_to = nullptr;               // this room joins the room at the other end of that link
 uint64_t g_next_match_ms = 0, g_next_pings_ms = 0;
-std::string g_pair_code;                   // the opponent this game last searched for
+uint64_t g_test_wait_since = 0;
+// The game being passed on to the room, and who was in the ring when it began. The room moves on
+// at its Game End report, which can arrive before the feed's last messages: those still go to the
+// members who were watching that game, not to whoever is watching now.
+uint32_t g_relay_tag = 0;
+uint8_t g_relay_from = kNone;
+std::array<uint8_t, kRingMax> g_relay_ring{kNone, kNone, kNone, kNone};
+std::array<uint8_t, kRingMax> g_send_ring{kNone, kNone, kNone, kNone};   // this member's own game, as it began
+bool in_ring_of(const std::array<uint8_t, kRingMax>& ring, uint8_t id) {
+  for (uint8_t r : ring) if (r == id) return true;
+  return false;
+}            // test rooms: when this member began waiting for its viewer
+std::string g_pair_code;                  // the opponent this game last searched for
 std::array<int, kMaxMembers> g_ping{};
 std::string g_status;
 bool g_live = false;
@@ -246,12 +259,21 @@ void host_message(Link& from, const std::vector<uint8_t>& m) {
       return;
     }
     case kFeed: {
-      // From the first player only; passed on to everyone watching (not the fighters), and kept
-      // here when the host watches.
-      if (from.id == kNone || from.id != g_room.ring[0]) return;
+      // A game starts from the first player only; the rest of it comes from the same player under
+      // the same tag even after the room has moved on. Passed on to everyone who was not playing
+      // in it, and kept here when the host was watching.
+      if (from.id == kNone || m.size() < 6) return;
+      const uint32_t tag = get32(&m[2]);
+      if (m[1] == feed::kStart && from.id == g_room.ring[0]) {
+        g_relay_tag = tag;
+        g_relay_from = from.id;
+        std::copy(std::begin(g_room.ring), std::end(g_room.ring), g_relay_ring.begin());
+      } else if (from.id != g_relay_from || tag != g_relay_tag) {
+        return;
+      }
       for (Link& l : g_links)
-        if (&l != &from && l.id != kNone && ring_slot(g_room, l.id) < 0) send(l, m, true);
-      if (ring_slot(g_room, g_self) < 0) watch_feed(m.data() + 1, m.size() - 1);
+        if (&l != &from && l.id != kNone && !in_ring_of(g_relay_ring, l.id)) send(l, m, true);
+      if (!in_ring_of(g_relay_ring, g_self)) watch_feed(m.data() + 1, m.size() - 1);
       return;
     }
     default:
@@ -260,6 +282,11 @@ void host_message(Link& from, const std::vector<uint8_t>& m) {
 }
 
 // ---- watching (any member who is not fighting) ----
+bool viewer_running() {
+  DWORD code = 0;
+  return g_viewer && GetExitCodeProcess(g_viewer, &code) && code == STILL_ACTIVE;
+}
+
 void close_viewer() {
   if (!g_viewer) return;
   DWORD code = 0;
@@ -363,6 +390,7 @@ void open_room() {
 }
 
 void do_act(const Pending& p) {
+  if (yougame::active() && !g_test.on) return;   // not in YouGame mode
   if (p.a == Act::OpenRoom) {
     if (!g_active && !g_code.empty()) open_room();
     return;
@@ -588,6 +616,13 @@ void steer_match() {
     return;
   }
   if (!online::in_online_menus()) { g_status = "Go to Direct to play " + t.label; return; }
+  if (g_test.on && viewer_running()) {
+    // Test rooms lock in at once. A player picking a character gives their viewer window time to
+    // show the end of the game it was playing, so a test member waits for it too (20 s at most).
+    if (!g_test_wait_since) g_test_wait_since = now_ms();
+    if (now_ms() - g_test_wait_since < 20000) { g_status = "Watching the end of the last game"; return; }
+  }
+  g_test_wait_since = 0;
   if (g_test.on) {
     // Test rooms: the players find each other on loopback, in ring-slot order (slot 0 decides).
     auto& lp = Matchmaking::local_peer;
@@ -677,8 +712,7 @@ void publish_view() {
   v.self = g_self;
   v.room = g_room;
   v.ping_ms = g_ping;
-  DWORD code = 0;
-  v.watching_live = g_viewer && GetExitCodeProcess(g_viewer, &code) && code == STILL_ACTIVE;
+  v.watching_live = viewer_running();
   v.status = g_status;
   std::lock_guard<std::mutex> lk(g_mutex);
   g_view = std::move(v);
@@ -750,11 +784,12 @@ void recording_event(const uint8_t* data, uint32_t size) {
     g_sending = g_my_online && g_room.ring[0] == g_self && watchers;
     if (g_sending) {
       g_sender = feed::Sender{};
+      std::copy(std::begin(g_room.ring), std::end(g_room.ring), g_send_ring.begin());
       g_sender.set_out([](const uint8_t* d, uint32_t len) {
         std::vector<uint8_t> m = {kFeed};
         m.insert(m.end(), d, d + len);
         if (g_hosting) {
-          for (Link& l : g_links) if (l.id != kNone && ring_slot(g_room, l.id) < 0) send(l, m, true);
+          for (Link& l : g_links) if (l.id != kNone && !in_ring_of(g_send_ring, l.id)) send(l, m, true);
         } else {
           send_to_host(m, true);
         }

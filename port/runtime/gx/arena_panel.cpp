@@ -4,6 +4,7 @@
 #include "host.h"
 #include "slippi_arena.h"
 #include "slippi_online.h"
+#include "yougame_link.h"
 #include "imgui.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -107,7 +108,7 @@ std::string fit(const std::string& s, float size, float w) {
   return t + ".";
 }
 
-// The game's slanted tag (NEXT UP, WATCHING ...).
+// The game's slanted tag (NEXT UP, JUST WATCHING ...).
 float tag(float x, float y, const char* label, ImU32 top, ImU32 bottom, ImU32 ink = IM_COL32(35, 23, 0, 255)) {
   const float h = px(15), w = text_w(10.5f, label) + px(22);
   const ImVec2 pts[4] = {ImVec2(x, y), ImVec2(x + w, y), ImVec2(x + w - px(8), y + h), ImVec2(x, y + h)};
@@ -222,7 +223,7 @@ float line_cards(float x, float y, float w, const View& v, bool with_open_spot) 
   return y;
 }
 float watch_cards(float x, float y, float w, const View& v) {
-  tag_grey(x, y, "WATCHING");
+  tag_grey(x, y, "JUST WATCHING");
   y += px(19);
   bool any = false;
   for (const Member& m : v.room.members) {
@@ -437,6 +438,11 @@ void handle_input(const Frame& f, const View& v) {
 // ---- the looks ----
 struct Bars { float lx0, lx1, rx0, rx1, y0, y1; };
 
+// What the room is doing for this member ("Connecting to P2", "Watching"), one line in a bar.
+void status_line(float x0, float x1, float y, const View& v) {
+  if (!v.status.empty()) text(x0, y, 9.5f, kDim, fit(v.status, 9.5f, x1 - x0), false);
+}
+
 void bottom_hints(float x0, float x1, float y, const std::vector<std::pair<char, std::string>>& items) {
   float yy = y - items.size() * px(17);
   for (const auto& it : items) { hint(x0, yy, it.first, it.second, x1 - x0); yy += px(17); }
@@ -471,18 +477,22 @@ void draw_combined(const Bars& b, const View& v, bool corners_only) {
     tag_gold(b.lx0 + pad, y, "NEXT UP");
     y += px(19);
     for (uint8_t id : v.room.line) { const Member* m = ar::find(v.room, id); if (m) { text(b.lx0 + pad, y, 11.5f, kWhite, fit(m->name, 11.5f, lw - pad * 2)); y += px(15); } }
+    if (v.room.line.empty()) text(b.lx0 + pad, y, 10, kDim, "open spot");
     y = ry + px(8);
-    tag_grey(b.rx0 + pad, y, "WATCHING");
+    tag_grey(b.rx0 + pad, y, "JUST WATCHING");
     y += px(19);
-    for (const Member& m : v.room.members) if (ar::role(v.room, m.id) == Role::Watching) { text(b.rx0 + pad, y, 11.5f, kWhite, fit(m.name, 11.5f, rw - pad * 2)); y += px(15); }
+    bool any = false;
+    for (const Member& m : v.room.members) if (ar::role(v.room, m.id) == Role::Watching) { text(b.rx0 + pad, y, 11.5f, kWhite, fit(m.name, 11.5f, rw - pad * 2)); y += px(15); any = true; }
+    if (!any) text(b.rx0 + pad, y, 10, kDim, "nobody");
   }
   const int prompt = prompt_kind(v);
   const int my_slot = ar::ring_slot(v.room, v.self);
   const bool left_side = my_slot == 0 || (my_slot == 1 && v.room.doubles);
   if (prompt) prompt_box(left_side ? b.lx0 + pad : b.rx0 + pad, b.y1 - px(170), (left_side ? lw : rw) - pad * 2, v, prompt);
   bottom_hints(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8), {{'Y', "Rules"}, {'Z', "Add a friend's code"}});
-  text(b.rx0 + pad, b.y1 - px(8) - action_hints(v).size() * px(17) - px(14), 9.5f, kGold,
-       std::string(v.room.doubles ? "DOUBLES  " : "") + kModeNames[(int)v.room.mode], false);
+  const float mode_y = b.y1 - px(8) - action_hints(v).size() * px(17) - px(14);
+  text(b.rx0 + pad, mode_y, 9.5f, kGold, std::string(v.room.doubles ? "DOUBLES  " : "") + kModeNames[(int)v.room.mode], false);
+  status_line(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8) - 2 * px(17) - px(14), v);
   bottom_hints(b.rx0 + pad, b.rx1 - pad, b.y1 - px(8), action_hints(v));
 }
 
@@ -527,6 +537,7 @@ void draw_card(const Bars& b, const View& v, bool ring_box) {
   auto items = action_hints(v);
   items.insert(items.begin(), {'Z', "Add a friend's code"});
   items.insert(items.begin(), {'Y', "Rules"});
+  status_line(x + px(2), x + w, b.y1 - px(12) - items.size() * px(17) - px(14), v);
   bottom_hints(x + px(2), x + w, b.y1 - px(12), items);
 }
 
@@ -551,6 +562,7 @@ void draw_split(const Bars& b, const View& v) {
   watch_cards(b.rx0 + pad, ry, rw - pad * 2, v);
   const int prompt = prompt_kind(v);
   if (prompt) prompt_box(b.rx0 + pad, b.y1 - px(250), rw - pad * 2, v, prompt);
+  status_line(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8) - 2 * px(17) - px(14), v);
   bottom_hints(b.lx0 + pad, b.lx1 - pad, b.y1 - px(8), {{'Y', "Rules"}, {'Z', "Add a friend's code"}});
   bottom_hints(b.rx0 + pad, b.rx1 - pad, b.y1 - px(8), action_hints(v));
 }
@@ -599,6 +611,7 @@ void draw_tabs(const Bars& b, const View& v, bool* hovered) {
 bool wants_capture() { return g.focus; }
 
 void frame(const Frame& f) {
+  if (yougame::active()) return;   // rooms are a Slippi Direct feature; YouGame has its own rooms
   load();
   const View v = ar::view();
   const bool visible = f.on_online_menus && !(v.active && v.room.in_game && ar::role(v.room, v.self) == Role::Fighter);
@@ -643,8 +656,6 @@ void frame(const Frame& f) {
         case Look::Split: draw_split(b, v); break;
       }
     }
-    if (!v.status.empty())
-      text_center(f.display_w * .5f, b.y1 - px(16), 10.5f, kDim, v.status);
   }
   if (g.page != Page::None) page_box(b.rx0 + px(6), b.y0 + px(10), b.rx1 - b.rx0 - px(12), v);
   // Move what was just drawn: the left half to the left, the right half to the right.

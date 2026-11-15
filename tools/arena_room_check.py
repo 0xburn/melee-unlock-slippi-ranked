@@ -337,9 +337,17 @@ def check(args, out):
             if missing or differ or first != min(pre):
                 problems.append(line)
     print(f"{lived} live recordings compared")
-    if viewed == 0 and lived == 0:
+    # Viewers that caught up with the live game and held for a frame (their logs say so).
+    for i in range(args.players):
+        for lg in sorted((out / f"m{i}" / "user" / "arena").glob("live-*.log")):
+            text = lg.read_text(errors="replace")
+            held = text.count("replay: waiting for frame")
+            if held:
+                print(f"    m{i} viewer of {lg.stem}: held {held} time(s) for a frame still on its way")
+    watchers = args.players > 2   # two members both fight every game: nobody watches
+    if watchers and viewed == 0 and lived == 0:
         problems.append("no viewer or live recording to compare")
-    if not args.no_viewer and viewed == 0:
+    if watchers and not args.no_viewer and viewed == 0:
         problems.append("no viewer recording to compare")
     (out / "result.json").write_text(json.dumps({"problems": problems, "ended": ended, "fought": sorted(fought),
                                                  "viewed": viewed}, indent=2))
