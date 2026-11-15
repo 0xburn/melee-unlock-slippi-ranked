@@ -32,6 +32,13 @@ constexpr size_t kHeader = 5;
 
 }  // namespace
 
+uint32_t game_tag(const uint8_t* start, size_t size) {
+  uint32_t h = 2166136261u;
+  const size_t n = size < 0x1A0 ? size : 0x1A0;   // the game's settings and seed; names after differ per side
+  for (size_t i = 0; i < n; ++i) { h ^= start[i]; h *= 16777619u; }
+  return h ? h : 1;
+}
+
 // ---------------------------------------------------------------- sender
 void Sender::send(const std::vector<uint8_t>& message) {
   stats_.bytes += message.size();
@@ -72,6 +79,7 @@ void Sender::event(const uint8_t* data, uint32_t size) {
       break;
     }
     case 0x36: {   // Game Start: a new match
+      tag_ = fixed_tag_ ? fixed_tag_ : game_tag(payload, length);
       started_ = true;
       open_ = false;
       waiting_.clear();
@@ -165,6 +173,7 @@ void Receiver::close() {
 bool Receiver::message(int source, const uint8_t* data, uint32_t size) {
   if (!data || size < kHeader) return fail("message too short");
   if (!file_.is_open() && !ended_) return fail("no live recording is open");
+  if (tag_ == 0 && data[0] == kStart) tag_ = get32(data + 1);
   if (get32(data + 1) != tag_) return true;   // another game's
   const uint8_t* p = data + kHeader;
   const uint32_t n = size - uint32_t(kHeader);

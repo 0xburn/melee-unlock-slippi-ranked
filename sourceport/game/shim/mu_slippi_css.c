@@ -168,6 +168,22 @@ void mu_slippi_css_poll(void)
     dt.msrb = *mu_slippi_match_state();
 }
 
+/* An arena room (host slippi_arena) counts the new pairings it starts; 0 outside a room. */
+int mu_online_abi_command(unsigned int command, const unsigned char* payload, unsigned int size,
+                          unsigned char* response, unsigned int capacity, unsigned int* response_size);
+#define CMD_ARENA_PAIRING 0xED
+static u32 arena_pairing(int* test_room)
+{
+    static unsigned char reply[4096];   /* the host's minimum response capacity */
+    unsigned int got = 0;
+    *test_room = 0;
+    if (mu_online_abi_command(CMD_ARENA_PAIRING, NULL, 0, reply, sizeof reply, &got) != 0 || got < 4) {
+        return 0;
+    }
+    *test_room = got >= 5 && (reply[4] & 1) != 0;   /* the host locked in a random stage itself */
+    return (u32) reply[0] << 24 | (u32) reply[1] << 16 | (u32) reply[2] << 8 | reply[3];
+}
+
 /* ---- HandleInputsOnCSS helpers ---- */
 
 /* FN_TX_LOCK_IN and FN_TX_FIND_MATCH are shared with name entry and the SSS (mu_slippi_sss.c),
@@ -289,6 +305,26 @@ int mu_slippi_css_inputs(unsigned int trigger)
         }
     } else {
         dt.z_hold_timer = 0;
+    }
+
+    /* An arena room's new pairing: two friends the room put together have no previous winner,
+     * so the first game's stage goes to player 1, as in a peer-to-peer session. A rematch of the
+     * same pair keeps the usual winner and loser. */
+    if ((st->mode == MU_SLP_MODE_DIRECT || st->mode == MU_SLP_MODE_TEAMS) &&
+        m->connection_state == MU_SLP_MM_CONNECTION_SUCCESS) {
+        static u32 arena_seen;
+        int test_room = 0;
+        const u32 pairing = arena_pairing(&test_room);
+        if (pairing != 0 && pairing != arena_seen) {
+            arena_seen = pairing;
+            st->is_winner = m->local_index == 0 ? MU_SLP_WINNER_LOST : MU_SLP_WINNER_WON;
+            st->chose_stage = 0;
+            OSReport("arena: new pairing %u, local index %d, %s the first stage\n", (unsigned) pairing, (int) m->local_index,
+                     m->local_index == 0 ? "picks" : "waits for");
+        }
+        if (test_room && st->is_winner == MU_SLP_WINNER_LOST) {
+            st->chose_stage = 1;   /* a test room: nobody is there to pick, the host's random stage stands */
+        }
     }
 
     /* A peer-to-peer session's first game: the stage is picked, never drawn. The player in slot 0

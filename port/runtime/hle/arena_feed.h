@@ -31,13 +31,20 @@ constexpr int32_t kFirstFrame = -123;
 
 enum Kind : uint8_t { kStart = 1, kFrame = 2, kEnd = 3 };
 
+// A game's tag: a hash of its Game Start payload's settings and seed (the first 0x1A0 bytes), which
+// both fighters' recordings share (the player names after them are each side's own). Never 0.
+uint32_t game_tag(const uint8_t* start, size_t size);
+
 class Sender {
  public:
   // One feed message, whole. Called from event() and stop().
   using Out = std::function<void(const uint8_t* data, uint32_t size)>;
   void set_out(Out out) { out_ = std::move(out); }
-  // Stamped on every message, so a late message of the last game is not taken for this one.
-  void set_game_tag(uint32_t tag) { tag_ = tag; }
+  // Stamped on every message, so a late message of the last game is not taken for this one. 0 (the
+  // default): each game's own game_tag.
+  void set_game_tag(uint32_t tag) { fixed_tag_ = tag; tag_ = tag; }
+  uint32_t tag() const { return tag_; }
+  bool in_game() const { return started_; }
   // Every frame's post-frame events too (about twice the upload). Off: the first frame's only.
   void set_full_post(bool on) { full_post_ = on; }
   // One recording event as the sink gives it: the command byte, then its payload. The command
@@ -59,7 +66,7 @@ class Sender {
   void send(const std::vector<uint8_t>& message);
   void release(int32_t through);
   Out out_;
-  uint32_t tag_ = 0;
+  uint32_t tag_ = 0, fixed_tag_ = 0;
   bool full_post_ = false;
   bool started_ = false;
   uint16_t pre_size_ = kPreFrameSize, post_size_ = kPostFrameSize;
@@ -75,7 +82,8 @@ class Sender {
 class Receiver {
  public:
   // The live recording goes to `path` (UTF-8). `codes` is this build's own code list for an online
-  // recording: the feed does not carry it. Messages with another tag are ignored.
+  // recording: the feed does not carry it. Messages with another tag are ignored; tag 0 takes the
+  // first start's.
   bool open(const std::string& path, std::vector<uint8_t> codes, uint32_t game_tag);
   // One feed message from fighter `source`. False when the message is malformed or does not fit
   // this build (nothing is written for it).
@@ -85,6 +93,7 @@ class Receiver {
   void close();
 
   bool started() const { return started_; }
+  uint32_t tag() const { return tag_; }
   bool ended() const { return ended_; }
   int32_t next_frame() const { return next_; }   // the first frame not written yet
   const std::string& error() const { return error_; }

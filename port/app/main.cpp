@@ -27,6 +27,9 @@
 #include "slippi_playback.h"
 #include "exi_slippi.h"
 #include "slippi_online.h"
+#ifndef MELEE_NO_SLIPPI
+#include "slippi_arena.h"
+#endif
 #include "slippi_net.h"
 #include "jukebox.h"
 #ifdef MELEE_SOURCE_PORT
@@ -1992,6 +1995,9 @@ static int melee_main(int argc, char** argv) {
       slippi::online::config().lobby_character = (int)character;
     }
     else if (a == "--lobby-status-file") slippi::online::config().lobby_status_file = next();
+    else if (a == "--arena-test") {   // a test arena room on loopback (hle/slippi_arena.h)
+      if (!slippi::arena::set_test(next())) { std::fprintf(stderr, "--arena-test <index>/<count>/<base port>[/<character>]\n"); return 2; }
+    }
     else if (a == "--online-delay") slippi::online::config().delay = std::atoi(next());
     else if (a == "--chat") { std::string v = next(); slippi::online::config().chat = v == "off" ? 2 : v == "direct" ? 1 : 0; }
     else if (a == "--netplay-port") slippi::Matchmaking::forced_port = (uint16_t)std::atoi(next());

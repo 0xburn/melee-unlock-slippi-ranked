@@ -218,6 +218,24 @@ int main() {
     remove_file(path);
   }
 
+  // 5. A game's tag: the two fighters' Game Start records differ in the player names (each side's
+  //    own view) but carry the same settings and seed; another game's seed gives another tag.
+  {
+    std::vector<uint8_t> a(0x2F8, 0), b2;
+    for (size_t i = 0; i < a.size(); ++i) a[i] = uint8_t(i * 7);
+    b2 = a;
+    for (size_t i = 0x1A4; i < 0x2F0; ++i) b2[i] ^= 0x5A;   // names and codes as the other side has them
+    CHECK(feed::game_tag(a.data(), a.size()) == feed::game_tag(b2.data(), b2.size()));
+    std::vector<uint8_t> other = a;
+    other[0x13D] ^= 1;                                     // another seed
+    CHECK(feed::game_tag(a.data(), a.size()) != feed::game_tag(other.data(), other.size()));
+    CHECK(feed::game_tag(a.data(), 0) != 0);               // never 0
+    // A Sender stamps each game with its own tag unless told one.
+    Fighter f(0);
+    f.start();
+    CHECK(f.sender.tag() != 0 && f.sender.in_game());
+  }
+
   // The upload a fighter pays: bytes per second of match for two fighters at 60 frames a second.
   {
     Fighter a(1);

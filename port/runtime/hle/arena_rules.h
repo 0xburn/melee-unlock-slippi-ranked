@@ -88,9 +88,11 @@ bool set_mode(Room& room, Mode mode);
 bool toggle_line(Room& room, uint8_t id);
 // A member who is not fighting asks to play the next game.
 bool ask(Room& room, uint8_t id);
-// A fighter answers the ask. The first yes gives up that fighter's spot at the next game.
+// A fighter answers the ask. The first yes gives up that fighter's spot: at once between games,
+// at the end of the game during one.
 bool answer(Room& room, uint8_t fighter, Answer answer);
-// A fighter offers their spot to the front of the line without being asked; again takes it back.
+// A fighter offers their spot to the front of the line without being asked (at once between games,
+// at the end of the game during one); again, during the game, takes it back.
 bool give_up(Room& room, uint8_t fighter, bool play_winner = false);
 // Singles to doubles, or back. Anyone in the room may propose; the switch happens when every voter
 // has said yes (immediately between games, otherwise when the game ends). A no ends the proposal.

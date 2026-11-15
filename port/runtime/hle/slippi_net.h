@@ -44,6 +44,9 @@ enum NetMsg : uint8_t {
   // Melee Unlocked only: a ping before the match (request or reply), sent only to a peer whose build
   // message said it answers them, so auto delay has a ping when the match is set up.
   NP_MSG_MU_PING = 0xE2,
+  // Melee Unlocked only: arena room traffic (slippi_arena.h) on a room link, sent only to a peer
+  // whose build message said it takes it (capability bit 4). Never on a match connection's pads.
+  NP_MSG_MU_ARENA = 0xE3,
 };
 
 // sf::Packet wire format: integers big-endian, bool as one byte, strings as u32 length + bytes.
@@ -232,7 +235,8 @@ class NetplayClient {
   struct RemoteBuild { bool received = false, mod_view = false; std::string fingerprint, name; bool early_pads = false, pings = false, static_engine = false;
                        uint32_t shield_rgb = 0;   // their own shield colour, 0x1000000 | RGB, 0 none sent
                        uint8_t port = 0xFF;       // their in-game slot
-                       std::string ranked_rules_digest; };
+                       std::string ranked_rules_digest;
+                       bool arena = false; };      // takes arena room messages
   // The shield colour the opponent on in-game `slot` sent (0 none).
   uint32_t RemoteShieldColor(int slot);
   RemoteBuild GetRemoteBuild(int index);
@@ -242,6 +246,12 @@ class NetplayClient {
   // `latest`; older entries are dropped), for the game's prediction.
   void SendEarlyPad(int32_t target, const uint8_t pad[host::early_input::kPadBytes]);
   void EarlyPads(int index, int32_t latest, std::vector<host::early_input::Entry>& out);
+  // Arena room links (one remote). SendArena queues one message for a peer that takes them (false
+  // when it does not, or before its build message arrived); `bulk` sends it on its own reliable
+  // channel so the live feed never holds up room messages. PopArena takes the oldest received.
+  bool ArenaReady();
+  bool SendArena(const uint8_t* data, size_t size, bool bulk);
+  bool PopArena(std::vector<uint8_t>& out);
 
  private:
   struct FrameTiming { int32_t frame = 0; uint64_t time_us = 0; };
@@ -317,6 +327,8 @@ class NetplayClient {
   RemoteBuild remote_build_[REMOTE_PLAYER_MAX];
   std::atomic<uint64_t> connected_at_ms_{0};
   host::early_input::Buffer early_pads_[REMOTE_PLAYER_MAX];   // under pad_mutex_
+  std::mutex arena_mutex_;                       // arena_inbox_ (network thread in, game thread out)
+  std::deque<std::vector<uint8_t>> arena_inbox_;
   void SendBuild();
 };
 
@@ -361,6 +373,8 @@ class Matchmaking {
   explicit Matchmaking(User* user);
   ~Matchmaking();
   void FindMatch(MatchSearchSettings settings);
+  // This search's own local port (arena room links), instead of forced_port or a random one.
+  void SetLocalPort(uint16_t port) { port_override_ = port; }
   ProcessState GetMatchmakeState() const { return state_; }
   std::string GetErrorMessage() const { std::lock_guard<std::mutex> lk(result_mutex_); return error_msg_; }
   bool IsSearching() const { return state_ == INITIALIZING || state_ == MATCHMAKING || state_ == OPPONENT_CONNECTING; }
@@ -430,6 +444,7 @@ class Matchmaking {
   std::unique_ptr<NetplayClient> netplay_client_;
   // Matchmaking thread only.
   int host_port_ = 0;
+  uint16_t port_override_ = 0;
   std::vector<std::string> remote_ips_;
   bool is_host_ = false;
 };

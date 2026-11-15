@@ -14,6 +14,9 @@
 #endif
 #include "source_host.h"
 #include <windows.h>
+#ifdef _WIN32
+#include <shellapi.h>   // CommandLineToArgvW: an arena viewer's options
+#endif
 #ifndef _WIN32
 #include <dlfcn.h>
 #ifdef __APPLE__
@@ -93,6 +96,7 @@
 #include "native_slippi_bridge.h"
 #include "native_replay_stream.h"
 #include "slippi_spectate.h"
+#include "slippi_arena.h"
 #include "slippi_net.h"
 #include "native_recording_codes.h"
 #include "slippilib/SlippiGame.h"
@@ -1152,6 +1156,7 @@ template <class F> void guarded(F&& f) {
     write_replay_recording();
 #ifndef MELEE_NO_SLIPPI
     slippi::spectate::stop();
+    slippi::arena::shutdown();
 #endif
     rollback_log(true);
     log_native_pose_bridge_stats();
@@ -1636,6 +1641,7 @@ constexpr uint8_t CMD_LAB_SAVE = 0xF2, CMD_LAB_LOAD = 0xF3, CMD_LAB_ADVANTAGE = 
 constexpr uint8_t CMD_PRACTICE_CPU = 0xF6;   // the practice CPU's settings (port/runtime/hle/practice_cpu.h)
 constexpr uint8_t CMD_FRAME_EVENT = 0xE8;   // replay frame data for the coach (shim/mu_framedata.c, host/replay_coach.h)
 constexpr uint8_t CMD_REPLAY_DEFENSE = 0xE9;   // a takeover's opponents once the game leaves the replay (shim/mu_replay_defend.c)
+constexpr uint8_t CMD_ARENA_PAIRING = 0xED;   // an arena room's pairing count (shim/mu_slippi_css.c, hle/slippi_arena.h)
 constexpr uint8_t CMD_GHOST_AI = 0xEA;         // a pro AI's controller for this frame (hle/ghost_ai.h)
 constexpr uint8_t CMD_STAGE_SONGS = 0xEB;      // a stage's main and alternate songs (gr/ground.c, hle/jukebox.h)
 void apply_content_mode(int mode);
@@ -1944,6 +1950,11 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
             const auto* bytes = reinterpret_cast<const uint8_t*>(&act);
             reply.assign(bytes, bytes + sizeof act);
           }
+          return true;
+        }
+        if (c == CMD_ARENA_PAIRING && n == 0) {   // shim/mu_slippi_css.c: an arena room's new pairing
+          append_be32(reply, slippi::online::arena_pairing());
+          reply.push_back(slippi::arena::test_mode() ? 1 : 0);   // a test room locks in a random stage itself
           return true;
         }
         if (c == CMD_PRACTICE_CPU) {   // shim/mu_practice_cpu.c: the settings, or what it is doing
@@ -2333,6 +2344,9 @@ void ranked_harness_tick() {
 
 void h_pad_read(MuPadStatus out[4]) {
   if (g_online_test_mode == 0) ranked_harness_tick();
+#ifndef MELEE_NO_SLIPPI
+  if (!g_resim && !g_replaying) slippi::arena::tick();   // an arena room, once a frame (nothing without one)
+#endif
   host::PadState pads[4];
 #ifdef YOUGAME_AGENT_TEST_HOOK
   using namespace yougame::agent_test;
@@ -3074,6 +3088,56 @@ void h_rng_seed_override(uint32_t* seed, int32_t* has_value) {
 // marks it.
 void h_mark_match_start() { host::input_mark_match_start(); }
 
+#if !defined(MELEE_NO_SLIPPI) && defined(_WIN32)
+// An arena room's viewer window (hle/slippi_arena.h): this same program playing the live recording,
+// with the options that set how the game looks and runs taken from this run's own command line.
+void* launch_arena_viewer(const std::string& path) {
+  wchar_t exe[MAX_PATH];
+  if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return nullptr;
+  int argc = 0;
+  LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  auto quote = [](const std::wstring& a) {
+    std::wstring q = L"\"";
+    for (wchar_t c : a) { if (c == L'"') q += L'\\'; q += c; }
+    return q + L"\"";
+  };
+  std::wstring cmd = quote(exe);
+  bool hidden = false;
+  // Kept: the disc, the system files, the settings, how it draws and sounds. Dropped: anything that
+  // would make the viewer play online, run a script or join the room.
+  static const wchar_t* const with_value[] = {L"--iso", L"--sys-dir", L"--settings-path", L"--shader-cache", L"--backend",
+                                              L"--volume", L"--mod-base-iso", L"--look-iso", L"--user-dir"};
+  static const wchar_t* const flags[] = {L"--load-settings", L"--hidden", L"--headless", L"--no-music"};
+  for (int i = 1; argv && i < argc; ++i) {
+    const std::wstring a = argv[i];
+    bool kept = false;
+    for (const wchar_t* f : flags) if (a == f) { cmd += L" " + a; kept = true; if (a != L"--load-settings" && a != L"--no-music") hidden = true; }
+    for (const wchar_t* w : with_value)
+      if (!kept && a == w && i + 1 < argc) { cmd += L" " + a + L" " + quote(argv[++i]); kept = true; }
+  }
+  if (argv) LocalFree(argv);
+  const std::filesystem::path live = std::filesystem::u8path(path);
+  cmd += L" --replay " + quote(live.wstring());
+  // Its own recording of what it showed goes beside the live one (tests compare the two).
+  cmd += L" --replay-dir " + quote((live.parent_path() / L"viewer").wstring());
+  if (hidden) cmd += L" --log-file " + quote((live.parent_path() / L"viewer.log").wstring());
+  STARTUPINFOW si{};
+  si.cb = sizeof si;
+  PROCESS_INFORMATION pi{};
+  std::vector<wchar_t> line(cmd.begin(), cmd.end());
+  line.push_back(0);
+  if (!CreateProcessW(exe, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+    host::log("arena: viewer did not start (error %lu)", GetLastError());
+    return nullptr;
+  }
+  CloseHandle(pi.hThread);
+  host::log("arena: viewer pid %lu", pi.dwProcessId);
+  return pi.hProcess;
+}
+#elif !defined(MELEE_NO_SLIPPI)
+void* launch_arena_viewer(const std::string&) { return nullptr; }
+#endif
+
 #ifdef MELEE_NO_SLIPPI
 // No replay playback and no recording in this build. The game is told there is no replay; the
 // callbacks stay in the host table so the same game interface version is served.
@@ -3490,7 +3554,10 @@ void h_replay_event(uint8_t command, const uint8_t* payload, uint32_t size) {
     // The spectator server (Slippi Dolphin's): start_game, then the command table and every event
     // as recorded, then end_game after Game End, the order Dolphin's DMAWrite sends them.
     slippi::spectate::start_game();
-    g_replay_stream.set_event_sink([](const uint8_t* data, uint32_t size) { slippi::spectate::write(data, size); });
+    g_replay_stream.set_event_sink([](const uint8_t* data, uint32_t size) {
+      slippi::spectate::write(data, size);
+      slippi::arena::recording_event(data, size);   // an arena room's live feed and game reports
+    });
     if (!g_replay_stream.begin_slippi(start, codes, (int64_t)std::time(nullptr))) {
       host::log("replay: cannot start native recording: %s", g_replay_stream.error().c_str());
       slippi::spectate::end_game();
@@ -4318,6 +4385,8 @@ int run(void (*shutdown)(int)) {
   int code = 0;
 #ifndef MELEE_NO_SLIPPI
   slippi::spectate::start();   // Slippi Dolphin's spectator server (settings: Spectator server)
+  slippi::arena::set_recording_codes(std::vector<uint8_t>(std::begin(native_online_recording_codes), std::end(native_online_recording_codes)));
+  slippi::arena::set_viewer_launcher(launch_arena_viewer);
 #endif
 #ifdef __APPLE__
   g_mac_running = true;

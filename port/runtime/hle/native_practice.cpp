@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "test_env.h"
 #include "native_practice.h"
+#include "slippi_arena.h"
 
 #include "host.h"
 #include "practice_cpu.h"
@@ -994,6 +995,8 @@ void tick() {
       // Unranked ends its session after every game, so there it would leave the online screens after
       // each one (two reports); the player stays on Unranked's character select, as on Slippi.
       const bool unranked = session_mode_seen == (int)MatchMode::Unranked;
+      // In an arena room a pair ending is the rotation: the room starts the next match from here.
+      if (slippi::arena::in_room()) played = false;
       if (played && !unranked && gx::RenderOptions::live_online_back_to_training() && g_lifecycle.phase() == Phase::Idle &&
           is_online_scene() && !slippi::playback::enabled()) {
         enter_training_after_session((MatchMode)session_mode_seen, local_index_seen);

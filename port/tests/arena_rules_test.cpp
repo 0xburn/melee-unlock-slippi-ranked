@@ -191,9 +191,20 @@ TEST(ask_yes_takes_that_fighters_spot) {
   set_mode(r, Mode::Ask);
   CHECK(ask(r, 2));
   CHECK(next_up(r) == 2);
+  CHECK(answer(r, 0, Answer::Yes));   // between games: at once, for the next game
+  CHECK(r.leaving_slot == kNone && r.asker == kNone);
+  CHECK((ring_ids(r) == std::vector<uint8_t>{2, 1}));
+  CHECK((r.line == std::vector<uint8_t>{0}));
+}
+TEST(ask_answered_during_a_game_waits_for_its_end) {
+  Room r = room_of(3);
+  set_mode(r, Mode::Ask);
+  CHECK(game_start(r));
+  CHECK(ask(r, 2));
   CHECK(answer(r, 0, Answer::Yes));
-  CHECK(r.leaving_slot == 0 && r.incoming == 2 && r.asker == kNone);
-  win(r, 0);   // the result does not matter: the spot was given
+  CHECK(r.leaving_slot == 0 && r.incoming == 2);
+  CHECK((ring_ids(r) == std::vector<uint8_t>{0, 1}));   // the game in progress keeps its players
+  CHECK(game_end(r, 0));                                 // the result does not matter: the spot was given
   CHECK((ring_ids(r) == std::vector<uint8_t>{2, 1}));
   CHECK((r.line == std::vector<uint8_t>{0}));
 }
@@ -201,11 +212,10 @@ TEST(ask_yes_and_i_play_the_winner) {
   Room r = room_of(4);
   set_mode(r, Mode::Ask);
   CHECK(ask(r, 3));
-  CHECK(answer(r, 1, Answer::YesAndPlayWinner));
-  win(r, 0);   // 1 leaves for 3, goes to the front of the line
+  CHECK(answer(r, 1, Answer::YesAndPlayWinner));   // 1 lets 3 in now and goes to the front of the line
   CHECK((ring_ids(r) == std::vector<uint8_t>{0, 3}));
   CHECK((r.line == std::vector<uint8_t>{1, 2}) && r.play_winner_next);
-  win(r, 3);   // 1 plays the winner (3), 0 lost and goes to the back, even in Ask mode
+  win(r, 3);   // 1 plays the winner (3); 0 lost and goes to the back, even in Ask mode
   CHECK((ring_ids(r) == std::vector<uint8_t>{1, 3}));
   CHECK((r.line == std::vector<uint8_t>{2, 0}) && !r.play_winner_next);
 }
@@ -225,7 +235,7 @@ TEST(ask_one_no_then_other_yes) {
   ask(r, 2);
   CHECK(answer(r, 0, Answer::No));
   CHECK(answer(r, 1, Answer::Yes));
-  CHECK(r.leaving_slot == 1 && r.incoming == 2);
+  CHECK((ring_ids(r) == std::vector<uint8_t>{0, 2}) && (r.line == std::vector<uint8_t>{1}));
 }
 TEST(ask_refused_cases) {
   Room r = room_of(4);
@@ -241,19 +251,33 @@ TEST(ask_from_a_watcher_jumps_the_line) {
   CHECK(toggle_line(r, 3));   // 3 just watches
   CHECK(role(r, 3) == Role::Watching);
   CHECK(ask(r, 3) && answer(r, 1, Answer::Yes));
-  win(r, 0);
   CHECK(r.ring[1] == 3 && (r.line == std::vector<uint8_t>{2, 1}));
+}
+
+TEST(an_asker_rotated_in_is_no_longer_asking) {
+  Room r = room_of(3);
+  set_mode(r, Mode::TakeTurns);
+  CHECK(ask(r, 2));
+  win(r, 0);   // Take turns brings 2 in for 1 anyway
+  CHECK(r.ring[1] == 2 && r.asker == kNone && valid(r));
 }
 
 // ---------------------------------------------------------------- giving up a spot
 TEST(give_up_and_take_it_back) {
   Room r = room_of(3);
+  CHECK(game_start(r));       // during a game the change waits for its end, and can be taken back
   CHECK(give_up(r, 1));
   CHECK(r.leaving_slot == 1 && next_up(r) == 2);
   CHECK(give_up(r, 1));       // again: taken back
   CHECK(r.leaving_slot == kNone);
   CHECK(give_up(r, 0));
   CHECK(!give_up(r, 1));      // one change per game
+}
+TEST(give_up_between_games_is_at_once) {
+  Room r = room_of(3);
+  CHECK(give_up(r, 1));
+  CHECK((ring_ids(r) == std::vector<uint8_t>{0, 2}) && (r.line == std::vector<uint8_t>{1}));
+  CHECK(r.leaving_slot == kNone);
 }
 TEST(give_up_needs_someone_to_come_in) {
   Room r = room_of(2);
@@ -264,8 +288,9 @@ TEST(give_up_needs_someone_to_come_in) {
 }
 TEST(give_up_replaces_the_mode_rotation) {
   Room r = room_of(4);        // Winner stays
-  CHECK(give_up(r, 0));       // 0 lets the front of the line in
-  win(r, 0);                  // 0 even wins: the voluntary change happens instead of 1 going out
+  CHECK(game_start(r));
+  CHECK(give_up(r, 0));       // during the game, 0 lets the front of the line in
+  CHECK(game_end(r, 0));      // 0 even wins: the voluntary change happens instead of 1 going out
   CHECK((ring_ids(r) == std::vector<uint8_t>{2, 1}));
   CHECK((r.line == std::vector<uint8_t>{3, 0}));
   CHECK(r.streak_id == kNone);   // the streak left with 0
@@ -274,9 +299,7 @@ TEST(give_up_uses_a_waiting_ask) {
   Room r = room_of(4);
   ask(r, 3);
   CHECK(give_up(r, 1));
-  CHECK(r.incoming == 3 && r.asker == kNone);
-  win(r, 0);
-  CHECK(r.ring[1] == 3);
+  CHECK(r.ring[1] == 3 && r.asker == kNone);
 }
 
 // ---------------------------------------------------------------- watching and the line
@@ -299,12 +322,14 @@ TEST(watchers_are_skipped_by_rotation) {
 // ---------------------------------------------------------------- games
 TEST(no_contest_keeps_the_lineup) {
   Room r = room_of(4);
-  give_up(r, 1);
   CHECK(game_start(r));
+  give_up(r, 1);
   CHECK(game_end(r, kNone));
   CHECK((ring_ids(r) == std::vector<uint8_t>{0, 1}) && r.games == 0);
   CHECK(r.leaving_slot == 1);   // still decided for the next game
   CHECK(find(r, 0)->wins == 0 && find(r, 1)->losses == 0);
+  CHECK(game_start(r) && game_end(r, 0));
+  CHECK(r.ring[1] == 2);
 }
 TEST(game_start_and_end_order) {
   Room r = room_of(1);

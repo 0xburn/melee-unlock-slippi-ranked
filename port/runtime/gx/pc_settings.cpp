@@ -87,6 +87,12 @@ static constexpr bool kShowFasterSoundEffects = true;
 #include "replay_control.h"
 #include "replay_coach.h"
 #include "replay_hud.h"
+#ifndef MELEE_NO_SLIPPI
+#include "arena_panel.h"
+static bool arena_capture() { return arena_panel::wants_capture(); }
+#else
+static bool arena_capture() { return false; }
+#endif
 #include "practice_menu.h"
 // Lab view is hidden until its silhouette packs can ship at a reasonable size: no F3 toggle, no
 // Overlays switch, never drawn (so the renderers never skip the scene for it). Code kept intact.
@@ -4301,6 +4307,27 @@ static void draw_replay_practice(RenderOptions& options, const host::PadState& p
   replay_hud::frame(std::clamp(options.practice_style, 0, practice_menu::kStyleCount - 1), f);
 }
 
+#ifndef MELEE_NO_SLIPPI
+// An arena room in the bars beside the picture, on the online character select (gx/arena_panel.h).
+static void draw_arena_panel(RenderOptions& options, const host::PadState& pad, bool have_pad) {
+  const ImVec2 screen = ImGui::GetIO().DisplaySize;
+  arena_panel::Frame f;
+  f.display_w = screen.x;
+  f.display_h = screen.y;
+  const float aspect = presented_aspect(options, (int)screen.x, (int)screen.y, true);
+  float gw = screen.x, gh = gw / std::max(aspect, 0.1f);
+  if (gh > screen.y) { gh = screen.y; gw = gh * aspect; }
+  f.game_x0 = (screen.x - gw) * 0.5f;
+  f.game_y0 = (screen.y - gh) * 0.5f;
+  f.game_x1 = f.game_x0 + gw;
+  f.game_y1 = f.game_y0 + gh;
+  if (have_pad) { f.buttons = pad.button; f.stick_x = pad.stick_x; f.stick_y = pad.stick_y; f.sub_x = pad.sub_x; f.sub_y = pad.sub_y; }
+  f.time = ImGui::GetTime();
+  f.on_online_menus = slippi::online::in_online_menus();
+  arena_panel::frame(f);
+}
+#endif
+
 // The settings file. Written by the panel after a change, and at once when the game changes a
 // saved value itself (the 20XX TE menu song).
 // A Lab view colour as saved: "-" for the look's own, otherwise RRGGBB.
@@ -5456,7 +5483,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   const bool panel_visible = (state.open || state.panel_slide_x > -720.0f) && !phob_native_open();
   const bool practice_capture = state.practice_open || practice_force_capture ||
                                 state.practice_release_capture;
-  host::window_input_capture(state.open || state.menu_open || practice_capture || replay_bar::wants_cursor());
+  host::window_input_capture(state.open || state.menu_open || practice_capture || replay_bar::wants_cursor() || arena_capture());
   state.intervals[state.cursor++ % state.intervals.size()] = ImGui::GetIO().DeltaTime*1000.f;
   if (streamline::reflex_available() || streamline::reflex_latency_ms() > 0.0f)   // Vulkan on NVIDIA too
     state.latencies[state.latency_cursor++ % state.latencies.size()] = streamline::reflex_latency_ms();
@@ -10844,6 +10871,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     draw_native_practice(state, options, practice, pad, have_pad);
   if (!state.fill_window && !state.open && !state.menu_open && replay_control::active() && !gx::clean_replay_active())
     draw_replay_practice(options, pad, have_pad);
+#ifndef MELEE_NO_SLIPPI
+  if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active()) draw_arena_panel(options, pad, have_pad);
+#endif
   if (practice_was_open && !state.practice_open) state.practice_release_capture = true;
   // Practice menu changes (the CPU, your setups, skipped codes, the hint count) are saved as they happen.
   // The panel's own autosave runs only while the panel shows, so these were lost at exit before.
@@ -11036,7 +11066,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   // Same rule as at the top of the frame. With only the in-game (Esc) menu open, this used to say
   // "not captured" while the top said "captured", so the pointer was shown and hidden every frame.
   host::window_input_capture(state.open || state.menu_open || practice_capture ||
-                             state.practice_release_capture || replay_bar::wants_cursor());
+                             state.practice_release_capture || replay_bar::wants_cursor() || arena_capture());
   if (!state.fill_window && !state.open && !state.menu_open && options.show_player_nicknames)
     draw_player_nicknames();
   if (!state.fill_window && !state.open && !state.menu_open) draw_combo_counter();

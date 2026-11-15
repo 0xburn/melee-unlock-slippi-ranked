@@ -762,6 +762,7 @@ static void css_decide(GameModeState* state)
     case MU_SLP_MODE_TEAMS:
         /* The first match and the last winner go to the splash; the loser picks the stage unless
          * it already did. Any other value stalls on the console. */
+        OSReport("online css: is_winner %d, chose_stage %d\n", (int) slp.is_winner, (int) slp.chose_stage);
         if (slp.is_winner == MU_SLP_WINNER_LOST && slp.chose_stage == 0) {
             gm_SetNextGameModeStateId(MU_SLP_STATE_SSS);
             return;

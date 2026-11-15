@@ -55,6 +55,7 @@ if(MELEE_NO_SLIPPI)
       runtime/hle/exi_slippi.cpp runtime/hle/slippi_net.cpp runtime/hle/slippi_online.cpp runtime/hle/slippi_spectate.cpp
       runtime/hle/slippi_report.cpp runtime/hle/slippi_playback.cpp runtime/hle/native_practice.cpp
       runtime/hle/native_practice_model.cpp runtime/hle/native_replay_stream.cpp runtime/hle/jukebox.cpp
+      runtime/hle/slippi_arena.cpp runtime/hle/arena_feed.cpp runtime/gx/arena_panel.cpp   # arena rooms ride on Slippi Direct
       runtime/host/hackpack_ai.cpp runtime/host/static_gecko.cpp)   # the Static Recomp's loader for the pack's AI block
     list(REMOVE_ITEM RUNTIME_NS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${ns_removed}")
   endforeach()

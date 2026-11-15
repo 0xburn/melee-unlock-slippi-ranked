@@ -1669,6 +1669,80 @@ bool native_ranked_next_game(uint8_t character, uint8_t color) {
   return true;
 }
 
+ArenaMatchStatus arena_match_status() {
+  ArenaMatchStatus out;
+  out.active = slippi_session_up();
+  // A search that failed is no longer "up", but its client still has to be cleaned up before the
+  // next one (FindMatch on it again would end the program).
+  out.state = g_matchmaking ? (int)g_matchmaking->GetMatchmakeState() : 0;
+  out.direct = g_last_search.mode == Matchmaking::DIRECT;
+  out.mode = (int)g_last_search.mode;
+  out.code = shiftjis_to_utf8(g_last_search.connect_code);
+  out.state = g_matchmaking ? (int)g_matchmaking->GetMatchmakeState() : 0;
+  // The flag stays set on the character select after a game until the pair is cleaned up: a match is
+  // running only while the game is not polling the online menus.
+  out.in_match = g_in_online_match && !in_online_menus();
+  out.local_ready = g_local_selections.is_character_selected;
+  return out;
+}
+
+bool arena_start_search(int mode, const std::string& code, bool locked, uint8_t character, uint8_t color,
+                        uint8_t team, std::string* error) {
+  if (mode != Matchmaking::DIRECT && mode != Matchmaking::TEAMS) return false;
+  if (!g_user) init();
+  if (session_mode() >= 0) {
+    if (error) *error = "An online session is already active";
+    return false;
+  }
+  if (const char* reason = local_matchmaking_error(mode)) {
+    if (error) *error = reason;
+    return false;
+  }
+  // A client that has searched before (and failed or ended) is replaced first, as the online
+  // character select does before every search.
+  if (!g_matchmaking || g_matchmaking->GetMatchmakeState() != Matchmaking::IDLE) cleanup_connection(yougame::Leave::Quit);
+  g_forced_error.clear();
+  uint8_t selections[9] = {team, character, color, (uint8_t)(locked ? 1 : 0), 0, 0, 3, (uint8_t)mode, 0};
+  set_match_selections(selections);
+  uint8_t find[19] = {};
+  find[0] = (uint8_t)mode;
+  const std::string sjis = utf8_to_shiftjis(code);
+  std::memcpy(find + 1, sjis.data(), std::min<size_t>(18, sjis.size()));
+  start_find_match(find);
+  if (!g_forced_error.empty()) {
+    if (error) *error = g_forced_error;
+    return false;
+  }
+  return g_matchmaking && g_matchmaking->IsSearching();
+}
+
+bool local_identity(std::string* code, std::string* name) {
+  if (!g_user) init();
+  if (!g_user || !g_user->IsLoggedIn()) return false;
+  const UserInfo info = g_user->GetUserInfo();
+  if (code) *code = info.connect_code;
+  if (name) *name = info.display_name.empty() ? info.connect_code : info.display_name;
+  return !info.connect_code.empty();
+}
+
+std::unique_ptr<Matchmaking> arena_matchmaking() {
+  if (!g_user) init();
+  return g_user ? std::make_unique<Matchmaking>(g_user.get()) : nullptr;
+}
+
+bool arena_lock_in(uint8_t character, uint8_t color) {
+  if (!g_user || !g_matchmaking || !g_netplay) return false;
+  if (g_last_search.mode != Matchmaking::DIRECT && g_last_search.mode != Matchmaking::TEAMS) return false;
+  if (g_matchmaking->GetMatchmakeState() != Matchmaking::CONNECTION_SUCCESS || g_local_selections.is_character_selected) return false;
+  uint8_t selections[9] = {g_local_selections.team_id, character, color, 1, 0, 0, 3, (uint8_t)g_last_search.mode, 0};   // a random legal stage
+  set_match_selections(selections);
+  return true;
+}
+
+static std::atomic<uint32_t> g_arena_pairing{0};
+void arena_note_new_pairing() { g_arena_pairing.fetch_add(1, std::memory_order_relaxed); }
+uint32_t arena_pairing() { return g_arena_pairing.load(std::memory_order_relaxed); }
+
 bool local_css_selection(uint8_t* character, uint8_t* color) {
   if (!g_local_selections.is_character_selected || g_local_selections.character_id >= 26) return false;
   if (character) *character = g_local_selections.character_id;

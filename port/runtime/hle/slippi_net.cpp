@@ -614,7 +614,8 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       if (pidx >= remote_player_count_) { host::log("slippi: build message with invalid player idx %u", pidx); break; }
       {
         std::lock_guard<std::mutex> lk(build_mutex_);
-        remote_build_[pidx] = {true, mod_view != 0, fp, name, (caps & 1) != 0, (caps & 2) != 0, (caps & 4) != 0, shield, port, rules_digest};
+        remote_build_[pidx] = {true, mod_view != 0, fp, name, (caps & 1) != 0, (caps & 2) != 0, (caps & 4) != 0, shield, port, rules_digest,
+                               (caps & 16) != 0};
       }
       host::log("slippi: opponent %u build: %s%s%s%s, shield colour %s%06X", port, mod_view ? "mod " : "retail game",
                 mod_view ? name.c_str() : "", mod_view ? (" " + fp.substr(0, 16)).c_str() : "",
@@ -671,6 +672,22 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       }
       break;
     }
+    case NP_MSG_MU_ARENA: {
+      // 'M' 'U' 'A' version, then one arena message. Kept for the game thread, from a peer that
+      // announced room messages only.
+      uint8_t m, u, a, version;
+      if (!(packet >> m >> u >> a >> version) || m != 'M' || u != 'U' || a != 'A' || version != 1) break;
+      {
+        std::lock_guard<std::mutex> lk(build_mutex_);
+        if (!remote_build_[0].arena) break;
+      }
+      const size_t head = 6;   // the id, the four bytes above and the channel flag
+      if (packet.size() <= head) break;
+      std::lock_guard<std::mutex> lk(arena_mutex_);
+      if (arena_inbox_.size() >= 60000) { host::log("slippi: arena inbox full, message dropped"); break; }
+      arena_inbox_.emplace_back(packet.data() + head, packet.data() + packet.size());
+      break;
+    }
     case NP_MSG_SLIPPI_CONN_SELECTED: break;
     case NP_MSG_SLIPPI_COMPLETE_STEP: {
       if (!yougame::session()) break;
@@ -713,7 +730,8 @@ void NetplayClient::SendBuild() {
   // rules digest follows the shield colour (absent outside verified remix Ranked). Older peers mask
   // only the bits they know and stop reading after the shield colour, so the layout stays compatible.
   const std::string rules_digest = online::ranked_rules_digest(online::session_mode());
-  *p << (uint8_t)((early ? 1 : 0) | 2 | (me.static_engine ? 4 : 0) | (rules_digest.empty() ? 0 : 8));
+  // Bit 4: this side takes arena room messages (NP_MSG_MU_ARENA).
+  *p << (uint8_t)((early ? 1 : 0) | 2 | (me.static_engine ? 4 : 0) | (rules_digest.empty() ? 0 : 8) | 16);
   // Then the player's own shield colour ("Shield colours", Online): a byte 1 and the three RGB bytes, or
   // a byte 0. Builds before it stop reading at the capabilities byte.
   const uint32_t shield = gx::shield_color_online();
@@ -737,6 +755,29 @@ void NetplayClient::SendPrematchPing() {
   Packet p;
   p << (uint8_t)NP_MSG_MU_PING << (uint8_t)'M' << (uint8_t)'U' << (uint8_t)'P' << (uint8_t)1 << (uint8_t)0 << player_idx_ << (uint32_t)time_us();
   Send(p);
+}
+
+bool NetplayClient::ArenaReady() {
+  if (status_.load(std::memory_order_acquire) != ConnectStatus::CONNECTED) return false;
+  std::lock_guard<std::mutex> lk(build_mutex_);
+  return remote_player_count_ == 1 && remote_build_[0].received && remote_build_[0].arena;
+}
+
+bool NetplayClient::SendArena(const uint8_t* data, size_t size, bool bulk) {
+  if (!data || !size || !ArenaReady()) return false;
+  auto p = std::make_unique<Packet>();
+  *p << (uint8_t)NP_MSG_MU_ARENA << (uint8_t)'M' << (uint8_t)'U' << (uint8_t)'A' << (uint8_t)1 << (uint8_t)(bulk ? 1 : 0);
+  p->append(data, size);
+  SendAsync(std::move(p));
+  return true;
+}
+
+bool NetplayClient::PopArena(std::vector<uint8_t>& out) {
+  std::lock_guard<std::mutex> lk(arena_mutex_);
+  if (arena_inbox_.empty()) return false;
+  out = std::move(arena_inbox_.front());
+  arena_inbox_.pop_front();
+  return true;
 }
 
 uint32_t NetplayClient::RemoteShieldColor(int slot) {
@@ -817,6 +858,11 @@ void NetplayClient::Send(Packet& packet) {
       std::lock_guard<std::mutex> lk(build_mutex_);
       if (i >= (size_t)REMOTE_PLAYER_MAX || !remote_build_[i].early_pads) continue;
       flags = ENET_PACKET_FLAG_UNSEQUENCED; channel = 1;
+    }
+    if (mid == NP_MSG_MU_ARENA) {
+      std::lock_guard<std::mutex> lk(build_mutex_);
+      if (i >= (size_t)REMOTE_PLAYER_MAX || !remote_build_[i].arena) continue;
+      if (packet.size() > 5 && packet.data()[5] == 1) channel = 2;   // the live feed: its own reliable channel
     }
     ENetPacket* epac = enet_packet_create(packet.data(), packet.size(), flags);
     enet_peer_send(server_[i], channel, epac);
@@ -1506,7 +1552,7 @@ void Matchmaking::startMatchmaking() {
   }
 
   for (int retry = 0; !client_ && retry < 15; ++retry) {
-    host_port_ = forced_port ? forced_port : 41000 + (int)(rng() % 10000);
+    host_port_ = port_override_ ? port_override_ : forced_port ? forced_port : 41000 + (int)(rng() % 10000);
     ENetAddress addr; addr.host = ENET_HOST_ANY; addr.port = (enet_uint16)host_port_;
     client_ = enet_host_create(&addr, 1, 3, 0, 0);
   }
@@ -1556,7 +1602,7 @@ void Matchmaking::startMatchmaking() {
 // netplay client connects exactly as before; the address is the one that answered YouGame's punch.
 void Matchmaking::startYouGameMatchmaking() {
   static std::mt19937 rng((uint32_t)time_ms());
-  host_port_ = forced_port ? forced_port : 41000 + (int)(rng() % 10000);
+  host_port_ = port_override_ ? port_override_ : forced_port ? forced_port : 41000 + (int)(rng() % 10000);
   yougame::Search search;
   search.mode = (int)search_settings_.mode;
   // Only Direct sends the code; the other modes just ask whether the field is empty.

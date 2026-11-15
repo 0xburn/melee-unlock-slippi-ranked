@@ -129,6 +129,25 @@ void rotate_longest(Room& r, uint8_t winner_team) {
 
 void bump(Room& r) { ++r.rev; }
 
+// A fighter's spot changes hands: the one asking (or the front of the line) comes in, the fighter
+// goes to the back of the line (the front, and plays the winner next, when they asked to).
+void apply_leaving(Room& r) {
+  const uint8_t s = r.leaving_slot;
+  if (s == kNone || s >= ring_size(r)) { r.leaving_slot = kNone; return; }
+  const uint8_t leaver = r.ring[s];
+  uint8_t in = r.incoming;
+  if (in != kNone && role(r, in) == Role::Fighter) in = kNone;
+  if (in == kNone) in = pop_front(r); else remove_from_line(r, in);
+  if (in != kNone) {
+    r.ring[s] = in;
+    r.tenure[s] = 0;
+    if (r.streak_id == leaver) { r.streak_id = kNone; r.streak = 0; }
+    if (r.leaver_plays_winner) { r.line.insert(r.line.begin(), leaver); r.play_winner_next = true; }
+    else r.line.push_back(leaver);
+  }
+  r.leaving_slot = kNone; r.incoming = kNone; r.leaver_plays_winner = false;
+}
+
 void put16(std::vector<uint8_t>& o, uint16_t v) { o.push_back((uint8_t)(v >> 8)); o.push_back((uint8_t)v); }
 void put32(std::vector<uint8_t>& o, uint32_t v) { for (int s = 24; s >= 0; s -= 8) o.push_back((uint8_t)(v >> s)); }
 void put_str(std::vector<uint8_t>& o, const std::string& s) { o.push_back((uint8_t)s.size()); o.insert(o.end(), s.begin(), s.end()); }
@@ -311,6 +330,7 @@ bool answer(Room& r, uint8_t fighter, Answer a) {
     r.leaver_plays_winner = a == Answer::YesAndPlayWinner;
     r.asker = kNone;
     r.refused = 0;
+    if (!r.in_game) { apply_leaving(r); normalize(r); }   // between games: at once, for the next game
   }
   bump(r);
   return true;
@@ -331,6 +351,7 @@ bool give_up(Room& r, uint8_t fighter, bool play_winner) {
   r.incoming = in;
   r.leaver_plays_winner = play_winner;
   r.asker = kNone; r.refused = 0;
+  if (!r.in_game) { apply_leaving(r); normalize(r); }   // between games: at once, for the next game
   bump(r);
   return true;
 }
@@ -399,19 +420,8 @@ bool game_end(Room& r, uint8_t winner_team) {
   if (r.streak_id == leader) ++r.streak; else { r.streak_id = leader; r.streak = 1; }
 
   if (r.leaving_slot != kNone) {
-    // A fighter gave up their spot: that change replaces the mode's own rotation this game.
-    const uint8_t s = r.leaving_slot, leaver = r.ring[s];
-    uint8_t in = r.incoming;
-    if (in != kNone && role(r, in) == Role::Fighter) in = kNone;
-    if (in == kNone) in = pop_front(r); else remove_from_line(r, in);
-    if (in != kNone) {
-      r.ring[s] = in;
-      r.tenure[s] = 0;
-      if (leader == leaver) { r.streak_id = kNone; r.streak = 0; }
-      if (r.leaver_plays_winner) { r.line.insert(r.line.begin(), leaver); r.play_winner_next = true; }
-      else r.line.push_back(leaver);
-    }
-    r.leaving_slot = kNone; r.incoming = kNone; r.leaver_plays_winner = false;
+    // A fighter gave up their spot during the game: that change replaces the mode's own rotation.
+    apply_leaving(r);
   } else if (r.play_winner_next) {
     r.play_winner_next = false;
     rotate_losers(r, winner_team);
