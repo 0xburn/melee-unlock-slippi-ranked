@@ -3120,7 +3120,7 @@ void* launch_arena_viewer(const std::string& path) {
   cmd += L" --replay " + quote(live.wstring());
   // Its own recording of what it showed goes beside the live one (tests compare the two).
   cmd += L" --replay-dir " + quote((live.parent_path() / L"viewer").wstring());
-  if (hidden) cmd += L" --log-file " + quote((live.parent_path() / L"viewer.log").wstring());
+  if (hidden) cmd += L" --log-file " + quote((live.parent_path() / (live.stem().wstring() + L".log")).wstring());
   STARTUPINFOW si{};
   si.cb = sizeof si;
   PROCESS_INFORMATION pi{};

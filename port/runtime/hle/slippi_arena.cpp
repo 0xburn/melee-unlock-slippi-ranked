@@ -68,6 +68,7 @@ uint32_t g_my_tag = 0;                    // this game's own recording
 bool g_my_online = false;                 // and it is an online match
 std::string g_my_opp;                     // the opponent it is against (the room may move on first)
 bool g_my_doubles = false;                // and it was a doubles game
+uint8_t g_port_team[4] = {0, 0, 0, 0};    // each port's team in it (Game Start)
 std::vector<uint8_t> g_table;             // its command table event, for a sender made at Game Start
 bool g_wait_room = false;                 // a member's game ended: wait for the room to say what is next
 void* g_yield_to = nullptr;               // this room joins the room at the other end of that link
@@ -230,7 +231,8 @@ void host_message(Link& from, const std::vector<uint8_t>& m) {
       if (from.id != kNone && m.size() >= 3) apply_action(from.id, (Act)m[1], m[2]);
       return;
     case kReport: {
-      if (m.size() < 6 || from.id == kNone) return;
+      // Only the players of the game report it.
+      if (m.size() < 6 || from.id == kNone || ring_slot(g_room, from.id) < 0) return;
       size_t at = 6;
       std::string winner;
       get_str(m, at, winner);
@@ -238,7 +240,9 @@ void host_message(Link& from, const std::vector<uint8_t>& m) {
       return;
     }
     case kFeed: {
-      // Passed on to everyone watching (not the fighters), and kept here when the host watches.
+      // From the first player only; passed on to everyone watching (not the fighters), and kept
+      // here when the host watches.
+      if (from.id == kNone || from.id != g_room.ring[0]) return;
       for (Link& l : g_links)
         if (&l != &from && l.id != kNone && ring_slot(g_room, l.id) < 0) send(l, m, true);
       if (ring_slot(g_room, g_self) < 0) watch_feed(m.data() + 1, m.size() - 1);
@@ -425,6 +429,15 @@ void service_links() {
         event("link to %s lost", g_hosting ? "a member" : "the host");
         if (g_hosting) member_gone(l.id);
         else { g_room = Room{}; g_self = kNone; }
+        if (!g_hosting && !g_test.on) {
+          // A real room whose host has gone is over for this member (friends can start a new one).
+          event("the room's host left: the room is closed here");
+          drop_later(l.np);
+          g_links.clear();
+          g_active = false;
+          g_status.clear();
+          return;
+        }
       }
       l.id = g_hosting ? kNone : l.id;
       drop_later(l.np);
@@ -705,7 +718,14 @@ void recording_event(const uint8_t* data, uint32_t size) {
     const uint32_t n = size - 1;
     g_my_online = n >= 0x2F8 && (start[0x1A3] == 0x08 || start[0x2BD] != 0) && ring_slot(g_room, g_self) >= 0;
     g_my_tag = feed::game_tag(start, n);
+    if (g_my_online) close_viewer();   // playing now: the last game's viewer window has had its turn
     g_my_doubles = g_room.doubles;
+    // Each port's team: the game info block follows the version word; player blocks of 0x24 bytes
+    // at 0x60, the team at +9.
+    for (int port = 0; port < 4; ++port) {
+      const size_t at = 4 + 0x60 + 0x24 * (size_t)port + 9;
+      g_port_team[port] = at < n ? start[at] : 0;
+    }
     if (!g_my_doubles) { const Member* opp = opponent(); g_my_opp = opp ? opp->code : std::string(); }
     else {
       // Doubles: a player of the other team stands for it in the report.
@@ -737,15 +757,15 @@ void recording_event(const uint8_t* data, uint32_t size) {
     std::vector<uint8_t> m = {kReport, (uint8_t)(command == 0x36 ? kStarted : kEnded)};
     put32(m, g_my_tag);
     std::string winner;
-    if (command == 0x39 && size >= 7 && data[1] == 2) {   // over by stocks: first place wins
+    // Game End: the method (1 time, 2 game, 3 game in newer recordings; 7 is a no contest), the
+    // LRA-Start port, then each port's placement. Whoever placed first wins (in doubles, their team).
+    if (command == 0x39 && size >= 7 && data[1] >= 1 && data[1] <= 3) {
       int first = -1, count = 0;
       for (int port = 0; port < 4; ++port) if (data[3 + port] == 0) { first = port; ++count; }
       const int mine = online::local_player_index();
-      if (g_my_doubles) {
-        // Teams share first place: this player's team won, or the other team did.
-        if (count >= 1) winner = mine >= 0 && mine < 4 && data[3 + mine] == 0 ? g_code : g_my_opp;
-      } else if (count == 1) {
-        winner = first == mine ? g_code : g_my_opp;
+      if (count == 1 && mine >= 0 && mine < 4) {
+        const bool won = g_my_doubles ? g_port_team[first] == g_port_team[mine] : first == mine;
+        winner = won ? g_code : g_my_opp;
       }
     }
     put_str(m, winner);
