@@ -39,6 +39,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "lcancel.h"
 #include "gameplay_policy.h"
+#include "test_env.h"
 #include "../abi/mu_lcancel_flash.h"
 
 #include <algorithm>
@@ -478,14 +479,16 @@ void apply(host::PadState pads[4]) {
       const bool active = aerial || (st.predict > 0 && st.predict < kPredictFrames);
 
       st.converted &= shoulders;                                  // let go: the button is his again
-      if (active) st.converted |= shoulders & (uint16_t)~fresh;   // held, not pressed this frame
+      // Tests: MELEE_TEST_LCANCEL_ADD_ONLY=1 never alters a hold (presses are only ever added).
+      static const bool add_only = host::test_env::getenv("MELEE_TEST_LCANCEL_ADD_ONLY") != nullptr;
+      if (active && !add_only) st.converted |= shoulders & (uint16_t)~fresh;   // held, not pressed this frame
       const bool own_analog = std::max(nml_trigger(pad.trig_l, cal), nml_trigger(pad.trig_r, cal)) > cal.deadzone;
-      const bool hold = st.converted != 0 || own_analog;
+      const bool hold = st.converted != 0 || own_analog || (add_only && shoulders != 0);
       bool on;   // whether a shoulder input goes out held this frame
       if (!active) on = hold || fresh;
       else if (fresh) on = true;                                           // his own press, as he made it
       else if (a_rising) on = hold;                                        // with an attack press: exactly his own state
-      else if (hold) on = !(st.last_effective_lr && st.since_edge >= 2);   // let go one frame in three
+      else if (hold) on = add_only || !(st.last_effective_lr && st.since_edge >= 2);   // let go one frame in three
       else on = !st.last_effective_lr && (st.since_edge >= 3 || !st.was_active);
 
       uint16_t button = raw_button & (uint16_t)~st.converted;
