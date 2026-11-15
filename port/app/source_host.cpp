@@ -3195,9 +3195,14 @@ int32_t replay_restore(int32_t target) {
 
 // CMD_REPLAY_GATE. Phase 0, every frame: 1 when the viewer wants to go back (the game then calls
 // again with phase 1, with its timers held), else 0. Phase 1: the state is restored.
+static void replay_hold_for_live_frame(int32_t frame);
+
 uint8_t replay_gate(int32_t frame, uint8_t phase) {
   if (!g_replay) return 0;
-  if (phase == 0) return replay_control::gate(frame) == replay_control::Gate::GoBack ? 1 : 0;
+  if (phase == 0) {
+    replay_hold_for_live_frame(frame);
+    return replay_control::gate(frame) == replay_control::Gate::GoBack ? 1 : 0;
+  }
   return replay_control::go_back() == replay_control::Gate::Restored ? 2 : 0;
 }
 
@@ -3461,6 +3466,39 @@ static int32_t replay_wait_or_end(int32_t frame) {
   host::log("replay: %s stops at frame %d with no Game End and nothing writing it any more; playback ends there",
             g_replay_path.c_str(), frame - 1);
   return MU_REPLAY_TERMINATE;
+}
+
+// A frame of a recording still being written that can be played: there, all of its inputs in, and
+// final. A finished recording answers yes for every frame (the fetch then finds it or ends).
+static bool replay_frame_ready(int32_t frame) {
+  const bool exists = g_replay->DoesFrameExist(frame);
+  if (g_replay->IsProcessingComplete()) return true;
+  if (!exists || !g_replay->GetFrame(frame)->inputsFullyFetched) return false;
+  const auto v = g_replay->GetVersion();
+  const bool has_finalized = v[0] > 3 || (v[0] == 3 && v[1] >= 7);
+  return !has_finalized || g_replay->GetLastFinalizedFrame() >= frame;
+}
+
+// Top of a frame, where a pause holds (replay_gate): a live recording's next frame is waited for
+// here, the way Dolphin's mirror mode stops the game until the frame arrives. The fetch would
+// otherwise answer WAIT and the match would run that frame with no one's inputs, and every frame
+// after it would be one behind (an arena watcher's viewer that caught up with the live game).
+static void replay_hold_for_live_frame(int32_t frame) {
+  if (replay_frame_ready(frame)) return;
+  const double started = host::now_seconds();
+  bool told = false;
+  while (!host::exit_requested() && !replay_frame_ready(frame) && !replay_recording_abandoned()) {
+    if (!told && host::now_seconds() - started > 1.0) {
+      std::error_code ec;
+      const auto size = std::filesystem::file_size(std::filesystem::u8path(g_replay_path), ec);
+      host::log("replay: waiting for frame %d of %s (read to frame %d, %llu bytes on disk)", frame,
+                g_replay_path.c_str(), g_replay->GetLatestIndex(), ec ? 0ull : (unsigned long long)size);
+      told = true;
+    }
+    if (host::g_has_window) host::window_pump();   // the simulation thread owns the window only without the render thread
+    { host::perf::Scope wait_cost(host::perf::Stage::Wait); Sleep(4); }
+  }
+  if (told) host::log("replay: frame %d came after %.1f s", frame, host::now_seconds() - started);
 }
 
 void h_replay_frame(int32_t frame, MuReplayFrame* out) {
