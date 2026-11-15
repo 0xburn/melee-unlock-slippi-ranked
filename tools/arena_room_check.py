@@ -141,6 +141,7 @@ def main():
     ap.add_argument("--capture", type=int, default=0,
                     help="screenshots: these members (bit per member) draw at 1280x720 on D3D11 and save a picture every 120 frames")
     ap.add_argument("--compare-only", action="store_true", help="check an earlier run's files again (nothing is started)")
+    ap.add_argument("--looks", default="", help="panel look per member, e.g. 0,1,2 (0 corners+cards, 1 card, 2 split, 3 corners, 4 ring)")
     ap.add_argument("--extra", nargs=argparse.REMAINDER, default=[])
     args = ap.parse_args()
     iso = require_iso(args.iso)
@@ -171,6 +172,10 @@ def main():
             f.unlink()
         for name in ("direct-codes.json", "teams-codes.json"):
             (user / name).write_text(CODE_HISTORY)
+        looks = [int(x) for x in args.looks.split(",") if x.strip()] if args.looks else []
+        if i < len(looks):
+            (user / "arena").mkdir(parents=True, exist_ok=True)
+            (user / "arena" / "panel.txt").write_text(f"{looks[i]} 0\n")
         script = d / "bot.txt"
         script.write_text(bot_script(i))
         settings = d / "settings.ini"

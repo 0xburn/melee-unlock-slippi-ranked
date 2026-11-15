@@ -39,6 +39,7 @@ struct Link {
   uint8_t id = kNone;          // the member at the other end (host side), kNone until its hello
   int test_peer = -1;          // test rooms: the other member's index
   uint64_t retry_at = 0;
+  uint64_t ready_at = 0;       // when it came up: a link up this long with no hello answered is reopened
   bool was_ready = false, hello_sent = false;
 };
 
@@ -452,7 +453,18 @@ void service_links() {
     if (!l.np->ArenaReady()) continue;
     if (!l.was_ready) {
       l.was_ready = true;
+      l.ready_at = now;
       event("link to %s up", g_hosting ? "a member" : "the host");
+    }
+    // Up, but the hello never got its answer (the other side was reconnecting when this one came
+    // up): reopen it rather than wait for the connection to time out.
+    const bool unanswered = g_hosting ? l.id == kNone : g_self == kNone;
+    if (unanswered && now - l.ready_at > 6000) {
+      event("link to %s up with no answer: reopening", g_hosting ? "a member" : "the host");
+      drop_later(l.np);
+      l.was_ready = false;
+      l.retry_at = now + kRetryMs;
+      continue;
     }
     if (!l.hello_sent && (!g_hosting || !g_test.on)) {
       std::vector<uint8_t> h = {kHello};
