@@ -236,6 +236,33 @@ int main() {
     CHECK(f.sender.tag() != 0 && f.sender.in_game());
   }
 
+  // 6. Who won, from Game End (and the teams from Game Start).
+  {
+    const uint8_t teams_none[4] = {0, 0, 0, 0};
+    const uint8_t singles[6] = {2, 0xFF, 1, 0, 0xFF, 0xFF};        // port 1 placed first
+    CHECK(feed::my_result(singles, 6, 1, teams_none, false) == 1);
+    CHECK(feed::my_result(singles, 6, 0, teams_none, false) == 0);
+    const uint8_t doubles[6] = {3, 0xFF, 0, 2, 1, 3};              // per player: port 0 first
+    const uint8_t teams[4] = {0, 0, 1, 1};
+    CHECK(feed::my_result(doubles, 6, 1, teams, true) == 1);       // port 1 is port 0's teammate
+    CHECK(feed::my_result(doubles, 6, 0, teams, true) == 1);
+    CHECK(feed::my_result(doubles, 6, 2, teams, true) == 0);
+    CHECK(feed::my_result(doubles, 6, 3, teams, true) == 0);
+    const uint8_t no_contest[6] = {7, 1, 0xFF, 0xFF, 0xFF, 0xFF};
+    CHECK(feed::my_result(no_contest, 6, 0, teams_none, false) == -1);
+    const uint8_t tie[6] = {1, 0xFF, 0, 0, 0xFF, 0xFF};             // two first places
+    CHECK(feed::my_result(tie, 6, 0, teams_none, false) == -1);
+    CHECK(feed::my_result(singles, 5, 1, teams_none, false) == -1);
+    CHECK(feed::my_result(singles, 6, 4, teams_none, false) == -1);
+    std::vector<uint8_t> start(0x2F8, 0);
+    for (int port = 0; port < 4; ++port) start[4 + 0x60 + 0x24 * port + 9] = uint8_t(port / 2);
+    uint8_t got[4];
+    feed::port_teams(start.data(), start.size(), got);
+    CHECK(got[0] == 0 && got[1] == 0 && got[2] == 1 && got[3] == 1);
+    feed::port_teams(start.data(), 0x20, got);
+    CHECK(got[0] == 0 && got[3] == 0);
+  }
+
   // The upload a fighter pays: bytes per second of match for two fighters at 60 frames a second.
   {
     Fighter a(1);

@@ -153,9 +153,14 @@ void broadcast_room() {
   const std::vector<uint8_t> bytes = encode(g_room);
   m.insert(m.end(), bytes.begin(), bytes.end());
   for (Link& l : g_links) if (l.id != kNone) send(l, m);
-  event("room rev %u: %s%s, ring %d %d, line %zu, games %u", g_room.rev, g_room.doubles ? "doubles " : "",
-        g_room.mode == Mode::WinnerStays ? "winner stays" : g_room.mode == Mode::TakeTurns ? "take turns" : "ask",
-        (int)g_room.ring[0], (int)g_room.ring[1], g_room.line.size(), g_room.games);
+  if (g_room.doubles)
+    event("room rev %u: doubles %s, ring %d %d vs %d %d, line %zu, games %u", g_room.rev,
+          g_room.mode == Mode::WinnerStays ? "winner stays" : g_room.mode == Mode::TakeTurns ? "take turns" : "ask",
+          (int)g_room.ring[0], (int)g_room.ring[1], (int)g_room.ring[2], (int)g_room.ring[3], g_room.line.size(), g_room.games);
+  else
+    event("room rev %u: %s, ring %d %d, line %zu, games %u", g_room.rev,
+          g_room.mode == Mode::WinnerStays ? "winner stays" : g_room.mode == Mode::TakeTurns ? "take turns" : "ask",
+          (int)g_room.ring[0], (int)g_room.ring[1], g_room.line.size(), g_room.games);
 }
 
 bool apply_action(uint8_t who, Act a, uint8_t arg) {
@@ -720,12 +725,7 @@ void recording_event(const uint8_t* data, uint32_t size) {
     g_my_tag = feed::game_tag(start, n);
     if (g_my_online) close_viewer();   // playing now: the last game's viewer window has had its turn
     g_my_doubles = g_room.doubles;
-    // Each port's team: the game info block follows the version word; player blocks of 0x24 bytes
-    // at 0x60, the team at +9.
-    for (int port = 0; port < 4; ++port) {
-      const size_t at = 4 + 0x60 + 0x24 * (size_t)port + 9;
-      g_port_team[port] = at < n ? start[at] : 0;
-    }
+    feed::port_teams(start, n, g_port_team);
     if (!g_my_doubles) { const Member* opp = opponent(); g_my_opp = opp ? opp->code : std::string(); }
     else {
       // Doubles: a player of the other team stands for it in the report.
@@ -759,14 +759,9 @@ void recording_event(const uint8_t* data, uint32_t size) {
     std::string winner;
     // Game End: the method (1 time, 2 game, 3 game in newer recordings; 7 is a no contest), the
     // LRA-Start port, then each port's placement. Whoever placed first wins (in doubles, their team).
-    if (command == 0x39 && size >= 7 && data[1] >= 1 && data[1] <= 3) {
-      int first = -1, count = 0;
-      for (int port = 0; port < 4; ++port) if (data[3 + port] == 0) { first = port; ++count; }
-      const int mine = online::local_player_index();
-      if (count == 1 && mine >= 0 && mine < 4) {
-        const bool won = g_my_doubles ? g_port_team[first] == g_port_team[mine] : first == mine;
-        winner = won ? g_code : g_my_opp;
-      }
+    if (command == 0x39) {
+      const int result = feed::my_result(data + 1, size - 1, online::local_player_index(), g_port_team, g_my_doubles);
+      if (result >= 0) winner = result ? g_code : g_my_opp;
     }
     put_str(m, winner);
     if (g_hosting) apply_report(m[1], g_my_tag, winner);

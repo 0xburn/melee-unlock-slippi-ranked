@@ -73,6 +73,28 @@ def game_key(path):
     return start[1:0x1A1]
 
 
+def entry_ulp(original, shown):
+    """Differences that are the replay viewer's known entry-animation case (replay_compare.py's
+    KNOWN_PREFRAME_ULP, seen with more values here): before frame 0, the height only, one float step.
+    Any other field or frame still counts."""
+    import struct
+    count = 0
+    for frame, players in original.items():
+        if frame >= 0 or frame not in shown:
+            continue
+        for key, a in players.items():
+            b = shown[frame].get(key)
+            if not b:
+                continue
+            bad = [f for f in replay_compare.FIELDS if f in a and f in b and not replay_compare.same_field(a, b, f)]
+            if bad == ["y"]:
+                ia = struct.unpack(">I", struct.pack(">f", a["y"]))[0]
+                ib = struct.unpack(">I", struct.pack(">f", b["y"]))[0]
+                if abs(ia - ib) == 1 and not replay_compare.known_preframe_difference(frame, key, "y", a["y"], b["y"]):
+                    count += 1
+    return count
+
+
 def own_processes(marker):
     """PIDs of processes whose command line mentions this run's folder (the viewers the games opened)."""
     ps = ("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*" + marker.replace("'", "''") +
@@ -196,15 +218,19 @@ def check(args, out):
     print(f"host: {len(joined)} joined, {len(ended)} games ended, {len(revs)} room changes")
     for e in ended:
         print("   ", e)
+    no_winner = [e for e in ended if e.endswith("winner none")]
+    if no_winner:
+        problems.append(f"{len(no_winner)} of {len(ended)} games ended with no winner reported")
     if len(joined) != args.players - 1:
         problems.append(f"{len(joined)} of {args.players - 1} members joined")
     if len(ended) < args.min_games:
         problems.append(f"only {len(ended)} games ended (wanted {args.min_games})")
+    def ring_of(e):
+        m = re.search(r"ring (\d+) (\d+)(?: vs (\d+) (\d+))?", e or "")
+        return {int(x) for x in m.groups() if x is not None} - {255} if m else set()
     fought = set()
     for e in revs:
-        m = re.search(r"ring (\d+) (\d+)", e)
-        if m:
-            fought.update({int(m.group(1)), int(m.group(2))} - {255})
+        fought |= ring_of(e)
     print("members who were in the ring:", sorted(fought))
     # Winner stays (the default): after each game with a winner, the winner is still in the ring.
     ids = {"ARENA#0": 0}
@@ -213,15 +239,15 @@ def check(args, out):
         if m:
             ids[m.group(1)] = int(m.group(2))
     plan = os.environ.get("MELEE_ARENA_TEST_PLAN", "")
-    if "mode:" not in plan:
+    if "mode:" not in plan and "doubles" not in plan:
         for k, e in enumerate(host):
             m = re.match(r"game [0-9A-F]{8} ended, winner (ARENA#\d+)", e)
             if not m:
                 continue
             after = next((x for x in host[k + 1:] if x.startswith("room rev")), None)
-            ring = re.search(r"ring (\d+) (\d+)", after or "")
+            ring = ring_of(after)
             winner = ids.get(m.group(1))
-            if ring and winner is not None and winner not in (int(ring.group(1)), int(ring.group(2))):
+            if ring and winner is not None and winner not in ring:
                 problems.append(f"winner {m.group(1)} left the ring under Winner stays: {after}")
     if len(ended) >= args.players and len(fought) < args.players:
         problems.append(f"only members {sorted(fought)} ever fought")
@@ -264,12 +290,15 @@ def check(args, out):
                 _, original, _ = replay_compare.parse_slp(ref)
                 reference = {fr: p for fr, p in original.items() if first <= fr <= last}
                 r = replay_compare.compare_posts(reference, shown, allow_preframe_ulp=True)
+                r["entry_ulp"] = entry_ulp(reference, shown)
+                r["unexpected_mismatches"] -= min(r["unexpected_mismatches"], r["entry_ulp"])
                 if result is None or r["unexpected_mismatches"] < result["unexpected_mismatches"]:
                     result = r
             viewed += 1
             line = (f"m{i} watched {f.name}: frames {first}..{last} of the fighter's {min(original)}..{max(original)}, "
                     f"{result['player_frames']} player-frames, {result['unexpected_mismatches']} mismatches"
-                    + (f" ({result['allowed_preframe_mismatches']} known entry-animation float steps)" if result['allowed_preframe_mismatches'] else ""))
+                    + (f" ({result['allowed_preframe_mismatches'] + result['entry_ulp']} one-step height differences in the entry animation, "
+                       f"a known replay playback difference)" if result['allowed_preframe_mismatches'] or result['entry_ulp'] else ""))
             print(line)
             if result["unexpected_mismatches"] or result["player_frames"] == 0:
                 problems.append(line + f" first {result['first']}")

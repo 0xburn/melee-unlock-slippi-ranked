@@ -35,6 +35,13 @@ enum Kind : uint8_t { kStart = 1, kFrame = 2, kEnd = 3 };
 // both fighters' recordings share (the player names after them are each side's own). Never 0.
 uint32_t game_tag(const uint8_t* start, size_t size);
 
+// Who won a game, from its Game End payload (method, LRA-Start port, each port's placement) and,
+// for doubles, each port's team from its Game Start: 1 the player on `my_port` (or their team)
+// won, 0 they lost, -1 no result (a no contest, a tie, a payload too short).
+int my_result(const uint8_t* game_end, size_t size, int my_port, const uint8_t port_team[4], bool doubles);
+// Each port's team from a Game Start payload (0 for a short one).
+void port_teams(const uint8_t* game_start, size_t size, uint8_t out[4]);
+
 class Sender {
  public:
   // One feed message, whole. Called from event() and stop().
