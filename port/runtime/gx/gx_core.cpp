@@ -1196,6 +1196,9 @@ bool low_poly_fighters_active() {
   const LookLive& look = look_live();
   if (look.exact.load(std::memory_order_relaxed) && !look.exact_low_poly.load(std::memory_order_relaxed))
     return g_low_poly_fighters.load(std::memory_order_relaxed);
+  // A look that keeps the full models (Silhouettes): the Lightweight level's low poly swap stays off.
+  if (look.full_models.load(std::memory_order_relaxed))
+    return g_low_poly_fighters.load(std::memory_order_relaxed) || retro_textures_active();
   return g_low_poly_fighters.load(std::memory_order_relaxed) || lightweight_level() >= 1 || retro_textures_active();
 }
 

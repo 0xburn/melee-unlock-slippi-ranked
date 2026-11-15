@@ -147,6 +147,14 @@ struct RenderOptions {
   bool look_unfiltered = false;
   // Our own renderer version of a look even when the exact look's pack is built (the "64 Style" preset).
   bool look_own = false;
+  // The fighters keep their full models whatever the Lightweight level (Silhouettes: its point is each
+  // fighter's true shape, and the low poly models the game uses for shadows read as lumps).
+  bool look_full_models = false;
+  // A look that lifts the frame cap (Potato, Minimal) keeps what the player had and gives it back when
+  // another look is picked. Leaving Minimal used to leave the cap lifted under every other look.
+  bool look_cap_lifted = false;
+  double look_saved_fps_cap = -1;
+  int look_saved_subframe = 1;
   int look_colours = 0, look_background = 0;
   uint32_t look_background_rgb = 0x2A2A40;
   // Lab view looks (lab_view.h set_style): fighters 0 silhouettes, 1 stick figures, 2 capsules; stage 0 as
@@ -534,6 +542,7 @@ struct LookPreset {
   int lab = 0, lab_stage = 0;   // 0: the 3D scene; 1 stick figures, 2 capsules in the Lab view (stage: 1 outline, 2 blocks)
   bool unlocked = false;        // lifts the frame cap
   bool own = false;             // our renderer version, never the exact look's pack
+  bool full_models = false;     // the fighters' full models even at a Lightweight level that lowers them
 };
 inline const LookPreset* look_presets(int* count) {
   static const LookPreset p[] = {
@@ -550,7 +559,7 @@ inline const LookPreset* look_presets(int* count) {
     {"Capsules", "Every fighter as rounded capsules (its hurtboxes) in its port colour, the stage as solid blocks. No 3D scene.", 2, 0, 0, 0, false, 0, 0, 2, 2, 2},
     {"Minimal", "Stick figures on the stage outline with the frame cap lifted: the least work any look does.", 2, 0, 0, 0, false, 0, 0, 2, 1, 1, true},
     {"64 Style (built-in)", "Our N64-inspired rendering, no patch needed: low poly fighters and sharp 64 x 64 textures. This is different from Diet 64's mod artwork.", 1, 1, 1, 1, true, 0, 0, 1, 0, 0, false, true},
-    {"Silhouettes", "Every fighter as its real model in its port colour, so its true height and shape read, on white platforms over a plain background. No scenery.", 2, 2, 3, 0, false, 1, 2, 2},
+    {"Silhouettes", "Every fighter as its real model in its port colour, so its true height and shape read, on white platforms over a plain background. No scenery.", 2, 3, 3, 0, false, 1, 2, 2, 0, 0, false, false, true},
     {"Classic Style (built-in)", "A built-in Diet Classic-inspired look. No patch needed; it does not use the mod's artwork.", 2, 0, 0, 0, false, 0, 1, 1, 0, 0, false, true},
   };
   *count = (int)(sizeof p / sizeof p[0]);
@@ -562,9 +571,19 @@ inline void apply_look_preset(RenderOptions& o, int index, bool d3d11_available)
   const LookPreset& l = p[index];
   apply_lightweight(o, l.lightweight, d3d11_available);
   if (l.unlocked) {
+    if (!o.look_cap_lifted) {
+      o.look_cap_lifted = true;
+      o.look_saved_fps_cap = o.fps_cap;
+      o.look_saved_subframe = (int)o.subframe;
+    }
     o.fps_cap = 0;
     if (o.subframe == SubFrameMode::Off) o.subframe = SubFrameMode::Authored;
+  } else if (o.look_cap_lifted) {
+    o.look_cap_lifted = false;
+    o.fps_cap = o.look_saved_fps_cap;
+    o.subframe = (SubFrameMode)o.look_saved_subframe;
   }
+  o.look_full_models = l.full_models;
   o.lab_view = l.lab != 0; o.look_lab_fighters = l.lab; o.look_lab_stage = l.lab_stage;
   o.look_fighter = l.fighter; o.look_stage = l.stage; o.look_menus = l.menus; o.look_unfiltered = l.unfiltered;
   o.look_colours = l.colours; o.look_background = l.background; o.effects_level = l.effects; o.look_own = l.own;
@@ -589,7 +608,7 @@ inline int look_preset_of(const RenderOptions& o) {
            o.look_unfiltered == l.unfiltered && o.look_colours == l.colours && o.look_background == l.background &&
            o.effects_level == l.effects && o.lab_view == (l.lab != 0) &&
            (l.lab == 0 || (o.look_lab_fighters == l.lab && o.look_lab_stage == l.lab_stage)) &&
-           (!l.unlocked || o.fps_cap == 0) && o.look_own == l.own;
+           (!l.unlocked || o.fps_cap == 0) && o.look_own == l.own && o.look_full_models == l.full_models;
   };
   // A preset that lifts the cap first (it is the more specific one when the cap is lifted), then the rest.
   for (int i = 0; i < n; ++i) if (p[i].unlocked && same(p[i])) return i;
@@ -608,6 +627,13 @@ inline void migrate_lightweight(RenderOptions& o, bool lowspec_look = false) {
     o.lightweight = 0;
   if (o.low_poly_fighters && o.lightweight < 1) o.lightweight = 1;
   o.low_poly_fighters = 0;   // the ladder decides from here on
+  // Silhouettes as saved before 0.9.121 (flat colour patches on the low poly models): the same look now.
+  if (o.lightweight == 2 && o.look_fighter == 2 && o.look_stage == 3 && o.look_menus == 0 && !o.look_unfiltered &&
+      o.look_colours == 1 && o.look_background == 2 && o.effects_level == 2 && !o.lab_view && !o.look_own &&
+      !o.look_full_models) {
+    o.look_fighter = 3;
+    o.look_full_models = true;
+  }
 }
 
 }  // namespace gx

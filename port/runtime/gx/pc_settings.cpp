@@ -2356,6 +2356,10 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "look_menus") { int n = std::atoi(value.c_str()); if (n >= 0 && n < kSurfaceCount) options.look_menus = n; }
       else if (key == "look_unfiltered") options.look_unfiltered = value == "1";
       else if (key == "look_own") options.look_own = value == "1";
+      else if (key == "look_full_models") options.look_full_models = value == "1";
+      else if (key == "look_cap_lifted") options.look_cap_lifted = value == "1";
+      else if (key == "look_saved_fps") options.look_saved_fps_cap = std::atof(value.c_str());
+      else if (key == "look_saved_subframe") options.look_saved_subframe = std::clamp(std::atoi(value.c_str()), 0, 4);
       else if (key == "look_colours") { int n = std::atoi(value.c_str()); if (n >= 0 && n <= 1) options.look_colours = n; }
       else if (key == "look_background") { int n = std::atoi(value.c_str()); if (n >= 0 && n <= 2) options.look_background = n; }
       else if (key == "look_background_rgb") options.look_background_rgb = (uint32_t)std::strtoul(value.c_str(), nullptr, 16) & 0xFFFFFFu;
@@ -4429,6 +4433,8 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nretro " << (options.retro ? 1 : 0)
        << "\nlook_fighter " << options.look_fighter << "\nlook_stage " << options.look_stage
        << "\nlook_menus " << options.look_menus << "\nlook_unfiltered " << (options.look_unfiltered ? 1 : 0) << "\nlook_own " << (options.look_own ? 1 : 0)
+       << "\nlook_full_models " << (options.look_full_models ? 1 : 0) << "\nlook_cap_lifted " << (options.look_cap_lifted ? 1 : 0)
+       << "\nlook_saved_fps " << options.look_saved_fps_cap << "\nlook_saved_subframe " << options.look_saved_subframe
        << "\nlook_colours " << options.look_colours << "\nlook_background " << options.look_background
        << "\nlook_background_rgb " << std::hex << options.look_background_rgb << std::dec
        << "\nstadium_frozen " << (options.stadium_frozen ? 1 : 0)
@@ -5455,6 +5461,24 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   if (streamline::reflex_available() || streamline::reflex_latency_ms() > 0.0f)   // Vulkan on NVIDIA too
     state.latencies[state.latency_cursor++ % state.latencies.size()] = streamline::reflex_latency_ms();
   bool changed = false;
+  // Hidden test hook: MELEE_TEST_LOOK_SEQUENCE="<frame>:<look>,..." picks those looks (by their number
+  // in look_presets) at those panel frames, exactly as the Look list does, so going from one look to
+  // another in one run can be captured (a look that leaves something of itself behind).
+  if (const char* seq = host::test_env::getenv("MELEE_TEST_LOOK_SEQUENCE")) {
+    static size_t next = 0;
+    const char* p = seq;
+    for (size_t i = 0; i < next && p && *p; ++i) { p = std::strchr(p, ','); if (p) ++p; }
+    int at = 0, look = 0;
+    if (p && *p && std::sscanf(p, "%d:%d", &at, &look) == 2 && ImGui::GetFrameCount() >= at) {
+      apply_look_preset(options, look, d3d11_available());
+      set_lightweight_level(options.lightweight);
+      host::log("look test: frame %d, look %d: frame cap %.0f, sub-frame %d, lightweight %d, full models %d, cap lifted %d",
+                ImGui::GetFrameCount(), look, options.fps_cap, (int)options.subframe, options.lightweight,
+                options.look_full_models ? 1 : 0, options.look_cap_lifted ? 1 : 0);
+      ++next;
+      changed = true;
+    }
+  }
   if (panel_visible) {
     g_settings_palette = options.overlay_palettes[std::clamp(options.overlay_style, 0, 6)];
     g_settings_custom_color_enabled = options.settings_custom_color_enabled;
