@@ -5,6 +5,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <array>
 #include <memory>
@@ -555,6 +557,19 @@ inline bool lightweight_world_draw(const LightweightFilter& e, const DrawCall& d
 inline LightweightFilter lightweight_filter_build(const Frame& f, int level) {
   lightweight_publish_counts();
   LightweightFilter e;
+  // MELEE_TEST_BACKDROP_TRACE=<from>-<to> (tests): one line per simulation frame in that range.
+  static const auto trace_range = [] {
+    unsigned long long from = 0, to = 0;
+    if (const char* v = std::getenv("MELEE_TEST_BACKDROP_TRACE")) std::sscanf(v, "%llu-%llu", &from, &to);
+    return std::pair<unsigned long long, unsigned long long>(from, to);
+  }();
+  const bool trace = f.sequence >= trace_range.first && f.sequence <= trace_range.second && trace_range.second;
+  if (trace) {
+    uint32_t persp = 0, skinned = 0;
+    for (const auto& d : f.draws) if (d.xf_regs[0x26] == 0) { ++persp; skinned += d.skinned ? 1 : 0; }
+    std::fprintf(stderr, "backdrop trace %llu: scene %02X/%02X in_match %d draws %zu perspective %u skinned %u\n",
+                 (unsigned long long)f.sequence, f.scene_major, f.scene_minor, frame_in_match(f) ? 1 : 0, f.draws.size(), persp, skinned);
+  }
   if (!frame_in_match(f)) return e;
   const DrawCall* scene = frame_scene_draw(f);
   if (!scene) return e;
@@ -600,6 +615,11 @@ inline LightweightFilter lightweight_filter_build(const Frame& f, int level) {
       if (!e.have_fighters || z > e.fighter_far) e.fighter_far = z;
       e.have_fighters = true;
     }
+    if (trace) {
+      const LightweightCounts last = lightweight_last_counts();
+      std::fprintf(stderr, "backdrop trace %llu: fighters %d far %.1f, last frame drawn %u skipped %u\n",
+                   (unsigned long long)f.sequence, e.have_fighters ? 1 : 0, e.fighter_far, last.drawn, last.skipped);
+    }
   }
   lightweight_debug(f, e);
   return e;
@@ -633,18 +653,43 @@ inline bool lightweight_background(const LightweightFilter& e, const Frame& f, c
   const float front = e.fighter_far + 30.0f;
   bool seen = false;
   float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+  // The piece's extent first. A piece that surrounds the camera (Battlefield's sky sphere, about 1100
+  // units across with the camera inside it) is scenery whatever the depth of the point that happens
+  // to be in a corner of the view: its inner wall passes within the play plane's depth there, and as
+  // the camera moved the whole sky drew for a few frames at a time (a player's replay: 33 flashes of
+  // Battlefield's sky through the Arcade look's plain background in one game). No stage floor, wall
+  // or platform surrounds the camera.
   for (uint32_t i = 0; i < d.vertex_count; ++i) {
     const int row = (int)(v[i].posmtx & 0x3F);
     if (row + 2 >= 64) return false;
     const float* m = &d.posMatrices[row * 4];
+    for (int r = 0; r < 3; ++r) {
+      const float c = m[r * 4] * v[i].pos[0] + m[r * 4 + 1] * v[i].pos[1] + m[r * 4 + 2] * v[i].pos[2] + m[r * 4 + 3];
+      if (!std::isfinite(c)) return false;
+      lo[r] = std::min(lo[r], c); hi[r] = std::max(hi[r], c);
+    }
+  }
+  if (lo[0] < 0 && hi[0] > 0 && lo[1] < 0 && hi[1] > 0 && lo[2] < 0 && hi[2] > 0) return true;
+  for (uint32_t i = 0; i < d.vertex_count; ++i) {
+    const float* m = &d.posMatrices[(int)(v[i].posmtx & 0x3F) * 4];
     float p[3];
     for (int r = 0; r < 3; ++r) p[r] = m[r * 4] * v[i].pos[0] + m[r * 4 + 1] * v[i].pos[1] + m[r * 4 + 2] * v[i].pos[2] + m[r * 4 + 3];
-    if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) return false;
-    for (int r = 0; r < 3; ++r) { lo[r] = std::min(lo[r], p[r]); hi[r] = std::max(hi[r], p[r]); }
     const float z = p[2];
     if (z >= 0 || std::abs(p[0]) > -z * 1.5f || std::abs(p[1]) > -z * 1.5f) continue;   // out of view
     seen = true;
-    if (z >= limit && (!band || z <= front)) return false;   // something visible is on the play plane: keep it
+    if (z >= limit && (!band || z <= front)) {   // something visible is on the play plane: keep it
+      static const auto range = [] {
+        unsigned long long from = 0, to = 0;
+        if (const char* t = std::getenv("MELEE_TEST_BACKDROP_TRACE")) std::sscanf(t, "%llu-%llu", &from, &to);
+        return std::pair<unsigned long long, unsigned long long>(from, to);
+      }();
+      if (range.second && f.sequence >= range.first && f.sequence <= range.second &&
+          (hi[0] - lo[0] > 300.0f || hi[1] - lo[1] > 300.0f || hi[2] - lo[2] > 300.0f))
+        std::fprintf(stderr, "backdrop keep %llu: draw %zu verts %u size %.0f x %.0f x %.0f z %.0f..%.0f, kept by a point at %.0f,%.0f,%.0f (fighters %.0f, limit %.0f) backdrop %d\n",
+                     (unsigned long long)f.sequence, (size_t)(&d - f.draws.data()), d.vertex_count, hi[0] - lo[0], hi[1] - lo[1],
+                     hi[2] - lo[2], lo[2], hi[2], p[0], p[1], z, e.fighter_far, limit, d.frustum_backdrop ? 1 : 0);
+      return false;
+    }
   }
   if (seen) return true;
   // Nothing of it in view by its corners: background when all of it lies behind the play plane (in
