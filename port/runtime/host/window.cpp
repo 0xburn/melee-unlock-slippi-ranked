@@ -1052,6 +1052,9 @@ void apply_known_box_layout(int idx) {
   if (lower.find("vjoy") != std::string::npos) {
     g_hid_bindings[idx] = vjoy_b0xx_bindings();
     host::log("hid pad %d: %s, using the B0XX (vJoy) layout", idx + 1, name.c_str());
+  } else if (hidpad_frame1_dinput(idx)) {
+    g_hid_bindings[idx] = frame1_dinput_bindings();
+    host::log("hid pad %d: %s, using the Frame1 DInput layout", idx + 1, name.c_str());
   } else if (lower.find("leonardo") != std::string::npos || lower.find("haybox") != std::string::npos ||
              hidpad_haybox_dinput(idx)) {
     // By name for the Arduino-based boxes; by descriptor for the Pico-based ones (a Frame1, say),

@@ -502,8 +502,44 @@ void check_frame1_dinput_axes() {
   }
 }
 
+// A Frame1 on its own firmware in DInput mode (pico-rectangle's "HID with triggers" report): every
+// stick byte comes back exactly, a resting stick reads centred (it read full left and full up, the
+// top-left corner a player reported), and the trigger sliders read as their bytes.
+void check_frame1_own_dinput() {
+  CHECK(host::frame1_dinput_name("Frame1 Dinput"));
+  CHECK(host::frame1_dinput_name("pico-rectangle - HID with triggers mode"));
+  CHECK(!host::frame1_dinput_name("Arduino Leonardo"));
+  auto word = [](long v) { return (unsigned long)(v & 0xFFFF); };
+  const unsigned long rest = word(127);                       // ((128 - 128) << 8) + 127
+  const int8_t enc = host::frame1_stick_encoding(rest, 16);
+  CHECK(enc == host::kFrame1Twos);
+  CHECK(host::frame1_stick(rest, 16, enc) == 0);
+  CHECK(host::frame1_stick(rest, 16, enc, true) == 0);
+  for (int g = 1; g <= 255; ++g) {
+    CHECK(host::frame1_stick(word(((long)(g - 128) << 8) + 127), 16, enc) == g - 128);
+    CHECK(host::frame1_stick(word(((long)(-(g - 128)) << 8) + 127), 16, enc, true) == (g - 128 > 127 ? 127 : g - 128));
+  }
+  // Offset binary (centre 0x8000) is still read right if a build sends it that way.
+  const int8_t off = host::frame1_stick_encoding(128ul * 257, 16);
+  CHECK(off == host::kFrame1Offset);
+  for (int g = 0; g <= 255; ++g) CHECK(host::frame1_stick((unsigned long)g * 257, 16, off) == g - 128);
+  // Triggers: pico-rectangle's ((l - 128) << 8) + 128, or plain l << 8, told apart by the rest.
+  for (int rest_l : {0, 31}) {
+    const unsigned long pico_rest = word(((long)(rest_l - 128) << 8) + 128);
+    const int8_t te = host::frame1_trigger_encoding(pico_rest, 16);
+    CHECK(host::frame1_trigger(pico_rest, 16, te) == rest_l);
+    for (int l = 0; l <= 255; ++l) CHECK(host::frame1_trigger(word(((long)(l - 128) << 8) + 128), 16, te) == l);
+    const int8_t pe = host::frame1_trigger_encoding((unsigned long)rest_l << 8, 16);
+    for (int l = 0; l <= 255; ++l) CHECK(host::frame1_trigger((unsigned long)l << 8, 16, pe) == l);
+  }
+  const host::HidBindings b = host::frame1_dinput_bindings();
+  CHECK(b.mask[(size_t)host::BindAction::A] == 1u << 0 && b.mask[(size_t)host::BindAction::Z] == 1u << 12);
+  CHECK(b.mask[(size_t)host::BindAction::L] == 1u << 14 && b.mask[(size_t)host::BindAction::R] == 1u << 13);
+}
+
 int main() {
   check_frame1_dinput_axes();
+  check_frame1_own_dinput();
   check_haybox_shape();
   check_trigger_cap();
   check_binding_levels();

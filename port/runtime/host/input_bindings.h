@@ -264,6 +264,20 @@ inline HidBindings haybox_dinput_bindings() {
   b.mask[(size_t)BindAction::DLeft] = HID_HAT_LEFT; b.mask[(size_t)BindAction::DRight] = HID_HAT_RIGHT;
   return b;
 }
+// A Frame1 on its own firmware in DInput mode ("Frame1 Dinput", hid_pad.h): the button order of its
+// maker's pico-rectangle HID report, A B X Y Start, three unused, D-pad left right down up, Z R L.
+// The analog sliders carry the trigger travel; these bits are the full presses.
+inline HidBindings frame1_dinput_bindings() {
+  HidBindings b{};
+  b.mask[(size_t)BindAction::A] = 1u << 0;  b.mask[(size_t)BindAction::B] = 1u << 1;
+  b.mask[(size_t)BindAction::X] = 1u << 2;  b.mask[(size_t)BindAction::Y] = 1u << 3;
+  b.mask[(size_t)BindAction::Start] = 1u << 4;
+  b.mask[(size_t)BindAction::DLeft] = 1u << 8;  b.mask[(size_t)BindAction::DRight] = 1u << 9;
+  b.mask[(size_t)BindAction::DDown] = 1u << 10; b.mask[(size_t)BindAction::DUp] = 1u << 11;
+  b.mask[(size_t)BindAction::Z] = 1u << 12; b.mask[(size_t)BindAction::R] = 1u << 13;
+  b.mask[(size_t)BindAction::L] = 1u << 14;
+  return b;
+}
 // vJoy fed as a B0XX (the b0xx-ahk keyboard setup and others that use its profile), from
 // b0xx-keyboard.ini.
 inline HidBindings vjoy_b0xx_bindings() {
