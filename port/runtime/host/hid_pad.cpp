@@ -270,7 +270,17 @@ bool hidpad_raw_input(void* device_handle, const uint8_t* report, uint32_t size,
   Slot& s = g_slots[index];
   if (!s.device) {
     const std::string path = device_path(device);
-    if (claimed_elsewhere(info.hid, path)) return false;
+    if (claimed_elsewhere(info.hid, path)) {
+      // Named once in the log: which pad is being read through XInput (or another reader) says what a
+      // box in its XInput mode calls itself, which a report about its stick values needs.
+      static std::vector<HANDLE> named;
+      if (path.find("IG_") != std::string::npos && std::find(named.begin(), named.end(), device) == named.end() && named.size() < 16) {
+        named.push_back(device);
+        host::log("hid pad: %s (%04X:%04X) is read through XInput", friendly_name(path, info.hid).c_str(),
+                  (unsigned)info.hid.dwVendorId, (unsigned)info.hid.dwProductId);
+      }
+      return false;
+    }
     if (!describe(s, device)) return false;
     s.device = device;
     s.name = friendly_name(path, info.hid);
