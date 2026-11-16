@@ -98,9 +98,8 @@ static bool arena_capture() { return false; }
 static uint16_t arena_withheld() { return 0; }
 #endif
 #include "practice_menu.h"
-// Lab view is hidden until its silhouette packs can ship at a reasonable size: no F3 toggle, no
-// Overlays switch, never drawn (so the renderers never skip the scene for it). Code kept intact.
-constexpr bool kLabViewAvailable = false;
+// Lab view: the release ships its silhouette packs in Lab\ (tools/build_lab_assets.py), on both engines.
+constexpr bool kLabViewAvailable = true;
 #ifndef MELEE_PORT_VERSION
 #define MELEE_PORT_VERSION "dev"
 #endif
@@ -5412,12 +5411,12 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   if (ImGui::IsKeyPressed(ImGuiKey_F2, false) && ImGui::GetIO().KeyCtrl) { request_frame_capture(90); host::log("capture: Ctrl+F2, writing the next 90 presented frames into capture\\"); }
   // F3: Lab view on or off. Marked dirty, so it is saved with the other settings the next time the
   // panel is open (the panel is what writes the settings file).
-  // The Lab view draws from the Slippi frame data the translated guest sends; the Source Port has
-  // none, so F3 stays off there.
-  if (kLabViewAvailable && !options.native_source && ImGui::IsKeyPressed(ImGuiKey_F3, false)) { options.lab_view = !options.lab_view; state.dirty = true; host::log("lab view: %s", options.lab_view ? "on" : "off"); }
+  // Both engines feed it: the Static Recomp its Slippi frame data, the Source Port a geometry snapshot.
+  if (kLabViewAvailable && ImGui::IsKeyPressed(ImGuiKey_F3, false)) { options.lab_view = !options.lab_view; state.dirty = true; host::log("lab view: %s", options.lab_view ? "on" : "off"); }
   // Drawn first, on the background list, so every overlay and window below lands on top of it.
   // Called every frame, off or on, so lab::covering() always describes this frame.
   lab::set_style(options.look_lab_fighters, options.look_lab_stage);
+  lab::set_enabled(options.lab_view && kLabViewAvailable);
   lab::set_colors(options.lab_colour, options.lab_colour_background, options.lab_colour_stage);
   const bool lab_on = options.lab_view && (kLabViewAvailable || options.look_lab_fighters != 0);   // the styles need no packs
   lab::draw(lab_on && !state.fill_window, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
@@ -10520,17 +10519,11 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // Render latency, a developer readout, is under Advanced at the bottom of this tab.
 #ifndef MELEE_NO_SLIPPI   // the Lab view is the Static Recomp's: no switch for it in the build without that engine
     if (kLabViewAvailable) {
-    ImGui::BeginDisabled(options.native_source);
     changed |= settings_toggle("Lab view (F3)", &options.lab_view);
-    ImGui::EndDisabled();
-    if (options.native_source)
-      engine_only_reason("Static Recomp only. The Lab view draws from the Slippi frame data the Static\n"
-                         "Recomp sends, and the Source Port has none.");
-    else if (ImGui::IsItemHovered())
+    if (ImGui::IsItemHovered())
       ImGui::SetTooltip("Draws matches the way Slippi Lab draws replays: flat character silhouettes\n"
                         "on a plain stage, over the game image. Display only, so it is safe online;\n"
-                        "menus and character select look normal. Needs the Lab folder from\n"
-                        "tools/build_lab_assets.py for the silhouettes.\n"
+                        "menus and character select look normal.\n"
                         "A different tool from 20XX TE's Collision bubbles (Mods, Source Port), which\n"
                         "draws hitboxes inside the match itself.");
     // Its "Skip the 3D scene underneath" switch is under Advanced.
@@ -10592,12 +10585,10 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
 #ifndef MELEE_NO_SLIPPI   // as for the Lab view switch above
       if (kLabViewAvailable) {
         // Only with the Lab view on, and only on the engine that has it.
-        ImGui::BeginDisabled(options.native_source || !options.lab_view);
+        ImGui::BeginDisabled(!options.lab_view);
         changed |= settings_toggle("Skip the 3D scene underneath", &options.lab_skip_scene);
         ImGui::EndDisabled();
-        if (options.native_source)
-          engine_only_reason("Static Recomp only, with the Lab view (the Source Port has no Lab view).");
-        else if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
           ImGui::SetTooltip("While the Lab view is showing, the game's own 3D scene is not drawn at all,\n"
                             "since it would be covered anyway. Much lighter on the graphics card, so a\n"
                             "weak laptop runs smoother. The game itself runs exactly the same.%s",

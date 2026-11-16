@@ -1246,7 +1246,7 @@ void native_retrace() {
   native_audio_tick();
   g_game.fire_alarms(host::cpu->tb);
   g_game.retrace();
-  if (g_look_snapshot && lab::styles_on()) {
+  if (g_look_snapshot && lab::active()) {
     MuLookSnapshot snapshot{};
     g_look_snapshot(&snapshot);
     MuLookItems items{};

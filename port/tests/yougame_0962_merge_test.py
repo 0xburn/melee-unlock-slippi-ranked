@@ -118,7 +118,7 @@ class YouGame0962MergeTest(unittest.TestCase):
                     self.assertIn('game_proc("' + symbol + '")', active)
         retrace = host.split("void native_retrace() {", 1)[1].split("void h_gx_fifo", 1)[0]
         self.assertLess(retrace.index("g_game.retrace();"), retrace.index("g_look_snapshot(&snapshot);"))
-        self.assertIn("g_look_snapshot && lab::styles_on()", retrace)
+        self.assertIn("g_look_snapshot && lab::active()", retrace)
         self.assertIn("lab::native_frame(snapshot, g_look_items ? &items : nullptr);", retrace)
 
     def test_shader_workers_and_gl_headers_stay_platform_specific(self):

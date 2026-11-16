@@ -906,7 +906,18 @@ void draw_stage(ImDrawList* dl, const View& v, const GameInfo& info, const Frame
   pts.reserve(shape->main.size());
   for (const ImVec2& p : shape->main) pts.push_back(v(p));
   const ImU32 stage = rgb(stage_color());
-  dl->AddConcavePolyFilled(pts.data(), (int)pts.size(), stage);
+  {  // earcut, as for the silhouettes: ImGui's own concave fill left the stage body empty
+    std::vector<std::vector<std::array<float, 2>>> polygon(1);
+    for (const ImVec2& q : pts) polygon[0].push_back({q.x, q.y});
+    const std::vector<uint32_t> tris = mapbox::earcut<uint32_t>(polygon);
+    if (!tris.empty()) {
+      const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+      dl->PrimReserve((int)tris.size(), (int)pts.size());
+      const ImDrawIdx base = (ImDrawIdx)dl->_VtxCurrentIdx;
+      for (uint32_t i : tris) dl->PrimWriteIdx((ImDrawIdx)(base + i));
+      for (const ImVec2& q : pts) dl->PrimWriteVtx(q, uv, stage);
+    }
+  }
   dl->AddPolyline(pts.data(), (int)pts.size(), stage, ImDrawFlags_Closed, std::max(1.0f, 0.5f * v.px));
   const float line_w = std::max(1.0f, 1.0f * v.px);   // SVG's default stroke, one world unit
   if (live) {
@@ -1247,6 +1258,11 @@ bool covering() { return g_covering.load(std::memory_order_relaxed); }
 
 void draw(bool enabled, float width, float height) {
   g_covering.store(false, std::memory_order_relaxed);
+  {  // one line each time the reason the view is not showing changes (test runs read it)
+    static int last = -1;
+    const int why = !enabled ? 1 : (width <= 0 || height <= 0) ? 2 : !match_in_progress() ? 3 : 0;
+    if (why != last) { last = why; host::log("lab view: %s", why == 1 ? "off" : why == 2 ? "no window" : why == 3 ? "waiting for a match frame" : "drawing"); }
+  }
   if (!enabled || width <= 0 || height <= 0 || !match_in_progress()) return;
   GameInfo info;
   Frame f;
@@ -1307,5 +1323,9 @@ void set_colors(const uint32_t players[4], uint32_t background, uint32_t stage) 
 void set_hud_font(ImFont* font) { g_hud_font = font; }
 
 bool styles_on() { return g_fighter_style.load(std::memory_order_relaxed) != 0; }
+
+static std::atomic<bool> g_enabled{false};
+void set_enabled(bool on) { g_enabled.store(on, std::memory_order_relaxed); }
+bool active() { return styles_on() || g_enabled.load(std::memory_order_relaxed); }
 
 }  // namespace lab

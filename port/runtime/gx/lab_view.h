@@ -44,6 +44,9 @@ constexpr uint32_t kDefaultBackground = 0xF8FAFC, kDefaultStage = 0x1E293B;
 // A stick figure or capsule look is chosen: those draw from the live hurtboxes and need no
 // silhouette packs, so the view runs for them while the silhouette view stays hidden.
 bool styles_on();
+// The Lab view itself is on (any fighter look). The engines feed it frames while this or styles_on() is true.
+void set_enabled(bool on);
+bool active();
 // The heavy font the view's HUD draws its percent with (loaded large by the settings UI). Null: ImGui's default.
 void set_hud_font(ImFont* font);
 

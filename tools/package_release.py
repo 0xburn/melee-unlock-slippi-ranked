@@ -598,6 +598,15 @@ def main():
         if not src.is_file():
             raise SystemExit(f"missing license text: {src}")
         shutil.copy2(src, licenses / dst)
+    # The Lab view's fighter packs (tools/build_lab_assets.py from Slippi Lab, MIT). Without them the
+    # Lab view can only draw a plain marker per fighter, so a release without all 27 is refused.
+    lab_src = ROOT / "build/lab"
+    lab_packs = sorted(lab_src.glob("*.lab")) if lab_src.is_dir() else []
+    if len(lab_packs) != 27:
+        raise SystemExit(f"Lab packs missing: {len(lab_packs)} of 27 in {lab_src} (run tools/build_lab_assets.py)")
+    (folder / "Lab").mkdir(exist_ok=True)
+    for pack in lab_packs:
+        shutil.copy2(pack, folder / "Lab" / pack.name)
     mod_tools = ROOT / "port/third_party/mod_tools"
     (folder / "tools").mkdir(exist_ok=True)
     for tool, digest in (("xdelta3.exe", "d81f59b2fe5e8589c0ee9782e231c805084f4d23dfade413903a4cad63b4e342"),

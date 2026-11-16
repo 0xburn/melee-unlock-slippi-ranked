@@ -62,6 +62,11 @@ MU_EXPORT void mu_look_snapshot_v1(MuLookSnapshot* out)
             if (vs->state.match_result != OUTCOME_NONE) out->major |= MU_LOOK_SCENE_ENDED;
         }
         if (gm_GetDbPauseFlag(1)) out->major |= MU_LOOK_SCENE_PAUSED;
+        /* The VS controller's copy is empty outside its own scene: the stage that was actually loaded. */
+        if (out->stage <= 0) {
+            extern StKind Stage_80225194(void);
+            out->stage = Stage_80225194();
+        }
     }
     {
         MapCollData* map = mpLib_8004D164();
