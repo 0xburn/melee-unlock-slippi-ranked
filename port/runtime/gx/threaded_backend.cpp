@@ -172,7 +172,7 @@ class ThreadedBackend final : public Backend {
                     : live_options.fps_cap < 0 ? last_refresh
                     : present_uncapped ? 0.0 : 2.0 * last_refresh;
       // A display that follows the frames (G-Sync, FreeSync, read by the renderer from the display's
-      // own counts) is fed just under its refresh and synced, whatever the cap and V-Sync say: above
+      // own counts) is fed just under its refresh and synced when the cap follows the monitor: above
       // the refresh it stops following and tears, under it syncing costs nothing. A 0.8.99 player on
       // a 240 Hz G-Sync screen saw tearing with V-Sync off, and again after turning it on and off.
       int vrr = renderer->variable_refresh();
@@ -203,7 +203,10 @@ class ThreadedBackend final : public Backend {
         if (vrr < 0 && host::now_seconds() < probe_until) wanted = 0.9 * last_refresh;
         else probe_state = 2;
       }
-      if (vrr == 1 && (wanted <= 0.0 || wanted > vrr_cap)) wanted = vrr_cap;
+      // Only for "follow the monitor" (the default): a cap or "uncapped" the player chose is kept,
+      // since the game never lowers the frame rate on its own (B-953: uncapped on a 240 Hz G-Sync
+      // screen was held at 224).
+      if (vrr == 1 && live_options.fps_cap < 0 && (wanted <= 0.0 || wanted > vrr_cap)) wanted = vrr_cap;
       // NVIDIA frame generation 2x..6x: render the target rate divided by the multiplier and let
       // generation fill the rest. Rendering at the full target left no room for generated frames,
       // so none were shown (NVIDIA's guide: the frame limit applies to rendered frames).
