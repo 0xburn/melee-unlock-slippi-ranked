@@ -219,12 +219,29 @@ void mu_slippi_css_hand(int port, float x, float y)
     unsigned int got = 0;
     int ix, iy, packed;
 
-    if (!mu_slippi_css_online() || ctrl_port == NULL || port != *ctrl_port) {
-        return;
-    }
     ix = (int) (x * 10.0f);
     iy = (int) (y * 10.0f);
     packed = (ix & 0xFFFF) << 16 | (iy & 0xFFFF);
+    if (port >= 0 && port < 4) {
+        /* Every hand on every character select, when it moved: the easter egg's face can be taken
+         * hold of. The host only looks at it while the face is out. */
+        static int last_any[4] = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF };
+        if (packed != last_any[port]) {
+            unsigned char any[5];
+            last_any[port] = packed;
+            any[0] = (unsigned char) port;
+            any[1] = (unsigned char) (ix >> 8);
+            any[2] = (unsigned char) ix;
+            any[3] = (unsigned char) (iy >> 8);
+            any[4] = (unsigned char) iy;
+            /* The character select frame command with five bytes: a hand (the port, x, y). */
+            mu_online_abi_command(CMD_CSS_FRAME, any, sizeof any, reply, sizeof reply, &got);
+            got = 0;
+        }
+    }
+    if (!mu_slippi_css_online() || ctrl_port == NULL || port != *ctrl_port) {
+        return;
+    }
     if (packed == last) {
         return;
     }

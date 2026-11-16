@@ -1,7 +1,10 @@
-// An easter egg on every character select: the D-pad code (Up Up Down Down Left Right Left Right B A)
-// sends Walter bouncing around the picture like the old DVD screensaver. Most launches never meet a
-// corner; about one in five is aimed so that after a few bounces he lands exactly in one, which gets
-// a flash, a spin and a menu sound. The code again, or leaving the character select, sends him away.
+// An easter egg on every character select: the D-pad code (Up Up Down Down Left Right Left Right, then
+// B A or A B) sends a dog's face bouncing around the picture like the old DVD screensaver: B A is
+// Bailey, A B is Walter. Most launches never meet a corner; about one in five is aimed so that after
+// a few bounces he lands exactly in one, which gets a flash, a spin and a menu sound. After ten
+// seconds out he starts to turn as he flies. The same code again, or leaving the character select,
+// sends him away; the other code swaps the face. A hand that presses A on him takes hold: moving it
+// stretches him from that spot, and letting go lets him swing back.
 //
 // Local drawing only: the detector reads the pads and changes nothing in them, nothing is sent to
 // an opponent, and nothing is drawn in a match or a replay. The pure parts (the code detector and the
@@ -21,7 +24,10 @@ void watch_pads(const host::PadState pads[4]);
 // Game thread, every character select frame (the CSS frame command): marks a character select as
 // on screen and returns a menu sound to play (0 none).
 uint8_t css_frame();
-// Walter is out and a character select is on screen.
+// Game thread: a character select hand moved (the shim's hand command; any character select, any
+// port), in tenths of the game's own units. A hand on him with A held takes hold and pulls.
+void set_hand(int port, int16_t x10, int16_t y10);
+// He is out and a character select is on screen.
 bool active();
 struct Frame { float game_x0 = 0, game_y0 = 0, game_x1 = 0, game_y1 = 0; double time = 0; };
 // Drawing thread, inside ImGui: draws him over the game picture while active().
@@ -31,41 +37,48 @@ void draw(const Frame& f);
 // GameCube pad bits (window.cpp's PAD_* values).
 constexpr uint16_t kDL = 0x0001, kDR = 0x0002, kDD = 0x0004, kDU = 0x0008, kB = 0x0200, kA = 0x0100;
 constexpr uint16_t kWatched = kDL | kDR | kDD | kDU | kA | kB;
-constexpr uint16_t kSequence[10] = {kDU, kDU, kDD, kDD, kDL, kDR, kDL, kDR, kB, kA};
-constexpr int kSequenceLength = 10;
+constexpr uint16_t kSequence[8] = {kDU, kDU, kDD, kDD, kDL, kDR, kDL, kDR};   // then B A, or A B
+constexpr int kSequenceLength = 8;
 constexpr int kMaxGapPolls = 90;   // a pause longer than 1.5 s between two presses starts over
+constexpr int kBailey = 1, kWalter = 2;   // what feed() answers: the code ended B A, or A B
 
 // One port. Presses are rising edges of the six watched buttons; other buttons are ignored, a
 // held button counts once, two watched buttons going down together are not part of the code.
 struct Detector {
   uint16_t last = 0;
-  int step = 0;        // how much of the code has been entered
+  int step = 0;        // how much of the code has been entered (8: the D-pad part; 9: and the first of B, A)
+  uint16_t tail = 0;   // step 9: which of B and A came first
   int idle = 0;        // polls since the last watched press
-  // One pad poll. True on the poll that completes the code.
-  bool feed(uint16_t buttons) {
+  // One pad poll. On the poll that completes a code: kBailey (ended B A) or kWalter (ended A B); else 0.
+  int feed(uint16_t buttons) {
     const uint16_t now = buttons & kWatched;
     const uint16_t pressed = (uint16_t)(now & ~last);
     last = now;
     if (!pressed) {
       if (step > 0 && ++idle > kMaxGapPolls) { step = 0; idle = 0; }
-      return false;
+      return 0;
     }
     idle = 0;
-    if (pressed & (pressed - 1)) { step = 0; return false; }
-    if (pressed == kSequence[step]) {
-      if (++step == kSequenceLength) { step = 0; return true; }
-      return false;
+    if (pressed & (pressed - 1)) { step = 0; return 0; }
+    if (step == kSequenceLength + 1) {
+      // The last press: the other one of B and A.
+      const bool done = pressed == (tail == kB ? kA : kB);
+      const int which = tail == kB ? kBailey : kWalter;
+      step = !done && pressed == kSequence[0] ? 1 : 0;
+      return done ? which : 0;
     }
+    if (step == kSequenceLength && (pressed == kA || pressed == kB)) { tail = pressed; ++step; return 0; }
+    if (step < kSequenceLength && pressed == kSequence[step]) { ++step; return 0; }
     // A wrong press: keep the longest end of what was entered (this press included) that is a
     // start of the code, so Up Up Up Down Down ... still counts.
     int keep = 0;
-    for (int len = step; len >= 1; --len) {
+    for (int len = step < kSequenceLength ? step : kSequenceLength; len >= 1; --len) {
       bool ok = kSequence[len - 1] == pressed;
       for (int i = 0; ok && i < len - 1; ++i) ok = kSequence[i] == kSequence[step - (len - 1) + i];
       if (ok) { keep = len; break; }
     }
     step = keep;
-    return false;
+    return 0;
   }
 };
 

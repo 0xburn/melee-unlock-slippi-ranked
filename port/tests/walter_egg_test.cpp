@@ -28,7 +28,22 @@ static void test_detector() {
   { Detector d; std::vector<uint16_t> v = {kDU}; v.insert(v.end(), kCode.begin(), kCode.end()); CHECK(feed(d, v) == 1); }  // Up Up Up ...
   { Detector d; std::vector<uint16_t> v = {kDU, kDU, kDD, kDU, kDU, kDD, kDD, kDL, kDR, kDL, kDR, kB, kA}; CHECK(feed(d, v) == 1); }
   { Detector d; std::vector<uint16_t> v = kCode; v[4] = kDR; CHECK(feed(d, v) == 0); }        // wrong order
-  { Detector d; std::vector<uint16_t> v = kCode; std::swap(v[8], v[9]); CHECK(feed(d, v) == 0); }   // A before B
+  { Detector d; std::vector<uint16_t> v = kCode; std::swap(v[8], v[9]); CHECK(feed(d, v) == kWalter); }   // A then B: the other face
+  { Detector d; CHECK(feed(d, kCode) == kBailey); }                                                       // B then A
+  { Detector d; std::vector<uint16_t> v = kCode; v[9] = kB; CHECK(feed(d, v) == 0); }                     // B B
+  { Detector d; std::vector<uint16_t> v = kCode; v[8] = kA; CHECK(feed(d, v) == 0); }                     // A A
+  { // B, then a wrong press, then A: not the code; the code right after still counts
+    Detector d; std::vector<uint16_t> v = kCode; v.insert(v.begin() + 9, kDL); CHECK(feed(d, v) == 0); CHECK(feed(d, kCode) == kBailey);
+  }
+  { // B, then Up starts the code over: Up (kept) Up Down Down Left Right Left Right A B
+    Detector d; std::vector<uint16_t> v(kCode.begin(), kCode.begin() + 9);
+    const std::vector<uint16_t> rest = {kDU, kDU, kDD, kDD, kDL, kDR, kDL, kDR, kA, kB};
+    v.insert(v.end(), rest.begin(), rest.end()); CHECK(feed(d, v) == kWalter);
+  }
+  { // both codes, one after the other
+    Detector d; std::vector<uint16_t> w = kCode; std::swap(w[8], w[9]);
+    CHECK(feed(d, kCode) == kBailey); CHECK(feed(d, w) == kWalter); CHECK(feed(d, w) == kWalter);
+  }
   { Detector d; std::vector<uint16_t> v = kCode; v.pop_back(); CHECK(feed(d, v) == 0); }       // unfinished
   { // a pause too long in the middle starts over
     Detector d; int done = feed(d, std::vector<uint16_t>(kCode.begin(), kCode.begin() + 5));
