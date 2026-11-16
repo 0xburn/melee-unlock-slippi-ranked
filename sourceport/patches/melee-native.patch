@@ -77815,7 +77815,7 @@ index 12a45b712..70467b648 100644
      fp->x2226_b1 = true;
      fp->x222A_b0 = true;
 diff --git a/src/melee/ft/kinds/ftKirby/ftkirby.c b/src/melee/ft/kinds/ftKirby/ftkirby.c
-index ef9c7233a..ec48e4272 100644
+index ef9c7233a..af08e0446 100644
 --- a/src/melee/ft/kinds/ftKirby/ftkirby.c
 +++ b/src/melee/ft/kinds/ftKirby/ftkirby.c
 @@ -1,3 +1,9 @@
@@ -77884,12 +77884,21 @@ index ef9c7233a..ec48e4272 100644
  }
  
  void ftKb_Init_800EE74C(HSD_GObj* gobj)
-@@ -2680,12 +2689,12 @@ void ftKb_Init_LoadSpecialAttrs(HSD_GObj* gobj)
+@@ -2680,12 +2689,21 @@ void ftKb_Init_LoadSpecialAttrs(HSD_GObj* gobj)
  
  void ftKb_Init_800EEB00(Fighter_GObj* gobj, ArticleDynamicBones** arg1)
  {
 -    *arg1 = ft_80459B88.hats[Ft_Kind_Pichu]->hat_dynamics[4]->ftDynamicBones;
++#ifdef MU_NATIVE
++    /* ftLib_8008770C: the color the articles of Kirby's copy of Game & Watch take (it_8027CE64
++     * reads it as a 4-byte GXColor; the outline is the next word, ftKb_Init_800EEB1C). The console
++     * copies this word as it is: its 4 bytes, in the disc data's order. Read as a pointer it became
++     * 8 host bytes written into that 4-byte color, and Linux's stack protector stopped the game
++     * when Kirby used Game & Watch's Chef (crash reports from 0.9.115 and 0.9.120 on Linux). */
++    __builtin_memcpy(arg1, &DP(ft_80459B88.hats[Ft_Kind_Pichu]->hat_dynamics[4])->ftDynamicBones, 4);
++#else
 +    *arg1 = DP(DP(ft_80459B88.hats[Ft_Kind_Pichu]->hat_dynamics[4])->ftDynamicBones);
++#endif
  }
  
  void ftKb_Init_800EEB1C(Fighter_GObj* gobj, s32* arg1)
@@ -77899,7 +77908,7 @@ index ef9c7233a..ec48e4272 100644
  }
  
  void ftKb_Init_OnKnockbackEnter(HSD_GObj* gobj)
-@@ -2737,6 +2746,12 @@ float const ftKb_Init_803B7548[10] = { 0 };
+@@ -2737,6 +2755,12 @@ float const ftKb_Init_803B7548[10] = { 0 };
  
  void ftKb_SpecialN_800EEC34(int arg0, int arg1, int arg2)
  {
@@ -77912,7 +77921,7 @@ index ef9c7233a..ec48e4272 100644
      int i;
      int lo;
  
-@@ -2752,8 +2767,13 @@ void ftKb_SpecialN_800EEC34(int arg0, int arg1, int arg2)
+@@ -2752,8 +2776,13 @@ void ftKb_SpecialN_800EEC34(int arg0, int arg1, int arg2)
              arg2 = arg1 + 1;
          }
          for (i = lo; i < arg2; i++) {
@@ -77928,7 +77937,7 @@ index ef9c7233a..ec48e4272 100644
                                 4, 0, 1, 3, 1, 0);
              }
          }
-@@ -2765,16 +2785,26 @@ void ftKb_SpecialN_800EEC34(int arg0, int arg1, int arg2)
+@@ -2765,16 +2794,26 @@ void ftKb_SpecialN_800EEC34(int arg0, int arg1, int arg2)
  
  void ftKb_SpecialN_800EED50(s32 arg0, s32 arg1)
  {
@@ -77956,7 +77965,7 @@ index ef9c7233a..ec48e4272 100644
              }
          }
          if (ftKb_Init_803CB3E8[arg0] != NULL) {
-@@ -2785,10 +2815,10 @@ void ftKb_SpecialN_800EED50(s32 arg0, s32 arg1)
+@@ -2785,10 +2824,10 @@ void ftKb_SpecialN_800EED50(s32 arg0, s32 arg1)
                  if (cs->matanim_joint_name != NULL) {
                      lbArchive_80017040(NULL, costumes[arg1].dat_filename, item,
                                         cs->joint_name, &item->matanim,
@@ -77969,7 +77978,7 @@ index ef9c7233a..ec48e4272 100644
                      item->matanim = NULL;
                  }
              }
-@@ -2806,6 +2836,12 @@ void ftKb_SpecialN_800EEEC4(HSD_GObj* gobj, FighterKind kind)
+@@ -2806,6 +2845,12 @@ void ftKb_SpecialN_800EEEC4(HSD_GObj* gobj, FighterKind kind)
  {
      HSD_GObjEvent cb;
  
@@ -77982,7 +77991,7 @@ index ef9c7233a..ec48e4272 100644
      if ((cb = ftKb_Init_803C9CC8[kind * 2 + 1]) != NULL) {
          cb(gobj);
      }
-@@ -2814,8 +2850,16 @@ void ftKb_SpecialN_800EEEC4(HSD_GObj* gobj, FighterKind kind)
+@@ -2814,8 +2859,16 @@ void ftKb_SpecialN_800EEEC4(HSD_GObj* gobj, FighterKind kind)
  void ftKb_UnkMtxFunc0(Fighter_GObj* gobj, int arg1, Mtx mtx)
  {
      Fighter* fp = gobj->user_data;
@@ -77999,7 +78008,7 @@ index ef9c7233a..ec48e4272 100644
          return;
      }
      if (!fp->x2225_b2) {
-@@ -2824,12 +2868,21 @@ void ftKb_UnkMtxFunc0(Fighter_GObj* gobj, int arg1, Mtx mtx)
+@@ -2824,12 +2877,21 @@ void ftKb_UnkMtxFunc0(Fighter_GObj* gobj, int arg1, Mtx mtx)
  
      {
          MtxPtr bone_mtx = HSD_JObjGetMtxPtr(fp->parts[6].joint);
@@ -78021,7 +78030,7 @@ index ef9c7233a..ec48e4272 100644
      }
      PAD_STACK(8);
  }
-@@ -2837,24 +2890,38 @@ void ftKb_UnkMtxFunc0(Fighter_GObj* gobj, int arg1, Mtx mtx)
+@@ -2837,24 +2899,38 @@ void ftKb_UnkMtxFunc0(Fighter_GObj* gobj, int arg1, Mtx mtx)
  HSD_JObj* ftKb_Init_UnkMotionStates6(Fighter_GObj* gobj)
  {
      Fighter* fp = GET_FIGHTER(gobj);
@@ -78065,7 +78074,7 @@ index ef9c7233a..ec48e4272 100644
          int i;
          for (i = 0; i < count; i++, parts++) {
              if ((1 << i) & mask) {
-@@ -2881,7 +2948,7 @@ ftKb_SpecialN_insert_joint_refs(s32* total_dobjs, HSD_Joint* root, Fighter* fp,
+@@ -2881,7 +2957,7 @@ ftKb_SpecialN_insert_joint_refs(s32* total_dobjs, HSD_Joint* root, Fighter* fp,
              bone++;
              (*part_idx)++;
          }
@@ -78074,7 +78083,7 @@ index ef9c7233a..ec48e4272 100644
          (*part_idx)++;
          ftAnim_GetNextJointInTree(joint, joint_idx);
      }
-@@ -2928,22 +2995,26 @@ void ftKb_SpecialN_800EF0E4(Fighter_GObj* gobj, int arg1, u8* arg2)
+@@ -2928,22 +3004,26 @@ void ftKb_SpecialN_800EF0E4(Fighter_GObj* gobj, int arg1, u8* arg2)
      s32 byte_base;
  
      ftPartsPObjSetDefaultClass();
@@ -78105,7 +78114,7 @@ index ef9c7233a..ec48e4272 100644
              if (tail == NULL) {
                  HSD_JObjAddDObj(jobj, dobj);
              } else {
-@@ -2973,8 +3044,8 @@ void ftKb_SpecialN_800EF0E4(Fighter_GObj* gobj, int arg1, u8* arg2)
+@@ -2973,8 +3053,8 @@ void ftKb_SpecialN_800EF0E4(Fighter_GObj* gobj, int arg1, u8* arg2)
                      hsdChangeClass(mobj, &ftMObj);
                  }
                  dobj = (dobj != NULL) ? dobj->next : NULL;
@@ -78116,7 +78125,7 @@ index ef9c7233a..ec48e4272 100644
                  total_dobjs += 1;
                  group_count += 1;
              }
-@@ -2995,7 +3066,11 @@ void ftKb_SpecialN_800EF35C(Fighter_GObj* gobj, int arg1, u8* arg2)
+@@ -2995,7 +3075,11 @@ void ftKb_SpecialN_800EF35C(Fighter_GObj* gobj, int arg1, u8* arg2)
  {
      Fighter* fp = GET_FIGHTER(gobj);
      ftKirby_CostumeArchive* costume_data = ftKb_Init_803C9FC8[arg1];
@@ -78129,7 +78138,7 @@ index ef9c7233a..ec48e4272 100644
      int idx = 0;
      arg1 = 0;
      PAD_STACK(4);
-@@ -3004,9 +3079,9 @@ void ftKb_SpecialN_800EF35C(Fighter_GObj* gobj, int arg1, u8* arg2)
+@@ -3004,9 +3088,9 @@ void ftKb_SpecialN_800EF35C(Fighter_GObj* gobj, int arg1, u8* arg2)
              arg1++;
              arg2++;
          } else {
@@ -78141,7 +78150,7 @@ index ef9c7233a..ec48e4272 100644
              }
              arg1++;
              arg2++;
-@@ -3020,7 +3095,7 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
+@@ -3020,7 +3104,7 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
      HSD_Joint* current_joint;
      s32 joint_idx;
      HSD_JObj* jobj;
@@ -78150,7 +78159,7 @@ index ef9c7233a..ec48e4272 100644
      s32 byte_off;
      Fighter* fp = GET_FIGHTER(gobj);
      s32 total_dobjs;
-@@ -3039,7 +3114,7 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
+@@ -3039,7 +3123,7 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
                                          &insert_part_idx, &current_joint,
                                          &joint_idx, &byte_base);
          joint_idx = 0;
@@ -78159,7 +78168,7 @@ index ef9c7233a..ec48e4272 100644
          insert_part_idx = 0;
          while (current_joint != NULL) {
              group_count = 0;
-@@ -3047,11 +3122,11 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
+@@ -3047,11 +3131,11 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
                  insert_part_idx++;
              }
              jobj = fp->parts[insert_part_idx].joint;
@@ -78173,7 +78182,7 @@ index ef9c7233a..ec48e4272 100644
                  if (tail == NULL) {
                      HSD_JObjAddDObj(jobj, dobj);
                  } else {
-@@ -3081,8 +3156,8 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
+@@ -3081,8 +3165,8 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
                          hsdChangeClass(mobj, &ftMObj);
                      }
                      dobj = (dobj != NULL) ? dobj->next : NULL;
@@ -78184,7 +78193,7 @@ index ef9c7233a..ec48e4272 100644
                      total_dobjs += 1;
                      group_count += 1;
                  }
-@@ -3108,10 +3183,10 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
+@@ -3108,10 +3192,10 @@ void ftKb_SpecialN_800EF438(Fighter_GObj* gobj, KirbyHatStruct* hat)
  static inline void ftKb_RemoveHatParts(Fighter_GObj* gobj, u32 mask)
  {
      Fighter* fp = GET_FIGHTER(gobj);
@@ -78197,7 +78206,7 @@ index ef9c7233a..ec48e4272 100644
          }
      }
  }
-@@ -3123,16 +3198,15 @@ void ftKb_SpecialN_800EF69C(Fighter_GObj* gobj, int arg1, KirbyHatStruct* hat)
+@@ -3123,16 +3207,15 @@ void ftKb_SpecialN_800EF69C(Fighter_GObj* gobj, int arg1, KirbyHatStruct* hat)
      fp = GET_FIGHTER(gobj);
      if (fp->u.kb.hat.x14.data != NULL) {
          int i;
@@ -78217,7 +78226,7 @@ index ef9c7233a..ec48e4272 100644
                          dobj = fp->x203C.data[bone->xD];
                      } else {
                          dobj = fp->dobj_list.data[bone->xD];
-@@ -3150,7 +3224,7 @@ void ftKb_SpecialN_800EF69C(Fighter_GObj* gobj, int arg1, KirbyHatStruct* hat)
+@@ -3150,7 +3233,7 @@ void ftKb_SpecialN_800EF69C(Fighter_GObj* gobj, int arg1, KirbyHatStruct* hat)
          HSD_ObjFree(&fighter_x2040_alloc_data, fp->u.kb.hat.x1C.data);
          fp->u.kb.hat.x14.data = NULL;
      }
@@ -78226,7 +78235,7 @@ index ef9c7233a..ec48e4272 100644
      if (mask != 0) {
          ftKb_RemoveHatParts(gobj, mask);
      }
-@@ -3158,10 +3232,22 @@ void ftKb_SpecialN_800EF69C(Fighter_GObj* gobj, int arg1, KirbyHatStruct* hat)
+@@ -3158,10 +3241,22 @@ void ftKb_SpecialN_800EF69C(Fighter_GObj* gobj, int arg1, KirbyHatStruct* hat)
  
  void ftKb_UnkIntBoolFunc0(Fighter* fp, int arg1, bool arg2)
  {
@@ -78249,7 +78258,7 @@ index ef9c7233a..ec48e4272 100644
                  return;
              }
              {
-@@ -3173,27 +3259,54 @@ void ftKb_UnkIntBoolFunc0(Fighter* fp, int arg1, bool arg2)
+@@ -3173,27 +3268,54 @@ void ftKb_UnkIntBoolFunc0(Fighter* fp, int arg1, bool arg2)
                      var_r0 = 0;
                  }
                  if (var_r0 != 0) {
@@ -78304,7 +78313,7 @@ index ef9c7233a..ec48e4272 100644
          }
      }
  }
-@@ -3201,16 +3314,32 @@ void ftKb_UnkIntBoolFunc0(Fighter* fp, int arg1, bool arg2)
+@@ -3201,16 +3323,32 @@ void ftKb_UnkIntBoolFunc0(Fighter* fp, int arg1, bool arg2)
  void ftKb_Init_UnkCallbackPairs0_0(Fighter_GObj* gobj)
  {
      Fighter* fp = GET_FIGHTER(gobj);
@@ -78337,7 +78346,7 @@ index ef9c7233a..ec48e4272 100644
      }
  }
  
-@@ -3222,7 +3351,7 @@ void ftKb_SpecialN_800EFA40(HSD_GObj* gobj)
+@@ -3222,7 +3360,7 @@ void ftKb_SpecialN_800EFA40(HSD_GObj* gobj)
          Kirby_Unk* unk = ft_80459B88.x0;
          fp->u.kb.hat.x14.data = HSD_ObjAlloc(&fighter_x2040_alloc_data);
          ftPartsPObjSetDefaultClass();
@@ -78346,7 +78355,7 @@ index ef9c7233a..ec48e4272 100644
          fp->x2225_b2 = true;
          ftPartsPObjClearDefaultClass();
          ftParts_80075650(gobj, fp->u.kb.hat.jobj, &fp->u.kb.hat.x14);
-@@ -3252,7 +3381,7 @@ static inline void ftKb_LoadHat(Fighter_GObj* gobj, Fighter* fp,
+@@ -3252,7 +3390,7 @@ static inline void ftKb_LoadHat(Fighter_GObj* gobj, Fighter* fp,
  {
      fp->u.kb.hat.x14.data = HSD_ObjAlloc(&fighter_x2040_alloc_data);
      ftPartsPObjSetDefaultClass();
@@ -78355,7 +78364,7 @@ index ef9c7233a..ec48e4272 100644
      fp->x2225_b2 = true;
      ftPartsPObjClearDefaultClass();
      ftParts_80075650(gobj, fp->u.kb.hat.jobj, &fp->u.kb.hat.x14);
-@@ -3454,7 +3583,7 @@ void ftKb_SpecialN_800F07C0(Fighter_GObj* gobj)
+@@ -3454,7 +3592,7 @@ void ftKb_SpecialN_800F07C0(Fighter_GObj* gobj)
  
  void ftKb_SpecialN_800F081C(Fighter_GObj* gobj)
  {
@@ -78364,7 +78373,7 @@ index ef9c7233a..ec48e4272 100644
          Fighter* fp = HSD_GObjGetUserData(gobj);
          KirbyHatStruct** hats = ft_80459B88.hats;
          KirbyHatStruct* hat = hats[Ft_Kind_Luigi];
-@@ -3571,44 +3700,40 @@ void ftKb_SpecialN_800F0F5C(Fighter_GObj* gobj)
+@@ -3571,44 +3709,40 @@ void ftKb_SpecialN_800F0F5C(Fighter_GObj* gobj)
      ftKb_SpecialN_800EFAF0_inline(gobj);
      ftCo_UnloadDynamicBones(fp);
  }
@@ -78438,7 +78447,7 @@ index ef9c7233a..ec48e4272 100644
  
  void ftKb_SpecialN_800F10A4(Fighter_GObj* gobj)
  {
-@@ -3616,27 +3741,15 @@ void ftKb_SpecialN_800F10A4(Fighter_GObj* gobj)
+@@ -3616,27 +3750,15 @@ void ftKb_SpecialN_800F10A4(Fighter_GObj* gobj)
  }
  
  /// Load Yoshi's hat for Kirby copy ability.
@@ -78471,7 +78480,7 @@ index ef9c7233a..ec48e4272 100644
  
  void ftKb_SpecialN_800F11AC(Fighter_GObj* gobj)
  {
-@@ -3646,27 +3759,15 @@ void ftKb_SpecialN_800F11AC(Fighter_GObj* gobj)
+@@ -3646,27 +3768,15 @@ void ftKb_SpecialN_800F11AC(Fighter_GObj* gobj)
  }
  
  /// Load Jigglypuff's hat for Kirby copy ability.
@@ -78504,7 +78513,7 @@ index ef9c7233a..ec48e4272 100644
  
  void ftKb_SpecialN_800F12C8(Fighter_GObj* gobj)
  {
-@@ -3676,25 +3777,14 @@ void ftKb_SpecialN_800F12C8(Fighter_GObj* gobj)
+@@ -3676,25 +3786,14 @@ void ftKb_SpecialN_800F12C8(Fighter_GObj* gobj)
  }
  
  /// Load Dr. Mario's hat for Kirby copy ability.
@@ -78534,7 +78543,7 @@ index ef9c7233a..ec48e4272 100644
  
  void ftKb_SpecialN_800F13F0(Fighter_GObj* gobj)
  {
-@@ -3709,8 +3799,8 @@ u8* ftKb_SpecialN_800F1420(Fighter_GObj* gobj, const u32* arg1)
+@@ -3709,8 +3808,8 @@ u8* ftKb_SpecialN_800F1420(Fighter_GObj* gobj, const u32* arg1)
      u8* p;
      for (i = 0; i < lookup->x0; i++) {
          int j;
@@ -78545,7 +78554,7 @@ index ef9c7233a..ec48e4272 100644
  
          for (j = 0; j < entry->x0; j++, p++) {
              HSD_DObj* dobj = fp->u.kb.hat.x14.data[*p];
-@@ -3733,32 +3823,24 @@ u8* ftKb_SpecialN_800F1420(Fighter_GObj* gobj, const u32* arg1)
+@@ -3733,32 +3832,24 @@ u8* ftKb_SpecialN_800F1420(Fighter_GObj* gobj, const u32* arg1)
      return p;
  }
  
@@ -78592,7 +78601,7 @@ index ef9c7233a..ec48e4272 100644
  
  void ftKb_SpecialN_800F15D8(Fighter_GObj* gobj)
  {
-@@ -3774,6 +3856,16 @@ void ftKb_SpecialN_Enter(Fighter_GObj* gobj)
+@@ -3774,6 +3865,16 @@ void ftKb_SpecialN_Enter(Fighter_GObj* gobj)
  {
      Fighter* fp = GET_FIGHTER(gobj);
  
@@ -78609,7 +78618,7 @@ index ef9c7233a..ec48e4272 100644
      if (ftKb_Init_803C9DD0[fp->u.kb.hat.kind] != NULL) {
          ftKb_Init_803C9DD0[fp->u.kb.hat.kind](gobj);
      } else {
-@@ -3784,6 +3876,15 @@ void ftKb_SpecialN_Enter(Fighter_GObj* gobj)
+@@ -3784,6 +3885,15 @@ void ftKb_SpecialN_Enter(Fighter_GObj* gobj)
  void ftKb_SpecialAirN_Enter(Fighter_GObj* gobj)
  {
      Fighter* fp = GET_FIGHTER(gobj);
@@ -78625,7 +78634,7 @@ index ef9c7233a..ec48e4272 100644
      if (ftKb_Init_803C9E54[fp->u.kb.hat.kind] != NULL) {
          ftKb_Init_803C9E54[fp->u.kb.hat.kind](gobj);
      } else {
-@@ -3797,102 +3898,108 @@ void ftKb_SpecialN_800F16D0(Fighter_GObj* gobj, FighterKind kind)
+@@ -3797,102 +3907,108 @@ void ftKb_SpecialN_800F16D0(Fighter_GObj* gobj, FighterKind kind)
      KirbyHatStruct* hat;
      PAD_STACK(8);
  
@@ -78763,7 +78772,7 @@ index ef9c7233a..ec48e4272 100644
                      It_Kind_Kirby_YoshiEggLay);
          break;
      default:
-@@ -3988,6 +4095,12 @@ void ftKb_SpecialN_800F1A8C(Fighter_GObj* gobj)
+@@ -3988,6 +4104,12 @@ void ftKb_SpecialN_800F1A8C(Fighter_GObj* gobj)
      Fighter* fp = GET_FIGHTER(gobj);
      FighterKind kind = fp->u.kb.hat.kind;
  
@@ -78776,7 +78785,7 @@ index ef9c7233a..ec48e4272 100644
      switch (kind) {
      case Ft_Kind_Popo:
          ftKb_SpecialNIc_80108D04(gobj);
-@@ -4036,6 +4149,12 @@ void ftKb_Init_UnkMotionStates3(Fighter_GObj* gobj)
+@@ -4036,6 +4158,12 @@ void ftKb_Init_UnkMotionStates3(Fighter_GObj* gobj)
      Fighter* fp = GET_FIGHTER(gobj);
      FighterKind kind = fp->u.kb.hat.kind;
  
@@ -78789,7 +78798,7 @@ index ef9c7233a..ec48e4272 100644
      switch (kind) {
      case Ft_Kind_Koopa:
      case Ft_Kind_GKoops:
-@@ -4051,9 +4170,28 @@ void ftKb_SpecialN_800F1BAC(Fighter_GObj* gobj, s32 kind, bool arg2)
+@@ -4051,9 +4179,28 @@ void ftKb_SpecialN_800F1BAC(Fighter_GObj* gobj, s32 kind, bool arg2)
      Fighter* fp = gobj->user_data;
      HSD_GObjEvent cb;
  
