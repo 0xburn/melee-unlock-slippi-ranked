@@ -2433,6 +2433,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "proaistronger") options.pro_ai_stronger = std::clamp(std::atoi(value.c_str()), 0, 2);
       else if (key == "community_codes") options.community_codes = (uint32_t)std::strtoul(value.c_str(), nullptr, 16) & (MU_DISPLAY_OPTION_CODES_ALL | MU_DISPLAY_OPTION_OFFLINE_CODES);
       else if (key == "unlock_all") options.unlock_all = value != "0";
+      else if (key == "zelda_as_sheik") options.zelda_as_sheik = value == "1";
       else if (key == "results_screen") options.results_screen = value != "0";
 #ifndef MELEE_NO_SLIPPI
       else if (key == "slippi_spectator") options.slippi_spectator = value != "0";
@@ -2660,6 +2661,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   host::g_community_codes.store(options.community_codes, std::memory_order_relaxed);
   phillip_ai::set_stronger_choice(options.pro_ai_stronger);
   RenderOptions::live_unlock_all() = options.unlock_all;
+  RenderOptions::live_zelda_as_sheik() = options.zelda_as_sheik;
   RenderOptions::live_results_screen() = options.results_screen;
   RenderOptions::live_offline_delay() = options.offline_delay;
   // Old files used the online slider for offline play. Preserve that value once, independent
@@ -4557,6 +4559,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\ncommunity_codes " << std::hex << options.community_codes << std::dec
        << "\nproaistronger " << options.pro_ai_stronger
        << "\nunlock_all " << (options.unlock_all ? 1 : 0)
+       << "\nzelda_as_sheik " << (options.zelda_as_sheik ? 1 : 0)
        << "\nresults_screen " << (options.results_screen ? 1 : 0)
 #ifndef MELEE_NO_SLIPPI
        << "\nslippi_spectator " << (options.slippi_spectator ? 1 : 0)
@@ -9378,6 +9381,18 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetTooltip("On: every fighter, stage and mode is available from the start.\n"
                         "Off: your save file decides, and the game unlocks things as you play.\n"
                         "Offline only: online play always has everything. Takes effect on the next screen.");
+    // GitHub #75: rogueMelee has no "hold A at the start", and a run that swaps Down B away would
+    // keep Zelda for good. Offline only (the opponent's game would disagree), never in replays.
+    ImGui::BeginDisabled(!g_settings_standalone && host::game_image == nullptr);
+    if (settings_toggle("Zelda starts as Sheik", &options.zelda_as_sheik)) {
+      RenderOptions::live_zelda_as_sheik() = options.zelda_as_sheik;
+      changed = true;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("When you pick Zelda, the match starts as Sheik, as holding A at the start does in Versus.\n"
+                        "Works in every mode, rogueMelee included. Down B still changes between them.\n"
+                        "Offline only: online, use Slippi's own character choice. Source Port only.");
     if (settings_toggle("Show results screen", &options.results_screen)) {
       RenderOptions::live_results_screen() = options.results_screen;
       changed = true;

@@ -197,6 +197,16 @@ void mu_css_frame(void)
     }
 }
 
+#define CMD_ZELDA_AS_SHEIK 0xE6
+/* Player_SetPlayerCharacter and the rogueMelee run: a human's Zelda starts as Sheik when the player
+ * asked for it. The host answers 0 online and during replay playback. */
+int mu_human_zelda_as_sheik(void)
+{
+    static unsigned char reply[4096];   /* the host's minimum response capacity */
+    unsigned int got = 0;
+    return mu_online_abi_command(CMD_ZELDA_AS_SHEIK, NULL, 0, reply, sizeof reply, &got) == 0 && got >= 1 && reply[0] != 0;
+}
+
 #define CMD_ARENA_HAND 0xEF
 /* mnCharSel_CursorThink, after the hand moved: the online CSS's own player's hand goes to the host
  * (x, y as the screen's units, 0.1 steps) when it moved, for an arena room's side panels: a hand

@@ -1648,6 +1648,7 @@ constexpr uint8_t CMD_LAB_SAVE = 0xF2, CMD_LAB_LOAD = 0xF3, CMD_LAB_ADVANTAGE = 
 constexpr uint8_t CMD_PRACTICE_CPU = 0xF6;   // the practice CPU's settings (port/runtime/hle/practice_cpu.h)
 constexpr uint8_t CMD_FRAME_EVENT = 0xE8;   // replay frame data for the coach (shim/mu_framedata.c, host/replay_coach.h)
 constexpr uint8_t CMD_REPLAY_DEFENSE = 0xE9;   // a takeover's opponents once the game leaves the replay (shim/mu_replay_defend.c)
+constexpr uint8_t CMD_ZELDA_AS_SHEIK = 0xE6;  // a human's Zelda starts as Sheik (shim/mu_slippi_css.c): offline only
 constexpr uint8_t CMD_CSS_FRAME = 0xEC;       // every character select frame (shim/mu_slippi_css.c): the easter egg
 constexpr uint8_t CMD_ARENA_HAND = 0xEF;      // the online CSS hand (shim/mu_slippi_css.c): an arena room's side panels
 constexpr uint8_t CMD_ARENA_PICK = 0xEE;      // the online CSS pick (shim/mu_slippi_sss.c): an arena room's portraits
@@ -1963,6 +1964,15 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
           return true;
         }
         if (c == CMD_CSS_FRAME && n == 0) { reply.push_back(walter_egg::css_frame()); return true; }
+        if (c == CMD_ZELDA_AS_SHEIK && n == 0) {
+          static const int test = [] { const char* v = host::test_env::getenv("MELEE_TEST_ZELDA_SHEIK"); return v && *v ? (*v == '1' ? 1 : 0) : -1; }();
+          const bool want = test >= 0 ? test == 1 : gx::RenderOptions::live_zelda_as_sheik();
+          const bool on = want && !g_replaying && slippi::online::session_mode() < 0 && !source_p2p::requested() &&
+                          !host::gameplay::vanilla_only();
+          if (on) host::log("game: Zelda starts as Sheik (setting)");
+          reply.push_back(on ? 1 : 0);
+          return true;
+        }
         if (c == CMD_ARENA_HAND && n == 4) {   // shim/mu_slippi_css.c: the CSS hand, in tenths
           slippi::arena::set_css_hand((int16_t)(p[0] << 8 | p[1]), (int16_t)(p[2] << 8 | p[3]));
           return true;

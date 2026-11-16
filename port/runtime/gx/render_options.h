@@ -263,6 +263,10 @@ struct RenderOptions {
   // MU_GAME_OPTION3_LOCKED_CONTENT (shim/mu_gecko.c mu_unlock_all).
   bool unlock_all = true;
   static bool& live_unlock_all() { static bool value = true; return value; }
+  // "Zelda starts as Sheik" (Game tab, ini key zelda_as_sheik): offline, a human's Zelda starts the
+  // match as Sheik in every mode, rogueMelee included (source_host CMD_ZELDA_AS_SHEIK).
+  bool zelda_as_sheik = false;
+  static bool& live_zelda_as_sheik() { static bool value = false; return value; }
   // "Show results screen" (Game tab, ini key results_screen, on unless the file says 0). Off, an
   // offline match goes straight back to character select, as online play does. Static Recomp:
   // gecko::option_offline_results (host.cpp); Source Port: MU_GAME_OPTION3_SKIP_RESULTS.
