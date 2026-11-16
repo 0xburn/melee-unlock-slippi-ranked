@@ -74,6 +74,25 @@ static bool bool_or(const json& j, const char* key, bool def) {
 uint64_t time_us() { return (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 uint64_t time_ms() { return time_us() / 1000; }
 
+// Test only. MELEE_NET_LOSS_PCT=P (1 to 99) drops P percent of the datagrams a game's netplay link
+// receives, before ENet sees them, as a lossy connection does (ENet resends what was sent reliably;
+// inputs carry their recent history). With MELEE_NET_LAG_MS / MELEE_NET_JITTER_MS it gives the test
+// links of one PC a real connection's lag, jitter and loss. Unset, as it always is for a player
+// (host::test_env), nothing changes.
+static uint32_t test_loss_pct() {
+  static const uint32_t pct = [] {
+    const char* s = host::test_env::getenv("MELEE_NET_LOSS_PCT");
+    const long v = s ? std::atol(s) : 0;
+    return v > 0 && v < 100 ? (uint32_t)v : 0u;
+  }();
+  return pct;
+}
+static int ENET_CALLBACK test_loss_intercept(ENetHost*, ENetEvent*) {
+  static thread_local uint64_t state = 0x2545F4914F6CDD1Dull ^ (uint64_t)time_us();
+  state ^= state << 13; state ^= state >> 7; state ^= state << 17;
+  return (state % 100) < test_loss_pct() ? 1 : 0;   // 1: taken (dropped); 0: ENet reads it
+}
+
 // ---------------------------------------------------------------- strings
 static std::wstring utf8_to_wide(const std::string& s) {
   if (s.empty()) return {};
@@ -479,6 +498,10 @@ NetplayClient::NetplayClient(std::vector<std::string> addrs, std::vector<uint16_
   if (local_port > 0) { local_addr.host = ENET_HOST_ANY; local_addr.port = local_port; local = &local_addr; }
   client_ = enet_host_create(local, 10, 3, 0, 0);
   if (!client_) { host::log("slippi: cannot create ENet client"); status_.store(ConnectStatus::FAILED); return; }
+  if (test_loss_pct() > 0) {
+    client_->intercept = test_loss_intercept;
+    host::log("slippi: MELEE_NET_LOSS_PCT: dropping %u%% of received datagrams (testing)", test_loss_pct());
+  }
   for (int i = 0; i < remote_player_count; ++i) {
     ENetAddress addr;
     enet_address_set_host(&addr, addrs[i].c_str());
