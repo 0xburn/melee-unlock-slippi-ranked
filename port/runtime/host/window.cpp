@@ -165,6 +165,12 @@ LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     g_pointer_rested = false;
   }
   if (m == WM_SETCURSOR && LOWORD(l) == HTCLIENT && g_pointer_rested) { SetCursor(nullptr); return TRUE; }
+  // MELEE_TEST_BIG_WINDOW=1 (hidden test runs): a --window larger than this PC's desktop is kept
+  // (1440p and ultrawide on a 1080p desktop); Windows otherwise caps it at the screen.
+  if (m == WM_GETMINMAXINFO) {
+    static const bool big = [] { const char* v = host::test_env::getenv("MELEE_TEST_BIG_WINDOW"); return v && *v == '1'; }();
+    if (big) { auto* mmi = reinterpret_cast<MINMAXINFO*>(l); mmi->ptMaxTrackSize = POINT{16384, 16384}; mmi->ptMaxSize = POINT{16384, 16384}; return 0; }
+  }
   // No mouse pointer over the game while it has focus and the settings panel is closed. The pointer
   // has nothing to do there, and after alt-tabbing back from a music player it sat in the middle of
   // the screen for the rest of the match. It comes back the moment the panel opens or focus leaves.

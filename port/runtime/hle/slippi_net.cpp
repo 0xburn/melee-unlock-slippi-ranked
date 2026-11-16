@@ -185,6 +185,18 @@ Packet& Packet::operator>>(std::string& s) {
   return *this;
 }
 
+// Tests only (MELEE_TEST_MM_HOST=<ip>:<port>): the matchmaking stand-in (port/tests/mm_standin.cpp)
+// answers in place of mm.slippi.gg, and while it is set no other Slippi server is asked either (the
+// profile refresh and the version check), so test identities never reach Slippi.
+static bool mm_test_server(std::string* host, int* port) {
+  static const std::string spec = [] { const char* v = host::test_env::getenv("MELEE_TEST_MM_HOST"); return std::string(v ? v : ""); }();
+  const size_t colon = spec.rfind(':');
+  if (spec.empty() || colon == std::string::npos) return false;
+  if (host) *host = spec.substr(0, colon);
+  if (port) *port = std::atoi(spec.c_str() + colon + 1);
+  return true;
+}
+
 // ---------------------------------------------------------------- user
 User::User(std::string user_dir) : dir_(std::move(user_dir)) { if (AttemptLogin()) RefreshFromServer(); }
 void User::RefreshFromServer() {
@@ -193,6 +205,7 @@ void User::RefreshFromServer() {
   if (me.uid.empty()) return;
   if (yougame::active()) return;                 // a YouGame session never asks Slippi's servers
   if (Matchmaking::local_peer.enabled) return;   // local test peering stays off Slippi's servers
+  if (mm_test_server(nullptr, nullptr)) return;  // so does the matchmaking stand-in
   std::shared_ptr<std::atomic<bool>> alive = alive_;
   refresh_ = std::async(std::launch::async, [this, me, alive] {
     // Nothing may leave this thread as an exception: that would end the process.
@@ -270,6 +283,7 @@ bool User::CheckOnlineCompatibility(std::string* error, VersionFetch fetch) {
   *error = "Could not check Slippi version. Try again.";
   const UserInfo me = GetUserInfo();
   if (me.uid.empty()) { *error = "Sign in to Slippi before playing online."; return false; }
+  if (mm_test_server(nullptr, nullptr)) { error->clear(); return true; }   // tests: the stand-in, no version server
   try {
     // Three tries, then the version the account last reported (user.json, which the Slippi
     // Launcher keeps current, or the profile refresh). One failed request used to block online
@@ -1562,8 +1576,16 @@ void Matchmaking::startMatchmaking() {
   }
   if (!client_) { fail("Failed to create mm client"); return; }
   ENetAddress addr;
-  enet_address_set_host(&addr, "mm.slippi.gg");
-  addr.port = 43113;
+  std::string test_host;
+  int test_port = 0;
+  if (mm_test_server(&test_host, &test_port)) {
+    enet_address_set_host(&addr, test_host.c_str());
+    addr.port = (enet_uint16)test_port;
+    host::log("slippi: matchmaking stand-in at %s:%d (test)", test_host.c_str(), test_port);
+  } else {
+    enet_address_set_host(&addr, "mm.slippi.gg");
+    addr.port = 43113;
+  }
   server_ = enet_host_connect(client_, &addr, 3, 0);
   if (!server_) { fail("Failed to start connection to mm server"); return; }
   int attempts = 0;
