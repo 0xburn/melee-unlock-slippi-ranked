@@ -231,6 +231,12 @@ std::string fit(const Ink& k, const std::string& s, float w) {
   while (!t.empty() && text_w(k, t + ".") > w) t.pop_back();
   return t + ".";
 }
+// A name: set smaller (down to 70%) before it is shortened.
+std::string fit_name(Ink& k, const std::string& s, float w) {
+  const float full = k.css;
+  while (text_w(k, s) > w && k.css > full * 0.7f) k.css -= full * 0.05f;
+  return fit(k, s, w);
+}
 
 // Colours of the vertices drawn since `start`, from `top` at y0 to `bottom` at y1 (the sheet's
 // vertical linear-gradients), alpha included.
@@ -283,6 +289,7 @@ ImGuiContext* g_portrait_context = nullptr;
 
 ImTextureData* portrait(uint8_t character, uint8_t costume) {
   if (character == ar::kNone || character >= 26) return nullptr;
+  if (character == 19) return nullptr;   // Sheik: the disc keeps her in Zelda's cell; her name tile instead
   if (g_portrait_context != ImGui::GetCurrentContext()) {
     g_portrait_context = ImGui::GetCurrentContext();
     for (auto& p : g_portraits)
@@ -344,6 +351,15 @@ void icon(float x, float y, float s, const Member* m, bool gold_frame = false, G
     const float in = px(2);
     dl()->AddImageRounded(t->GetTexRef(), ImVec2(x + in, y + in), ImVec2(x + s - in, y + s - in), ImVec2(pt->u0, pt->v0),
                           ImVec2(pt->u1, pt->v1), kWhite, r - px(1));
+  } else if (m && m->character < 26) {
+    // A fighter with no portrait here (Sheik): its name, set to fit the tile.
+    static const char* const kShort[26] = {"FALCON", "DK", "FOX", "G&W", "KIRBY", "BOWSER", "LINK", "LUIGI", "MARIO",
+                                           "MARTH", "MEWTWO", "NESS", "PEACH", "PIKA", "ICIES", "PUFF", "SAMUS",
+                                           "YOSHI", "ZELDA", "SHEIK", "FALCO", "Y.LINK", "DOC", "ROY", "PICHU", "GANON"};
+    Ink k{Face::Title, s * .26f / g_k, IM_COL32(220, 226, 240, 255), true, 1};
+    const std::string name = kShort[m->character];
+    while (k.css > 4 && text_w(k, name) > s - px(6)) k.css *= 0.92f;
+    text_center(k, x + s * .5f, y + (s - size_of(k.face, k.css)) * .5f, name);
   } else if (m) {
     Ink k{Face::Title, s * .42f / g_k, IM_COL32(200, 208, 226, 255), true, 2};
     const std::string letter = m->name.empty() ? "?" : std::string(1, (char)std::toupper((unsigned char)m->name[0]));
@@ -447,9 +463,29 @@ void slot_card(float x, float y, float w, const View& v, const Member& m, bool y
       right -= tw + px(4);
     }
   }
-  const Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
+  Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
   const float nx = x + px(6) + is + px(7);
-  text(nk, nx, line_top(nk, y, icon_css + 12), fit(nk, m.name, right - nx));
+  const std::string shown = fit_name(nk, m.name, right - nx);
+  text(nk, nx, line_top(nk, y, icon_css + 12), shown);
+}
+// Members of a list that did not fit: "+3 more in line".
+int line_after(const Room& r, uint8_t id) {
+  const auto it = std::find(r.line.begin(), r.line.end(), id);
+  return it == r.line.end() ? 0 : (int)(r.line.end() - it - 1);
+}
+int watchers_after(const Room& r, uint8_t id) {
+  int n = 0; bool past = false;
+  for (const Member& m : r.members) {
+    if (past && ar::role(r, m.id) == Role::Watching) ++n;
+    if (m.id == id) past = true;
+  }
+  return n;
+}
+float more_row(float x, float y, float w, int n, const char* what) {
+  if (n <= 0) return y;
+  const Ink dk{Face::Bold, 11, kDimText};
+  text(dk, x + px(4), line_top(dk, y + px(4), 16), fit(dk, "+" + std::to_string(n) + " more " + what, w - px(4)));
+  return y + px(20);
 }
 void open_spot(float x, float y, float w) {
   const float h = px(kSlotH);
@@ -513,6 +549,15 @@ std::vector<std::string> wrap(const Ink& k, const std::string& words, float w) {
 // The sheet's one plain sentence for a member waiting to play: what happens next for them.
 std::string next_sentence(const View& v) {
   const Room& r = v.room;
+  if (!v.hosting && !v.linked) return v.status.empty() ? "Lost the link to the room. Reconnecting." : v.status;
+  if (r.switch_pending) {
+    const auto voters = ar::switch_voters(r);
+    int yes = 0;
+    for (uint8_t id : voters) if (id < 16 && (r.switch_votes & (1u << id))) ++yes;
+    return std::string(r.doubles ? "Back to singles: " : "Doubles: ") + std::to_string(yes) + " of " +
+           std::to_string(voters.size()) + " said yes.";
+  }
+  if (r.asker != ar::kNone && r.asker == v.self) return "You asked to play next.";
   if (ar::role(r, v.self) != Role::InLine) return "";
   const size_t at = (size_t)(std::find(r.line.begin(), r.line.end(), v.self) - r.line.begin());
   if (at > 0) return "You are number " + std::to_string(at + 1) + " in line.";
@@ -877,12 +922,18 @@ float corner(float x0, float x1, float y0, bool red, const View& v, int side, bo
   // The record, the streak beside it, the ping under it (small).
   const Member* lead = m[0];
   if (lead) {
-    const Ink wl{Face::Title, 21, kGold, true, 2};
+    Ink wl{Face::Title, 21, kGold, true, 2};
     const Ink sm{Face::Body, 10, kPaper, false, 1, false, .5f};
     const std::string rec = record(*lead);
     std::string streak;
     for (int k = 0; k < fighters; ++k)
       if (m[k] && r.streak_id == m[k]->id && r.streak >= 2) streak = "x" + std::to_string(r.streak) + " STREAK";
+    // Long records (3 digits) and streaks: the word STREAK goes first, then the record gets smaller.
+    const float avail = (x1 - x0) - px(14);
+    auto line_w = [&] { return text_w(wl, rec) + (wl.italic ? size_of(wl.face, wl.css) * .16f : 0.f) +
+                               (streak.empty() ? 0.f : text_w(sm, streak) + px(5)); };
+    if (line_w() > avail && !streak.empty()) streak = "x" + std::to_string(r.streak);
+    while (line_w() > avail && wl.css > 21 * 0.65f) wl.css -= 0.5f;
     const float rw = text_w(wl, rec), sw = streak.empty() ? 0 : text_w(sm, streak) + px(5);
     const float left = cx - (rw + sw) * .5f;
     text(wl, left, line_top(wl, y, 21), rec);
@@ -920,7 +971,15 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
     const Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
     if (!r.line.empty()) {
       const Member* m = ar::find(r, r.line[0]);
-      if (m) { icon(b.lx0 + pad, y, px(32), m); text(nk, b.lx0 + pad + px(39), line_top(nk, y, 32), fit(nk, m->name, lw - pad * 2 - px(39))); }
+      if (m) {
+        const Ink mk{Face::Bold, 11, kDimText};
+        const std::string more = r.line.size() > 1 ? "+" + std::to_string(r.line.size() - 1) : "";
+        const float mw = more.empty() ? 0.f : text_w(mk, more) + px(4);
+        icon(b.lx0 + pad, y, px(32), m);
+        Ink nk2 = nk;
+        text(nk2, b.lx0 + pad + px(39), line_top(nk2, y, 32), fit_name(nk2, m->name, lw - pad * 2 - px(39) - mw));
+        if (!more.empty()) text(mk, b.lx1 - pad - mw + px(4), line_top(mk, y, 32), more);
+      }
     } else {
       const Ink dk{Face::Body, 11, IM_COL32(111, 123, 152, 255)};
       text(dk, b.lx0 + pad, line_top(dk, y, 32), "open spot");
@@ -931,7 +990,17 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
     y += px(17 + 6);
     const Member* w0 = nullptr;
     for (const Member& m : r.members) if (ar::role(r, m.id) == Role::Watching) { w0 = &m; break; }
-    if (w0) { icon(b.rx0 + pad, y, px(32), w0); text(nk, b.rx0 + pad + px(39), line_top(nk, y, 32), fit(nk, w0->name, rw - pad * 2 - px(39))); }
+    if (w0) {
+      int watchers = 0;
+      for (const Member& m : r.members) if (ar::role(r, m.id) == Role::Watching) ++watchers;
+      const Ink mk{Face::Bold, 11, kDimText};
+      const std::string more = watchers > 1 ? "+" + std::to_string(watchers - 1) : "";
+      const float mw = more.empty() ? 0.f : text_w(mk, more) + px(4);
+      icon(b.rx0 + pad, y, px(32), w0);
+      Ink nk2 = nk;
+      text(nk2, b.rx0 + pad + px(39), line_top(nk2, y, 32), fit_name(nk2, w0->name, rw - pad * 2 - px(39) - mw));
+      if (!more.empty()) text(mk, b.rx1 - pad - mw + px(4), line_top(mk, y, 32), more);
+    }
     else { const Ink dk{Face::Body, 11, IM_COL32(111, 123, 152, 255)}; text(dk, b.rx0 + pad, line_top(dk, y, 32), "nobody"); }
     hints_up(b.rx0 + pad, rw - pad * 2, bottom, {{'Y', "Rules"}, {'Z', "Add a friend's code"}}, g.focus ? 1.f : .55f);
     if (!g.focus) z_line(b.rx0 + pad, rw - pad * 2, fy - px(4));
@@ -960,7 +1029,7 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
     y += px(6);
     slot_card(b.lx0 + pad, y, lw - pad * 2, v, *m, id == v.self, r.asker == id);
     y += px(kSlotH);
-    if (y > b.y1 - px(190)) break;   // a long line: the first few (the Card look lists everyone)
+    if (y > b.y1 - px(190)) { y = more_row(b.lx0 + pad, y, lw - pad * 2, line_after(r, id), "in line"); break; }
   }
   if (r.line.size() < 2) { y += px(6); open_spot(b.lx0 + pad, y, lw - pad * 2); y += px(kSlotH); }
   // Right under: WATCHING, only when someone is just watching.
@@ -972,7 +1041,7 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
     wy += px(6);
     slot_card(b.rx0 + pad, wy, rw - pad * 2, v, m, m.id == v.self, r.asker == m.id);
     wy += px(kSlotH);
-    if (wy > b.y1 - px(170)) break;
+    if (wy > b.y1 - px(170)) { wy = more_row(b.rx0 + pad, wy, rw - pad * 2, watchers_after(r, m.id), "watching"); break; }
   }
   // Left foot: the prompt (under your own corner) or the plain sentence, then Y and Z.
   const int prompt = prompt_kind(v);
@@ -1017,8 +1086,9 @@ void card_row(float x, float y, float w, const View& v, const Member& m) {
   const std::string rec = record(m);
   const float rw = text_w(rk, rec);
   text(rk, x + w - rw, line_top(rk, y, 34), rec);
-  const Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
-  text(nk, x + px(41), line_top(nk, y, 34), fit(nk, m.name, w - px(41) - rw - px(4)));
+  Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
+  const std::string shown = fit_name(nk, m.name, w - px(41) - rw - px(4));
+  text(nk, x + px(41), line_top(nk, y, 34), shown);
 }
 
 // The sheet's .mode: small gold capitals, then the mode in Arial Black italic, two lines when it
@@ -1089,7 +1159,7 @@ void draw_card(const Bars& b, const View& v, bool ring_box) {
     y += px(6);
     if (ring_box) { slot_card(x, y, w, v, *m, id == v.self, r.asker == id); y += px(kSlotH); }
     else { card_row(x, y, w, v, *m); y += px(34); }
-    if (y > y1 - px(200)) break;
+    if (y > y1 - px(200)) { y = more_row(x, y, w, line_after(r, id), "in line"); break; }
   }
   if (r.line.empty()) { y += px(6); open_spot(x, y, w); y += px(kSlotH); }
   bool any = false;
@@ -1099,7 +1169,7 @@ void draw_card(const Bars& b, const View& v, bool ring_box) {
     y += px(6);
     if (ring_box) { slot_card(x, y, w, v, m, m.id == v.self, r.asker == m.id); y += px(kSlotH); }
     else { card_row(x, y, w, v, m); y += px(34); }
-    if (y > y1 - px(170)) break;
+    if (y > y1 - px(170)) { y = more_row(x, y, w, watchers_after(r, m.id), "watching"); break; }
   }
   std::vector<std::pair<char, std::string>> items = {x_action(v), {'Y', "Rules"}, {'Z', "Add a friend's code"}};
   const int prompt = prompt_kind(v);
@@ -1111,9 +1181,14 @@ void draw_card(const Bars& b, const View& v, bool ring_box) {
     std::vector<std::string> l, o;
     const float h = prompt_height(w, v, prompt, &l, &o);
     prompt_box(x, foot - px(7) - h, w, v, prompt);
-  } else if (!v.status.empty()) {
+  } else {
+    const std::string said = next_sentence(v);
+    const std::string line = !v.linked && !v.hosting ? said : !said.empty() && (r.switch_pending || r.asker == v.self) ? said : v.status;
     const Ink dk{Face::Body, 11, kDimText};
-    text(dk, x, foot - px(8) - px(15), fit(dk, v.status, w));
+    std::vector<std::string> lines = wrap(dk, line, w);
+    if (lines.size() > 2) { lines.resize(2); lines[1] = fit(dk, lines[1] + " ...", w); }
+    float sy = foot - px(8) - lines.size() * px(15);
+    for (const std::string& l : lines) { text(dk, x, line_top(dk, sy, 15), l); sy += px(15); }
   }
 }
 
@@ -1148,7 +1223,15 @@ void draw_split(const Bars& b, const View& v) {
   }
   float lfoot = legend(x, w, b.y1 - px(10), {{'Y', "Rules"}, {'Z', "Add a friend's code"}});
   lfoot = z_line(x, w, lfoot);
-  if (!v.status.empty()) { const Ink dk{Face::Body, 11, kDimText}; text(dk, x, lfoot - px(8) - px(15), fit(dk, v.status, w)); }
+  {
+    const std::string said = next_sentence(v);
+    const std::string line = !v.linked && !v.hosting ? said : !said.empty() && (r.switch_pending || r.asker == v.self) ? said : v.status;
+    const Ink dk{Face::Body, 11, kDimText};
+    std::vector<std::string> lines = wrap(dk, line, w);
+    if (lines.size() > 2) { lines.resize(2); lines[1] = fit(dk, lines[1] + " ...", w); }
+    float sy = lfoot - px(8) - lines.size() * px(15);
+    for (const std::string& l : lines) { text(dk, x, line_top(dk, sy, 15), l); sy += px(15); }
+  }
   // Right: the line, then the watchers.
   const float rx = b.rx0 + pad, rwid = rw - pad * 2;
   float ry = b.y0 + px(10);
@@ -1160,7 +1243,7 @@ void draw_split(const Bars& b, const View& v) {
     ry += px(6);
     slot_card(rx, ry, rwid, v, *m, id == v.self, r.asker == id);
     ry += px(kSlotH);
-    if (ry > b.y1 - px(200)) break;
+    if (ry > b.y1 - px(200)) { ry = more_row(rx, ry, rwid, line_after(r, id), "in line"); break; }
   }
   if (r.line.size() < 2) { ry += px(6); open_spot(rx, ry, rwid); ry += px(kSlotH); }
   bool any = false;
@@ -1170,7 +1253,7 @@ void draw_split(const Bars& b, const View& v) {
     ry += px(6);
     slot_card(rx, ry, rwid, v, m, m.id == v.self, r.asker == m.id);
     ry += px(kSlotH);
-    if (ry > b.y1 - px(170)) break;
+    if (ry > b.y1 - px(170)) { ry = more_row(rx, ry, rwid, watchers_after(r, m.id), "watching"); break; }
   }
   const int prompt = prompt_kind(v);
   std::vector<std::pair<char, std::string>> items = {x_action(v)};
@@ -1313,22 +1396,22 @@ void frame(const Frame& f) {
   const bool have_hand = ar::css_hand(&hand_x, &hand_y);
   const ImVec2 mouse = ImGui::GetIO().MousePos;
   for (int s = 0; s < 2; ++s) {
-    const bool near = g.side == s + 1 || (g.page != Page::None && s == 1) ||
-                      (have_hand && (s == 0 ? hand_x <= -30.0f : hand_x >= 21.0f)) ||
+    // Over the picture (no bars) only the hand pushed into the edge opens a panel: near the edge the
+    // hand is still on the outer icons, which an opening panel would cover.
+    static const bool test_open = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_FIXTURE"); return v && std::strstr(v, ":open"); }();
+    const bool near = g.side == s + 1 || (g.page != Page::None && s == 1) || test_open ||
+                      (!overlay && have_hand && (s == 0 ? hand_x <= -30.0f : hand_x >= 21.0f)) ||
                       (s == 0 ? mouse.x >= 0 && mouse.x < bar : mouse.x > f.display_w - bar && mouse.x <= f.display_w);
     if (near) g.pop_seen[s] = f.time;
     const bool out = f.time - g.pop_seen[s] < 0.6;
     g.pop[s] = std::clamp(g.pop[s] + (float)(dt / 0.28) * (out ? 1.f : -1.f), 0.f, 1.f);
   }
-  if (overlay) {
-    dl()->AddRectFilled(ImVec2(b.lx0, b.y0), ImVec2(b.lx1, b.y1), IM_COL32(0, 0, 0, 150));
-    dl()->AddRectFilled(ImVec2(b.rx0, b.y0), ImVec2(b.rx1, b.y1), IM_COL32(0, 0, 0, 150));
-  }
   // Slide in from the sides as the character select comes back: ease out over a third of a second.
   auto ease = [](double t) { t = std::clamp(t, 0.0, 1.0); return (float)(1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)); };
   const float enter = ease((f.time - g.shown_at) / 0.35);
   float shown[2] = {enter, enter};
-  if (g.tabs && v.active) {
+  const bool folded = (g.tabs || overlay) && v.active;   // no bars: always folded into the tabs
+  if (folded) {
     for (int s = 0; s < 2; ++s) shown[s] = std::min(shown[s], ease(g.pop[s]) < 1e-3f ? 0.f : ease(g.pop[s]));
     const float tab_alpha[2] = {1.f - ease(g.pop[0]), 1.f - ease(g.pop[1])};
     draw_tabs(b, v, tab_alpha);
@@ -1337,9 +1420,13 @@ void frame(const Frame& f) {
   g_text_boxes.clear();
   ImDrawList* draw = dl();
   const int start = draw->VtxBuffer.Size;
+  if (overlay && v.active) {   // the panels' own ground over the picture, sliding with them
+    if (shown[0] > 0.f) draw->AddRectFilled(ImVec2(b.lx0, b.y0), ImVec2(b.lx1, b.y1), IM_COL32(0, 0, 0, 200));
+    if (shown[1] > 0.f) draw->AddRectFilled(ImVec2(b.rx0, b.y0), ImVec2(b.rx1, b.y1), IM_COL32(0, 0, 0, 200));
+  }
   if (!v.active) {
     draw_not_in_room(b);
-  } else if (!g.tabs || shown[0] > 0.f || shown[1] > 0.f) {
+  } else if (!folded || shown[0] > 0.f || shown[1] > 0.f) {
     switch (g.look) {
       case Look::Combined: draw_combined(b, v, false); break;
       case Look::Corners: draw_combined(b, v, true); break;
