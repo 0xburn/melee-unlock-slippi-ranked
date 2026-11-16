@@ -1232,8 +1232,9 @@ void arcade_debug(const Frame& f, const LightweightFilter& e) {
 }
 void lightweight_debug(const Frame& f, const LightweightFilter& e) {
   static const bool on = [] { const char* v = host::test_env::getenv("MELEE_TEST_LIGHTWEIGHT_LOG"); return v && *v == '1'; }();
+  static const bool detail = [] { const char* v = host::test_env::getenv("MELEE_TEST_LIGHTWEIGHT_LOG"); return v && *v == '2'; }();
   static uint32_t n = 0;
-  if (!on || e.level < 2 || (n++ % 600) != 0) return;
+  if ((!on && !detail) || e.level < 2 || (n++ % 600) != 0) return;
   uint32_t world = 0, skinned = 0, owned = 0, other_camera = 0;
   float zmin = 1e30f, zmax = -1e30f;
   for (const auto& d : f.draws) {
@@ -1248,6 +1249,8 @@ void lightweight_debug(const Frame& f, const LightweightFilter& e) {
       back = std::min(back, z); front = std::max(front, z);
     }
     zmin = std::min(zmin, back); zmax = std::max(zmax, front);
+    if (detail && !lightweight_background(e, f, d))   // MELEE_TEST_LIGHTWEIGHT_LOG=2: every stage piece that stays
+      host::log("lightweight: kept draw %zu, %u vertices, z %.1f..%.1f", (size_t)(&d - f.draws.data()), d.vertex_count, back, front);
   }
   host::log("lightweight: draws %zu, world %u (skinned %u, owned %u), other cameras %u, fighters %s at z %.1f, stage z %.1f..%.1f",
             f.draws.size(), world, skinned, owned, other_camera, e.have_fighters ? "found" : "none", e.fighter_far, zmin, zmax);
