@@ -43,7 +43,8 @@ int room_limit() {
 }
 
 // Room message kinds (first byte of an NP_MSG_MU_ARENA payload).
-enum Msg : uint8_t { kHello = 1, kWelcome = 2, kRoomState = 3, kAction = 4, kReport = 5, kPings = 6, kFeed = 7 };
+enum Msg : uint8_t { kHello = 1, kWelcome = 2, kRoomState = 3, kAction = 4, kReport = 5, kPings = 6, kFeed = 7,
+                     kClosed = 8 };   // kClosed: the host left, the room is over
 enum Report : uint8_t { kStarted = 1, kEnded = 2 };
 constexpr uint64_t kRetryMs = 1500;
 
@@ -70,6 +71,8 @@ bool g_active = false, g_hosting = false;
 std::string g_notice;            // a line for the player beside the room tab (a full room), until g_notice_until
 uint64_t g_notice_until = 0;
 bool g_close_room = false;       // a full room refused this player: leave it at the next tick
+bool g_member_closed = false;    // the host said the room is over
+const char* g_closed_reason = nullptr;   // a member's room ended (host gone): closed after the links are read
 std::string g_code, g_name;
 uint8_t g_self = kNone;
 Room g_room;
@@ -94,6 +97,7 @@ bool g_wait_room = false;                 // a member's game ended: wait for the
 void* g_yield_to = nullptr;               // this room joins the room at the other end of that link
 uint64_t g_next_match_ms = 0, g_next_pings_ms = 0;
 std::atomic<bool> g_search_busy{false};
+std::atomic<uint64_t> g_room_over_ms{0};   // when this game was last put out of a room (0 never)
 std::atomic<uint16_t> g_css_pick{0xFF00};   // character << 8 | costume, kNone character: none
 uint64_t g_test_wait_since = 0;
 // The game being passed on to the room, and who was in the ring when it began. The room moves on
@@ -294,7 +298,17 @@ void host_message(Link& from, const std::vector<uint8_t>& m) {
       }
       return;
     case kAction:
-      if (from.id != kNone && m.size() >= 3) apply_action(from.id, (Act)m[1], m[2], m.size() >= 4 ? m[3] : 0);
+      if (from.id != kNone && m.size() >= 3) {
+        const uint8_t who = from.id;
+        apply_action(who, (Act)m[1], m[2], m.size() >= 4 ? m[3] : 0);
+        if ((Act)m[1] == Act::Leave) {
+          // Left on purpose: the link closes and that friend is not searched for again (their next
+          // Direct search for this player's code is a plain one).
+          event("member %u left the room", who);
+          from.id = kNone;
+          from.refused_at = now_ms();
+        }
+      }
       return;
     case kReport: {
       // Only the players of the game report it.
@@ -423,6 +437,9 @@ void member_message(const std::vector<uint8_t>& m) {
     case kFeed:
       watch_feed(m.data() + 1, m.size() - 1);
       return;
+    case kClosed:
+      g_member_closed = true;   // handled after the links are read (this closes them)
+      return;
     default:
       return;
   }
@@ -441,10 +458,63 @@ void open_room() {
   event("room opened by %s", g_code.c_str());
 }
 
+// Links of a room this game has left: kept up a moment so the goodbye gets out, then closed.
+std::vector<std::pair<uint64_t, Link>> g_closing;
+
+void close_links_soon() {
+  const uint64_t at = now_ms() + 800;
+  for (Link& l : g_links) {
+    drop_later(l.mm);
+    if (l.np) g_closing.emplace_back(at, std::move(l));
+  }
+  g_links.clear();
+}
+
+// This game is in no room any more: links closed, its viewer window closed, the search the room
+// started on the online character select ended (a player who left is free to play anyone).
+void room_over_here(const char* why, bool end_search) {
+  g_room_over_ms.store(now_ms() | 1);
+  close_links_soon();
+  close_viewer();
+  g_receiver.close();
+  g_viewer_open_for_tag = false;
+  g_sending = false;
+  if (end_search && online::in_online_menus()) {
+    const online::ArenaMatchStatus st = online::arena_match_status();
+    const bool searching = st.state >= (int)Matchmaking::INITIALIZING && st.state <= (int)Matchmaking::CONNECTION_SUCCESS;
+    if (searching && !st.in_match && (st.mode == Matchmaking::DIRECT || st.mode == Matchmaking::TEAMS)) online::native_cleanup_match();
+  }
+  g_active = false; g_hosting = false; g_room = Room{}; g_self = kNone; g_status.clear();
+  g_wait_room = false; g_pair_code.clear(); g_yield_to = nullptr; g_sent_rev = 0xFFFFFFFFu;
+  g_next_match_ms = 0; g_test_wait_since = 0; g_relay_tag = 0; g_relay_from = kNone;
+  g_ping.fill(-1);
+  event("%s", why);
+}
+
+// Rules > Leave the room. A member says goodbye to the host (the host takes it as that member
+// leaving); a host tells everyone the room is over. Only between games (the panel is on the
+// character select).
+void leave_room() {
+  if (!g_active) return;
+  if (g_hosting) {
+    for (Link& l : g_links) if (l.id != kNone) send(l, std::vector<uint8_t>{kClosed});
+    room_over_here("left the room (it closes for everyone)", true);
+  } else {
+    if (!g_links.empty()) send(g_links[0], std::vector<uint8_t>{kAction, (uint8_t)Act::Leave, 0});
+    room_over_here("left the room", true);
+  }
+  g_notice = "You left the room";
+  g_notice_until = now_ms() + 5000;
+}
+
 void do_act(const Pending& p) {
   if (yougame::active() && !g_test.on) return;   // not in YouGame mode
   if (p.a == Act::OpenRoom) {
     if (!g_active && !g_code.empty()) open_room();
+    return;
+  }
+  if (p.a == Act::LeaveRoom) {
+    leave_room();
     return;
   }
   if (p.a == Act::AddCode) {
@@ -485,6 +555,7 @@ void service_links() {
   for (Link& l : g_links) if (refused_done(l)) { drop_later(l.np); drop_later(l.mm); }
   g_links.erase(std::remove_if(g_links.begin(), g_links.end(), refused_done), g_links.end());
   for (Link& l : g_links) {
+    if (l.refused_at) continue;   // said no, or left on purpose: only waiting to be dropped (never searched again)
     if (!l.np && l.test_peer >= 0) {
       if (now < l.retry_at) continue;
       l.np = test_link(l.test_peer);
@@ -528,11 +599,8 @@ void service_links() {
         else { g_room = Room{}; g_self = kNone; }
         if (!g_hosting && !g_test.on) {
           // A real room whose host has gone is over for this member (friends can start a new one).
-          event("the room's host left: the room is closed here");
           drop_later(l.np);
-          g_links.clear();
-          g_active = false;
-          g_status.clear();
+          g_closed_reason = "the room's host left: the room is closed here";
           return;
         }
       }
@@ -651,6 +719,11 @@ bool test_autolock() {
 
 void steer_match() {
   if (g_self == kNone || g_room.in_game || g_wait_room || now_ms() < g_next_match_ms) return;
+  if (g_room.members.size() < 2 && !g_test.on) {
+    // Alone in the room: nothing to steer, and the player's own Direct searches are their own.
+    g_status = "Waiting for friends to join";
+    return;
+  }
   const online::ArenaMatchStatus st = online::arena_match_status();
   if (st.in_match) return;
   // The search's own state: a pair that has just connected is not an "active session" yet.
@@ -782,7 +855,6 @@ void run_test_plan() {
 void publish_view() {
   View v;
   v.active = g_active;
-  if (!g_notice.empty() && now_ms() < g_notice_until) v.notice = g_notice;
   v.hosting = g_hosting;
   v.linked = g_hosting || (!g_links.empty() && g_links[0].was_ready);
   v.self = g_self;
@@ -790,6 +862,10 @@ void publish_view() {
   v.ping_ms = g_ping;
   v.watching_live = viewer_running();
   v.status = g_status;
+  if (!g_notice.empty() && now_ms() < g_notice_until) {
+    v.notice = g_notice;
+    if (g_active) v.status = g_notice;   // in a room the looks show it where the status line is
+  }
   std::lock_guard<std::mutex> lk(g_mutex);
   g_view = std::move(v);
 }
@@ -834,6 +910,44 @@ void report_character() {
   do_act({Act::SetCharacter, character, std::string(1, (char)costume)});
 }
 
+// The game's own Direct search met a room's link: the host of a room had added this player's code,
+// and this player entered the host's code in plain Direct (or the room's next-match search crossed
+// a link coming back up). The Direct pair is ended; out of a room this game then joins that room, as
+// "Add a friend's code" would.
+void stray_room_hello() {
+  std::vector<uint8_t> m;
+  for (int n = 0; n < 16 && online::arena_pop_from_match(m); ++n) {
+    if (m.empty() || m[0] != kHello || g_test.on) continue;
+    size_t at = 1;
+    std::string code, name;
+    if (!get_str(m, at, code) || !get_str(m, at, name)) continue;
+    const bool they_host = at + 2 <= m.size() && m[at] != 0;
+    const online::ArenaMatchStatus st = online::arena_match_status();
+    if (st.in_match || !online::in_online_menus() || (yougame::active() && !g_test.on)) continue;
+    online::native_cleanup_match();
+    g_next_match_ms = now_ms() + 2000;
+    if (g_active || !they_host) { event("the Direct search met a room link (%s): searching again", code.c_str()); return; }
+    event("the Direct search met %s's room: joining it", code.c_str());
+    g_notice = "Joining " + (name.empty() ? code : name) + "'s room";
+    g_notice_until = now_ms() + 6000;
+    act(Act::AddCode, 0, code);
+    return;
+  }
+}
+
+// Tests: MELEE_TEST_ARENA_LEAVE=<games> leaves the room as Rules > Leave the room does, once the room
+// has finished that many games and this game is back on the online character select.
+void test_leave() {
+  static const int after = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_LEAVE"); return v && *v ? std::atoi(v) : -1; }();
+  static bool done = false;
+  if (after < 0 || done || !g_active || g_self == kNone) return;
+  if ((int)g_room.games < after || g_room.in_game || !online::in_online_menus()) return;
+  if (online::arena_match_status().in_match) return;
+  done = true;
+  event("test: leaving the room as the panel does");
+  act(Act::LeaveRoom);
+}
+
 // Tests: MELEE_TEST_ARENA_ADD=<code>[,<code>...][@<seconds>] adds those friends, once, as the panel's
 // "Add a friend's code" does, <seconds> (default 5) after the online menus first show.
 void test_add_codes() {
@@ -865,8 +979,10 @@ void test_add_codes() {
 }
 
 void tick() {
-  if (!rooms_enabled()) return;   // not in this release for players (rooms_enabled)
+  if (!rooms_enabled()) return;   // tests only: rooms off
   test_add_codes();
+  test_leave();
+  stray_room_hello();
   {
     std::deque<Pending> todo;
     { std::lock_guard<std::mutex> lk(g_mutex); todo.swap(g_pending); }
@@ -881,12 +997,14 @@ void tick() {
       g_search_busy.store(st.state >= (int)Matchmaking::INITIALIZING && st.state <= (int)Matchmaking::CONNECTION_SUCCESS);
     }
   }
+  {
+    const uint64_t now = now_ms();
+    for (auto& c : g_closing) if (now >= c.first) drop_later(c.second.np);
+    g_closing.erase(std::remove_if(g_closing.begin(), g_closing.end(), [](const auto& c) { return !c.second.np; }), g_closing.end());
+  }
   if (g_close_room) {
     g_close_room = false;
-    for (Link& l : g_links) { drop_later(l.np); drop_later(l.mm); }
-    g_links.clear();
-    g_active = false; g_hosting = false; g_room = Room{}; g_self = kNone; g_status.clear();
-    event("left: the room was full");
+    room_over_here("left: the room was full", false);
   }
   if (!g_active) {
     // The room tab's notice (a full room) still reaches the panel while this game is in no room.
@@ -897,6 +1015,16 @@ void tick() {
     return;
   }
   service_links();
+  if (g_member_closed || g_closed_reason) {
+    const bool host_said = g_member_closed;
+    const char* why = g_closed_reason;
+    g_member_closed = false; g_closed_reason = nullptr;
+    room_over_here(host_said ? "the host closed the room" : why, true);
+    g_notice = host_said ? "The host closed the room" : "The room's host left";
+    g_notice_until = now_ms() + 8000;
+    publish_view();
+    return;
+  }
   send_pings();
   report_character();
   run_test_plan();
@@ -978,6 +1106,7 @@ void shutdown() {
   g_receiver.close();
   for (Link& l : g_links) l.np.reset();
   g_links.clear();
+  g_closing.clear();
   g_active = false;
 }
 
@@ -1005,6 +1134,10 @@ void set_css_pick(uint8_t character, uint8_t costume) {
 bool in_room() {
   std::lock_guard<std::mutex> lk(g_mutex);
   return g_view.active;
+}
+bool room_just_ended() {
+  const uint64_t at = g_room_over_ms.load();
+  return at != 0 && GetTickCount64() - at < 5000;
 }
 
 namespace {
@@ -1088,8 +1221,8 @@ bool fixture(View& out) {
 
 bool test_fixture_active() { return !fixture_spec().empty(); }
 bool rooms_enabled() {
-  static const bool test_on = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_ROOMS"); return v && *v == '1'; }();
-  return test_on || g_test.on || test_fixture_active();
+  static const bool test_off = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_ROOMS"); return v && *v == '0'; }();
+  return !test_off || g_test.on || test_fixture_active();
 }
 int test_fixture_index() { return fixture_index(); }
 const char* test_fixture_state(int index) { return index >= 0 ? kFixtureStates[index % kFixtureStateCount] : ""; }

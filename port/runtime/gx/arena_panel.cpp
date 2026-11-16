@@ -85,6 +85,7 @@ struct State {
   float pop[2] = {0, 0};                    // Hidden: how far each panel has slid in (0..1)
   double pop_seen[2] = {-10, -10};          // when the hand was last near that side
   double last_time = 0;
+  bool leave_armed = false;                 // Rules > Leave the room was pressed once
 } g;
 
 // What a lit-up button does.
@@ -543,6 +544,7 @@ std::vector<std::string> wrap(const Ink& k, const std::string& words, float w) {
 // The sheet's one plain sentence for a member waiting to play: what happens next for them.
 std::string next_sentence(const View& v) {
   const Room& r = v.room;
+  if (v.active && !v.notice.empty()) return v.notice;   // a short-lived line from the room (it is full)
   if (!v.hosting && !v.linked) return v.status.empty() ? "Lost the link to the room. Reconnecting." : v.status;
   if (r.switch_pending) {
     const auto voters = ar::switch_voters(r);
@@ -634,7 +636,7 @@ void page_box(float x, float y, float w, const View& v) {
   const Ink head{Face::Title, 13, kWhite, true, 2};
   const Ink small{Face::Body, 10, kGold, false, 0, false, 1.5f};
   if (g.page == Page::Rules) {
-    const float h = px(150);
+    const float h = px(178);
     glow(x, y, x + w, y + h, px(6), IM_COL32(243, 194, 46, 90), px(10));
     steel(x, y, x + w, y + h, kGold);
     text(small, x + px(8), y + px(8), "ROOM");
@@ -652,6 +654,21 @@ void page_box(float x, float y, float w, const View& v) {
       const Ink vk{Face::Bold, 12, g.row == i ? kInk : kWhite};
       text(lk, x + px(12), yy, labels[i]);
       text(vk, x + px(12), yy + px(10), std::string("< ") + values[i] + " >");
+    }
+    {
+      // The last row: leave the room (A). A host's room closes for everyone, and the row says so.
+      const float yy = y + px(44) + 3 * px(28);
+      const bool sel = g.row == 3;
+      if (sel) {
+        const int start = dl()->VtxBuffer.Size;
+        dl()->AddRectFilled(ImVec2(x + px(6), yy - px(2)), ImVec2(x + w - px(6), yy + px(25)), kWhite, px(4));
+        shade_x(start, x + px(6), x + w - px(6), kGold, IM_COL32(233, 168, 26, 255));
+      }
+      const Ink lk{Face::Body, 9.5f, sel ? kInk : kDimText};
+      const Ink vk{Face::Bold, 12, sel ? kInk : kWhite};
+      // Short lines: the box is as narrow as a bar beside a 4:3 picture.
+      text(lk, x + px(12), yy, g.leave_armed ? "Sure?" : v.hosting ? "Closes it for all" : "Room");
+      text(vk, x + px(12), yy + px(10), g.leave_armed ? "A again: leave" : "Leave the room");
     }
     hint(x + px(8), y + h - px(22), 'B', "Back", w - px(16), 1.0f, false);
     return;
@@ -806,7 +823,22 @@ void handle_input(const Frame& f, const View& v) {
   }
   if (g.page == Page::Rules) {
     if (step == 1) g.row = std::max(0, g.row - 1);
-    if (step == 2) g.row = std::min(2, g.row + 1);
+    if (step == 2) g.row = std::min(3, g.row + 1);
+    if (g.row != 3) g.leave_armed = false;
+    if (g.row == 3) {
+      // Leave the room: A, then A again (one press on the way down the list never leaves by accident).
+      if (pressed & kA) {
+        if (!g.leave_armed) g.leave_armed = true;
+        else {
+          host::log("arena panel: leave the room");
+          send_act(Act::LeaveRoom);
+          g.leave_armed = false; g.page = Page::None; g.row = 0;
+          leave_panel();
+        }
+      }
+      if (pressed & kB) { g.leave_armed = false; g.page = Page::None; g.row = 0; }
+      return;
+    }
     const int delta = step == 3 ? -1 : step == 4 || (pressed & kA) ? 1 : 0;
     if (delta) {
       if (g.row == 0 && v.active) send_act(Act::SetMode, (uint8_t)(((int)v.room.mode + delta + 3) % 3));
@@ -1372,7 +1404,7 @@ uint16_t withheld_buttons() { return 0; }
 
 void frame(const Frame& f) {
   if (yougame::active()) { leave_panel(); g.page = Page::None; return; }   // rooms are a Slippi Direct feature
-  if (!ar::rooms_enabled()) { leave_panel(); g.page = Page::None; return; }   // not in this release for players
+  if (!ar::rooms_enabled()) { leave_panel(); g.page = Page::None; return; }   // tests only: rooms off
   load();
   if (const int forced = ar::test_fixture_look(); forced >= 0) {   // tests only: the fixture's cycle
     g.look = (Look)forced;

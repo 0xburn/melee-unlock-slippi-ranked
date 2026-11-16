@@ -45,6 +45,7 @@ enum class Act : uint8_t {
   ToggleLine = 1, Ask = 2, Answer = 3, GiveUp = 4, SetMode = 5, ProposeSwitch = 6, VoteSwitch = 7, Leave = 8,
   SetCharacter = 9,              // arg the character, text[0] the costume (sent by the room itself)
   OpenRoom = 20, AddCode = 21,   // the host's own (AddCode carries a connect code)
+  LeaveRoom = 22,                // this player leaves the room (a host's room closes with it)
 };
 void act(Act a, uint8_t arg = 0, const std::string& text = {});
 
@@ -71,6 +72,9 @@ int test_fixture_index();                 // -1 unless cycling
 const char* test_fixture_state(int index);
 // True while this game is in a room (any thread).
 bool in_room();
+// True for a few seconds after this game left a room or its room closed (any thread): the Direct pair
+// that ends with it is not a finished online session (no "back to Training").
+bool room_just_ended();
 // True while a Slippi search or a connected pair is up (any thread): then Z belongs to the game
 // ("Z to cancel") unless this game is in a room.
 bool search_busy();
@@ -81,8 +85,8 @@ void set_css_pick(uint8_t character, uint8_t costume);
 // (x -350 at the left edge, 260 or 290 at the right), and when it last moved.
 void set_css_hand(int16_t x10, int16_t y10);
 bool css_hand(float* x, float* y);   // false before the first report
-// Rooms for players: off in this release (no tab, no panels, no room logic, no settings rows).
-// Test rooms (--arena-test), the panel fixture and MELEE_TEST_ARENA_ROOMS=1 (tests only) still run them.
+// Rooms for players (the tab, the panels, the room logic, the settings rows). MELEE_TEST_ARENA_ROOMS=0
+// (tests only) turns them off, for runs that compare a game with and without them.
 bool rooms_enabled();
 
 // ---- tests ----

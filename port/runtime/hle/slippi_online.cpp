@@ -1741,6 +1741,8 @@ std::unique_ptr<Matchmaking> arena_matchmaking() {
   return g_user ? std::make_unique<Matchmaking>(g_user.get()) : nullptr;
 }
 
+bool arena_pop_from_match(std::vector<uint8_t>& out) { return g_netplay && g_netplay->PopArena(out); }
+
 bool arena_lock_in(uint8_t character, uint8_t color) {
   if (!g_user || !g_matchmaking || !g_netplay) return false;
   if (g_last_search.mode != Matchmaking::DIRECT && g_last_search.mode != Matchmaking::TEAMS) return false;

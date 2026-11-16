@@ -1964,6 +1964,10 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
           return true;
         }
         if (c == CMD_CSS_FRAME && n == 0) { reply.push_back(walter_egg::css_frame()); return true; }
+        if (c == CMD_CSS_FRAME && n == 5) {   // with five bytes: a hand moved (the port, then x and y in tenths)
+          walter_egg::set_hand(p[0], (int16_t)(p[1] << 8 | p[2]), (int16_t)(p[3] << 8 | p[4]));
+          return true;
+        }
         if (c == CMD_ZELDA_AS_SHEIK && n == 0) {
           static const int test = [] { const char* v = host::test_env::getenv("MELEE_TEST_ZELDA_SHEIK"); return v && *v ? (*v == '1' ? 1 : 0) : -1; }();
           const bool want = test >= 0 ? test == 1 : gx::RenderOptions::live_zelda_as_sheik();
@@ -3236,18 +3240,23 @@ uint8_t replay_gate(int32_t frame, uint8_t phase) {
     static bool catching_up = false;
     if (!g_replay->IsProcessingComplete() && !replay_control::status().seeking) {
       const int32_t behind = g_replay->GetLatestIndex() - frame;
+      // On the clock the players' games log their frames with ("online frame N wall T"): a test
+      // compares the two to see how far behind the match a watcher's window shows it.
+      if (frame % 30 == 0 && !catching_up) host::log("replay: live frame %d wall %.3f s", frame, host::now_seconds());
       const bool was = catching_up;
       if (behind > 3) catching_up = true;
       else if (behind <= 1) catching_up = false;
       if (catching_up != was) {
         host::options.fast = catching_up;
         host::audio_set_muted(catching_up);
+        replay_control::set_catching_up(catching_up);   // the way there is not drawn: the window joins live
         if (!catching_up) host::log("replay: caught up with the live game at frame %d", frame);
       }
     } else if (catching_up) {
       catching_up = false;
       host::options.fast = false;
       host::audio_set_muted(false);
+      replay_control::set_catching_up(false);
     }
     return replay_control::gate(frame) == replay_control::Gate::GoBack ? 1 : 0;
   }

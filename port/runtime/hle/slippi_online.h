@@ -155,6 +155,9 @@ bool arena_start_search(int mode, const std::string& code, bool locked, uint8_t 
 bool local_identity(std::string* code, std::string* name);
 // A matchmaking client of its own for an arena room link (the game's own search is untouched).
 std::unique_ptr<Matchmaking> arena_matchmaking();
+// A room message that reached the game's own Direct connection (its search met a room's link
+// instead of a plain Direct player): the oldest one, false when there is none.
+bool arena_pop_from_match(std::vector<uint8_t>& out);
 // Locks in this character and colour with a random legal stage when a Direct pair is connected and
 // not locked in (the arena test harness only, where nobody presses Start). True if it did.
 bool arena_lock_in(uint8_t character, uint8_t color);

@@ -971,6 +971,12 @@ void tick() {
     static int session_mode_seen = -1, local_index_seen = -1;
     static std::string session_code;
     const bool session = slippi::online::session_mode() >= 0;
+    // A session that was an arena room's (in the room, or its room just ended) is never a finished
+    // online session: the room's last game stays "in a match" on the select until its connection is
+    // cleaned up, which can be long after the room closed (0.9.201 test: the host closed the room).
+    static bool from_room = false;
+    if (slippi::arena::in_room() || slippi::arena::room_just_ended()) { from_room = true; played = false; }
+    else if (!session && !session_seen) from_room = false;   // no session left over: the next one is plain
     if (session) {
       session_seen = true;
       session_mode_seen = slippi::online::session_mode();
@@ -996,7 +1002,9 @@ void tick() {
       // each one (two reports); the player stays on Unranked's character select, as on Slippi.
       const bool unranked = session_mode_seen == (int)MatchMode::Unranked;
       // In an arena room a pair ending is the rotation: the room starts the next match from here.
-      if (slippi::arena::in_room()) played = false;
+      // Leaving a room, or the room closing, ends the pair too: the player stays on the select.
+      if (from_room) played = false;
+      from_room = false;
       if (played && !unranked && gx::RenderOptions::live_online_back_to_training() && g_lifecycle.phase() == Phase::Idle &&
           is_online_scene() && !slippi::playback::enabled()) {
         enter_training_after_session((MatchMode)session_mode_seen, local_index_seen);
