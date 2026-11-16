@@ -2063,7 +2063,14 @@ static void draw_lcancel_overlays() {
 #ifndef MELEE_NO_SLIPPI
   // A Direct opponent on 0.9.200 or later says in its build message whether its automatic
   // L-cancel is on; Slippi Dolphin and older builds never do, so nothing shows against them.
-  if (lcancel::online_session_pending() && slippi::online::opponent_auto_lcancel()) {
+  // Shown on the character select, and for the first eight seconds after the opponent's game says
+  // so: with both players locked in before they connect, the select closes half a second later,
+  // which nobody could read.
+  static double opponent_said_at = -1.0;
+  const bool opponent_auto = slippi::online::opponent_auto_lcancel();
+  if (!opponent_auto) opponent_said_at = -1.0;
+  else if (opponent_said_at < 0.0) opponent_said_at = ImGui::GetTime();
+  if (opponent_auto && (lcancel::online_session_pending() || ImGui::GetTime() - opponent_said_at < 8.0)) {
     const OverlayBounds bounds = overlay_bounds();
     ImGui::SetNextWindowPos(ImVec2((bounds.left + bounds.right) * 0.5f, bounds.top + 10), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.75f);
@@ -4181,7 +4188,8 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     if (show_hint && practice.in_practice && practice.tab_available && practice.phase == Phase::Idle) {
       ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetTime() < 20.0 ? 1.0f : 0.5f);
       practice_card_begin("##native_practice_hint", ImVec2(screen.x - 12, 52), ImVec2(1, 0), false);
-      practice_card_title("Practice menu: Tab or Start + D-pad Up + Z", false);
+      practice_card_title("Find a match while you train", false);
+      ImGui::TextDisabled("Start + D-pad Up + Z (Tab on a keyboard), then Search");
       practice_card_end();
       ImGui::PopStyleVar();
     }
@@ -6320,46 +6328,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     {
       float used = 0, total = 0;
       if (vram_usage(&used, &total)) settings_hint("Video memory in use: %.1f / %.1f GB", used, total);
-    }
-    // ---- Shield colours ----
-    // Each port's shield (and KO blast) colour: a colour wheel, the game's preset colours one click away,
-    // and the port's own. "Online" is the player's own colour in online matches; Melee Unlocked opponents
-    // are sent it and show it, Slippi Dolphin opponents keep the port colour. Display only.
-    if (ImGui::CollapsingHeader("Shield colours##shields")) {
-      ImGui::Indent(8.0f);
-      auto shield_row = [&](const char* label, uint32_t* value, int port_colour) {
-        ImGui::PushID(label);
-        const uint32_t shown = *value ? (*value & 0xFFFFFFu)
-                                      : ((uint32_t)kShieldColorRgb[port_colour][0] << 16 | (uint32_t)kShieldColorRgb[port_colour][1] << 8 |
-                                         kShieldColorRgb[port_colour][2]);
-        float c[3] = {((shown >> 16) & 0xFF) / 255.0f, ((shown >> 8) & 0xFF) / 255.0f, (shown & 0xFF) / 255.0f};
-        if (ImGui::ColorEdit3(label, c, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_DisplayRGB)) {
-          *value = 0x1000000u | ((uint32_t)(c[0] * 255 + 0.5f) << 16) | ((uint32_t)(c[1] * 255 + 0.5f) << 8) | (uint32_t)(c[2] * 255 + 0.5f);
-          changed = true;
-        }
-        ImGui::SameLine();
-        if (!*value) ImGui::TextDisabled("port colour");
-        else if (ImGui::SmallButton("Port colour")) { *value = 0; changed = true; }
-        // The game's own presets, one click each.
-        for (int i = 0; i < kShieldColorCount; ++i) {
-          const uint8_t* rgb = kShieldColorRgb[i];
-          if (i) ImGui::SameLine(0.0f, 3.0f);
-          ImGui::PushID(i);
-          if (ImGui::ColorButton(kShieldColorNames[i], ImVec4(rgb[0] / 255.0f, rgb[1] / 255.0f, rgb[2] / 255.0f, 1.0f), 0, ImVec2(16, 16))) {
-            *value = 0x1000000u | ((uint32_t)rgb[0] << 16) | ((uint32_t)rgb[1] << 8) | rgb[2];
-            changed = true;
-          }
-          ImGui::PopID();
-        }
-        ImGui::PopID();
-      };
-      static const char* const ports[4] = {"P1 shield", "P2 shield", "P3 shield", "P4 shield"};
-      for (int port = 0; port < 4; ++port) shield_row(ports[port], &options.shield_color[port], port);
-      ImGui::Separator();
-      shield_row("Online (you)", &options.shield_color_online, 0);
-      settings_hint("Your shield and KO blast colours. Online, \"Online (you)\" is yours (left empty, your P1 colour): players"
-                    " on Melee Unlocked see it, players on Slippi Dolphin see your port colour. Team matches keep team colours.");
-      ImGui::Unindent(8.0f);
     }
     // ---- Get mod looks ----
     // One click each: the authors' own download, checked against its published file and built from the
@@ -9405,6 +9373,238 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetTooltip("On: the results screen after each offline match.\n"
                         "Off: straight back to character select, for playing sets back to back.\n"
                         "Online play always goes back to character select.");
+    // ---- Shield colours (here since 0.9.201; they were under Video) ----
+    // Each port's shield (and KO blast) colour: a colour wheel, the game's preset colours one click away,
+    // and the port's own. "Online" is the player's own colour in online matches; Melee Unlocked opponents
+    // are sent it and show it, Slippi Dolphin opponents keep the port colour. Display only.
+    if (ImGui::CollapsingHeader("Shield colours##shields")) {
+      ImGui::Indent(8.0f);
+      auto shield_row = [&](const char* label, uint32_t* value, int port_colour) {
+        ImGui::PushID(label);
+        const uint32_t shown = *value ? (*value & 0xFFFFFFu)
+                                      : ((uint32_t)kShieldColorRgb[port_colour][0] << 16 | (uint32_t)kShieldColorRgb[port_colour][1] << 8 |
+                                         kShieldColorRgb[port_colour][2]);
+        float c[3] = {((shown >> 16) & 0xFF) / 255.0f, ((shown >> 8) & 0xFF) / 255.0f, (shown & 0xFF) / 255.0f};
+        if (ImGui::ColorEdit3(label, c, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_DisplayRGB)) {
+          *value = 0x1000000u | ((uint32_t)(c[0] * 255 + 0.5f) << 16) | ((uint32_t)(c[1] * 255 + 0.5f) << 8) | (uint32_t)(c[2] * 255 + 0.5f);
+          changed = true;
+        }
+        ImGui::SameLine();
+        if (!*value) ImGui::TextDisabled("port colour");
+        else if (ImGui::SmallButton("Port colour")) { *value = 0; changed = true; }
+        // The game's own presets, one click each.
+        for (int i = 0; i < kShieldColorCount; ++i) {
+          const uint8_t* rgb = kShieldColorRgb[i];
+          if (i) ImGui::SameLine(0.0f, 3.0f);
+          ImGui::PushID(i);
+          if (ImGui::ColorButton(kShieldColorNames[i], ImVec4(rgb[0] / 255.0f, rgb[1] / 255.0f, rgb[2] / 255.0f, 1.0f), 0, ImVec2(16, 16))) {
+            *value = 0x1000000u | ((uint32_t)rgb[0] << 16) | ((uint32_t)rgb[1] << 8) | rgb[2];
+            changed = true;
+          }
+          ImGui::PopID();
+        }
+        ImGui::PopID();
+      };
+      static const char* const ports[4] = {"P1 shield", "P2 shield", "P3 shield", "P4 shield"};
+      for (int port = 0; port < 4; ++port) shield_row(ports[port], &options.shield_color[port], port);
+      ImGui::Separator();
+      shield_row("Online (you)", &options.shield_color_online, 0);
+      settings_hint("Your shield and KO blast colours. Online, \"Online (you)\" is yours (left empty, your P1 colour): players"
+                    " on Melee Unlocked see it, players on Slippi Dolphin see your port colour. Team matches keep team colours.");
+      ImGui::Unindent(8.0f);
+    }
+    // Input delay, Online and Discord sit here, right below the game's own switches (owner, 0.9.201);
+    // they were at the very end of this tab.
+    ImGui::TextUnformatted("Input delay");
+    {
+      static const char* offline_choices[] = {"Off (0 frames)", "1 frame", "2 frames", "3 frames",
+                                              "4 frames", "5 frames", "6 frames", "7 frames", "8 frames", "9 frames"};
+      int offline = options.offline_delay ? options.offline_delay_frames : 0;
+      ImGui::SetNextItemWidth(180.0f);
+      if (settings_combo("Offline input delay", &offline, offline_choices, 10)) {
+        options.offline_delay = offline > 0;
+        if (offline > 0) options.offline_delay_frames = offline;
+        RenderOptions::live_offline_delay() = options.offline_delay;
+        RenderOptions::live_offline_delay_frames() = options.offline_delay_frames;
+        changed = true;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Added input delay in offline VS, Training and 1P modes, on both engines.\n"
+                          "Off adds no delay. Menus and replay playback are unaffected.");
+#ifndef MELEE_NO_SLIPPI
+      static const char* online_choices[] = {"Auto", "1 frame", "2 frames", "3 frames", "4 frames",
+                                             "5 frames", "6 frames", "7 frames", "8 frames", "9 frames"};
+      int online = slippi::online::config().auto_delay ? 0 : slippi::online::config().delay;
+      ImGui::SetNextItemWidth(180.0f);
+      if (settings_combo("Online input delay", &online, online_choices, 10)) {
+        slippi::online::config().auto_delay = online == 0;
+        if (online > 0) slippi::online::config().delay = online;
+        changed = true;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Applies from the next online match. Higher delay can reduce rollbacks.\n"
+                          "Auto picks 2 to 6 frames from ping at match start and holds it for that match.\n"
+                          "Without a ping measurement, Auto uses the last manual online value (%d frames).",
+                          slippi::online::config().delay);
+      if (online == 1)
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
+                           "1 frame online can cause more rollbacks: fighters may jump or stutter.");
+#endif
+      ImGui::TextDisabled("Added input delay, not total controller-to-screen latency.");
+    }
+
+#ifndef MELEE_NO_SLIPPI
+    ImGui::TextUnformatted("Online");
+    {
+      // Early inputs (host/early_input.h): the other player's game learns of a press up to a frame
+      // sooner, so it guesses right more often and rolls back less. Only between two Melee Unlocked
+      // players who both have it on; a Slippi Dolphin opponent is never sent anything new.
+      if (settings_toggle("Early inputs", &options.early_inputs)) {
+        host::early_input::set_enabled(options.early_inputs);
+        changed = true;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Sends your presses and stick moves the moment they happen, between frames, so the\n"
+                          "other player's game guesses them right more often and rolls back less.\n"
+                          "Only between Melee Unlocked players who both have this on. Slippi Dolphin\n"
+                          "opponents see nothing new. Takes effect from the next online match.");
+      // Slippi's quick chat on the online character select screen, the same three choices as
+      // Slippi Dolphin. Off also stops showing the other player's messages.
+      static const char* chat_choices[] = {"On", "Direct matches only", "Off"};
+      int chat = std::clamp(slippi::online::config().chat, 0, 2);
+      ImGui::SetNextItemWidth(220.0f);
+      if (settings_combo("Quick chat", &chat, chat_choices, 3)) { slippi::online::config().chat = chat; changed = true; }
+      if (slippi::online::is_online_match()) {
+        ImGui::SameLine();
+        settings_hint("(applies from the next match)");
+      }
+      // Up to three connect codes to skip in Unranked (a match with one is turned down and the
+      // search goes on). Ranked, Direct, Teams and Party are not affected.
+      {
+        {   // Screenshot tooling (MELEE_SETTINGS_SCROLL_TO=online): bring this row into view once.
+          static int scroll_frames = 0;
+          if (scroll_frames < 30) {
+            const char* target = std::getenv("MELEE_SETTINGS_SCROLL_TO");
+            if (target && std::strcmp(target, "online") == 0) ImGui::SetScrollHereY(0.3f);
+            ++scroll_frames;
+          }
+        }
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Skip in Unranked");
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Up to three connect codes you do not want to play in Unranked. When the search finds one,\n"
+                            "Melee Unlocked turns the match down and keeps searching. Other modes are not affected.");
+        for (int i = 0; i < 3; ++i) {
+          char buf[17];
+          std::snprintf(buf, sizeof buf, "%s", slippi::online::config().blocked_codes[i].c_str());
+          ImGui::SameLine();
+          ImGui::SetNextItemWidth(110.0f);
+          char id[24]; std::snprintf(id, sizeof id, "##blockcode%d", i);
+          if (ImGui::InputTextWithHint(id, "CODE#123", buf, sizeof buf, ImGuiInputTextFlags_CharsUppercase)) {
+            slippi::online::config().blocked_codes[i] = buf;
+            changed = true;
+          }
+        }
+      }
+      if (settings_toggle("After an online session, straight back into Training and offer to search again", &options.online_back_to_training)) {
+        RenderOptions::live_online_back_to_training() = options.online_back_to_training;
+        changed = true;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("When the other player leaves or the connection drops after a match, you land in a Training\n"
+                          "match with the same character. D-pad Up searches again (same mode, same Direct code), Down dismisses.\n"
+                          "Direct and Teams only: after an Unranked game you stay on Unranked's character select.");
+      if (!options.online_back_to_training && settings_toggle("After an online session ends, go back to Training mode", &options.online_return_training)) {
+        RenderOptions::live_online_return_training() = options.online_return_training;
+        changed = true;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("When the other player leaves, you hold Z to leave, or the connection drops after a match,\n"
+                          "the game goes to Training mode's character select instead of staying online.");
+      // Slippi Dolphin's spectator server (its Slippi settings: Enable spectator, Spectator port),
+      // read once at start as Dolphin does.
+      ImGui::BeginDisabled(yougame::active());
+      if (settings_toggle("Spectator server (Slippi Launcher broadcast, overlays, experimental)", &options.slippi_spectator)) {
+        RenderOptions::live_slippi_spectator() = options.slippi_spectator;
+        changed = true;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Sends this game to the Slippi Launcher on this PC the way Slippi Dolphin does:\n"
+                          "its Broadcast tab (a tournament stream's code) and stream overlays read it.\n"
+                          "Uses the same port as Slippi Dolphin, so close Slippi Dolphin while playing here.\n"
+                          "Takes effect the next time the game starts.");
+      ImGui::SameLine();
+      int spectator_port = options.slippi_spectator_port;
+      ImGui::SetNextItemWidth(110.0f);
+      if (ImGui::InputInt("Port##spectator", &spectator_port, 0, 0)) {
+        options.slippi_spectator_port = std::clamp(spectator_port, 1, 65535);
+        RenderOptions::live_slippi_spectator_port() = options.slippi_spectator_port;
+        changed = true;
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("51441 is Slippi Dolphin's port, the one the Slippi Launcher looks at.");
+      ImGui::EndDisabled();
+      if (yougame::active())
+        settings_hint("Slippi spectator listener off (YouGame mode).");
+      else if (slippi::spectate::running())
+        settings_hint(("Serving on port " + std::to_string(slippi::spectate::port()) + ".").c_str());
+      else if (options.slippi_spectator)
+        settings_hint("Not serving: starts with the game (see the log if the port is taken).");
+      // Arena rooms: the panel beside the picture on the Direct character select. Its two choices
+      // are also on the room's Rules page; nothing here changes anything until a room is opened.
+      if (slippi::arena::rooms_enabled()) {
+      ImGui::Spacing();
+      ImGui::TextUnformatted("Arena rooms");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("On the Direct character select, push your hand against the right edge of the screen to open a room.\n"
+                          "Friends join by code; two play while the others watch live and rotate in.");
+      int room_look = arena_panel::look();
+      ImGui::SetNextItemWidth(180.0f);
+      if (ImGui::BeginCombo("Room look", arena_panel::look_name(room_look))) {
+        for (int i = 0; i < arena_panel::kLookCount; ++i)
+          if (ImGui::Selectable(arena_panel::look_name(i), i == room_look)) arena_panel::set_look(i);
+        ImGui::EndCombo();
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("How the room shows in the bars beside the picture. Only you see this choice.");
+      bool room_tabs = arena_panel::tabs();
+      if (settings_toggle("Hide the room panels until the hand comes near", &room_tabs)) arena_panel::set_tabs(room_tabs);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("In a room, the panels fold into thin tabs at the screen edges and slide out when your hand\n"
+                          "or mouse comes near that side.");
+      }
+    }
+#endif
+
+    // ---- Discord presence ----
+    // Off by default, and inert without an application ID. Nothing reaches Discord until the box
+    // below is ticked. See scratchpad/discord_invite_design.md for the whole design.
+    ImGui::TextUnformatted("Discord");
+    char app_id[32];
+    std::snprintf(app_id, sizeof app_id, "%s", options.discord_app_id.c_str());
+    if (ImGui::InputText("Application ID", app_id, sizeof app_id, ImGuiInputTextFlags_CharsDecimal)) {
+      options.discord_app_id = app_id;
+      host::discord::configure(options.discord_app_id);
+    }
+    const bool discord_was = options.discord_presence;
+#ifdef MELEE_NO_SLIPPI   // presence only: this build publishes no code for Join to hand over
+    settings_toggle("Discord presence (show what you are playing)", &options.discord_presence);
+#else
+    settings_toggle("Discord presence (show what you are playing; friends can press Join)", &options.discord_presence);
+#endif
+    if (options.discord_presence != discord_was) {
+      host::discord::configure(options.discord_app_id);
+      host::discord::enable(options.discord_presence);   // starts or stops one background thread
+    }
+    if (options.discord_presence) {
+      ImGui::TextWrapped("%s", host::discord::status().c_str());
+      settings_hint("A new Application ID is picked up the next time you switch this off and on.");
+#ifdef MELEE_NO_SLIPPI
+      ImGui::TextWrapped("Your IP address is never published. Who can see what you are playing depends on your Discord activity privacy settings.");
+#else
+      ImGui::TextWrapped("Discord Join sends the other player's code to Online > Direct; selecting Direct automatically uses it for that attempt. Your Slippi code is copied to the clipboard for the other player. Your IP address is never published. Who can see or join depends on your Discord activity privacy settings.");
+#endif
+    } else {
+      settings_hint("Off. Nothing is sent to Discord. Needs an Application ID from discord.com/developers/applications.");
+    }
     ImGui::TextUnformatted("Stages");
     if (settings_toggle("Freeze Final Destination", &options.freeze_fd)) {
       RenderOptions::live_freeze_fd() = options.freeze_fd;
@@ -9689,198 +9889,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           ImGui::SetTooltip("%s\nOffline only: off in online matches. Source Port (on the Static Recomp, add the\n"
                             "Gecko code itself).", c.tip);
       }
-    }
-
-
-    ImGui::TextUnformatted("Input delay");
-    {
-      static const char* offline_choices[] = {"Off (0 frames)", "1 frame", "2 frames", "3 frames",
-                                              "4 frames", "5 frames", "6 frames", "7 frames", "8 frames", "9 frames"};
-      int offline = options.offline_delay ? options.offline_delay_frames : 0;
-      ImGui::SetNextItemWidth(180.0f);
-      if (settings_combo("Offline input delay", &offline, offline_choices, 10)) {
-        options.offline_delay = offline > 0;
-        if (offline > 0) options.offline_delay_frames = offline;
-        RenderOptions::live_offline_delay() = options.offline_delay;
-        RenderOptions::live_offline_delay_frames() = options.offline_delay_frames;
-        changed = true;
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Added input delay in offline VS, Training and 1P modes, on both engines.\n"
-                          "Off adds no delay. Menus and replay playback are unaffected.");
-#ifndef MELEE_NO_SLIPPI
-      static const char* online_choices[] = {"Auto", "1 frame", "2 frames", "3 frames", "4 frames",
-                                             "5 frames", "6 frames", "7 frames", "8 frames", "9 frames"};
-      int online = slippi::online::config().auto_delay ? 0 : slippi::online::config().delay;
-      ImGui::SetNextItemWidth(180.0f);
-      if (settings_combo("Online input delay", &online, online_choices, 10)) {
-        slippi::online::config().auto_delay = online == 0;
-        if (online > 0) slippi::online::config().delay = online;
-        changed = true;
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Applies from the next online match. Higher delay can reduce rollbacks.\n"
-                          "Auto picks 2 to 6 frames from ping at match start and holds it for that match.\n"
-                          "Without a ping measurement, Auto uses the last manual online value (%d frames).",
-                          slippi::online::config().delay);
-      if (online == 1)
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
-                           "1 frame online can cause more rollbacks: fighters may jump or stutter.");
-#endif
-      ImGui::TextDisabled("Added input delay, not total controller-to-screen latency.");
-    }
-
-#ifndef MELEE_NO_SLIPPI
-    ImGui::TextUnformatted("Online");
-    {
-      // Early inputs (host/early_input.h): the other player's game learns of a press up to a frame
-      // sooner, so it guesses right more often and rolls back less. Only between two Melee Unlocked
-      // players who both have it on; a Slippi Dolphin opponent is never sent anything new.
-      if (settings_toggle("Early inputs", &options.early_inputs)) {
-        host::early_input::set_enabled(options.early_inputs);
-        changed = true;
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Sends your presses and stick moves the moment they happen, between frames, so the\n"
-                          "other player's game guesses them right more often and rolls back less.\n"
-                          "Only between Melee Unlocked players who both have this on. Slippi Dolphin\n"
-                          "opponents see nothing new. Takes effect from the next online match.");
-      // Slippi's quick chat on the online character select screen, the same three choices as
-      // Slippi Dolphin. Off also stops showing the other player's messages.
-      static const char* chat_choices[] = {"On", "Direct matches only", "Off"};
-      int chat = std::clamp(slippi::online::config().chat, 0, 2);
-      ImGui::SetNextItemWidth(220.0f);
-      if (settings_combo("Quick chat", &chat, chat_choices, 3)) { slippi::online::config().chat = chat; changed = true; }
-      if (slippi::online::is_online_match()) {
-        ImGui::SameLine();
-        settings_hint("(applies from the next match)");
-      }
-      // Up to three connect codes to skip in Unranked (a match with one is turned down and the
-      // search goes on). Ranked, Direct, Teams and Party are not affected.
-      {
-        {   // Screenshot tooling (MELEE_SETTINGS_SCROLL_TO=online): bring this row into view once.
-          static int scroll_frames = 0;
-          if (scroll_frames < 30) {
-            const char* target = std::getenv("MELEE_SETTINGS_SCROLL_TO");
-            if (target && std::strcmp(target, "online") == 0) ImGui::SetScrollHereY(0.3f);
-            ++scroll_frames;
-          }
-        }
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Skip in Unranked");
-        if (ImGui::IsItemHovered())
-          ImGui::SetTooltip("Up to three connect codes you do not want to play in Unranked. When the search finds one,\n"
-                            "Melee Unlocked turns the match down and keeps searching. Other modes are not affected.");
-        for (int i = 0; i < 3; ++i) {
-          char buf[17];
-          std::snprintf(buf, sizeof buf, "%s", slippi::online::config().blocked_codes[i].c_str());
-          ImGui::SameLine();
-          ImGui::SetNextItemWidth(110.0f);
-          char id[24]; std::snprintf(id, sizeof id, "##blockcode%d", i);
-          if (ImGui::InputTextWithHint(id, "CODE#123", buf, sizeof buf, ImGuiInputTextFlags_CharsUppercase)) {
-            slippi::online::config().blocked_codes[i] = buf;
-            changed = true;
-          }
-        }
-      }
-      if (settings_toggle("After an online session, straight back into Training and offer to search again", &options.online_back_to_training)) {
-        RenderOptions::live_online_back_to_training() = options.online_back_to_training;
-        changed = true;
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("When the other player leaves or the connection drops after a match, you land in a Training\n"
-                          "match with the same character. D-pad Up searches again (same mode, same Direct code), Down dismisses.\n"
-                          "Direct and Teams only: after an Unranked game you stay on Unranked's character select.");
-      if (!options.online_back_to_training && settings_toggle("After an online session ends, go back to Training mode", &options.online_return_training)) {
-        RenderOptions::live_online_return_training() = options.online_return_training;
-        changed = true;
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("When the other player leaves, you hold Z to leave, or the connection drops after a match,\n"
-                          "the game goes to Training mode's character select instead of staying online.");
-      // Slippi Dolphin's spectator server (its Slippi settings: Enable spectator, Spectator port),
-      // read once at start as Dolphin does.
-      ImGui::BeginDisabled(yougame::active());
-      if (settings_toggle("Spectator server (Slippi Launcher broadcast, overlays, experimental)", &options.slippi_spectator)) {
-        RenderOptions::live_slippi_spectator() = options.slippi_spectator;
-        changed = true;
-      }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Sends this game to the Slippi Launcher on this PC the way Slippi Dolphin does:\n"
-                          "its Broadcast tab (a tournament stream's code) and stream overlays read it.\n"
-                          "Uses the same port as Slippi Dolphin, so close Slippi Dolphin while playing here.\n"
-                          "Takes effect the next time the game starts.");
-      ImGui::SameLine();
-      int spectator_port = options.slippi_spectator_port;
-      ImGui::SetNextItemWidth(110.0f);
-      if (ImGui::InputInt("Port##spectator", &spectator_port, 0, 0)) {
-        options.slippi_spectator_port = std::clamp(spectator_port, 1, 65535);
-        RenderOptions::live_slippi_spectator_port() = options.slippi_spectator_port;
-        changed = true;
-      }
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("51441 is Slippi Dolphin's port, the one the Slippi Launcher looks at.");
-      ImGui::EndDisabled();
-      if (yougame::active())
-        settings_hint("Slippi spectator listener off (YouGame mode).");
-      else if (slippi::spectate::running())
-        settings_hint(("Serving on port " + std::to_string(slippi::spectate::port()) + ".").c_str());
-      else if (options.slippi_spectator)
-        settings_hint("Not serving: starts with the game (see the log if the port is taken).");
-      // Arena rooms: the panel beside the picture on the Direct character select. Its two choices
-      // are also on the room's Rules page; nothing here changes anything until a room is opened.
-      if (slippi::arena::rooms_enabled()) {
-      ImGui::Spacing();
-      ImGui::TextUnformatted("Arena rooms");
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("On the Direct character select, push your hand against the right edge of the screen to open a room.\n"
-                          "Friends join by code; two play while the others watch live and rotate in.");
-      int room_look = arena_panel::look();
-      ImGui::SetNextItemWidth(180.0f);
-      if (ImGui::BeginCombo("Room look", arena_panel::look_name(room_look))) {
-        for (int i = 0; i < arena_panel::kLookCount; ++i)
-          if (ImGui::Selectable(arena_panel::look_name(i), i == room_look)) arena_panel::set_look(i);
-        ImGui::EndCombo();
-      }
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("How the room shows in the bars beside the picture. Only you see this choice.");
-      bool room_tabs = arena_panel::tabs();
-      if (settings_toggle("Hide the room panels until the hand comes near", &room_tabs)) arena_panel::set_tabs(room_tabs);
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("In a room, the panels fold into thin tabs at the screen edges and slide out when your hand\n"
-                          "or mouse comes near that side.");
-      }
-    }
-#endif
-
-    // ---- Discord presence ----
-    // Off by default, and inert without an application ID. Nothing reaches Discord until the box
-    // below is ticked. See scratchpad/discord_invite_design.md for the whole design.
-    ImGui::TextUnformatted("Discord");
-    char app_id[32];
-    std::snprintf(app_id, sizeof app_id, "%s", options.discord_app_id.c_str());
-    if (ImGui::InputText("Application ID", app_id, sizeof app_id, ImGuiInputTextFlags_CharsDecimal)) {
-      options.discord_app_id = app_id;
-      host::discord::configure(options.discord_app_id);
-    }
-    const bool discord_was = options.discord_presence;
-#ifdef MELEE_NO_SLIPPI   // presence only: this build publishes no code for Join to hand over
-    settings_toggle("Discord presence (show what you are playing)", &options.discord_presence);
-#else
-    settings_toggle("Discord presence (show what you are playing; friends can press Join)", &options.discord_presence);
-#endif
-    if (options.discord_presence != discord_was) {
-      host::discord::configure(options.discord_app_id);
-      host::discord::enable(options.discord_presence);   // starts or stops one background thread
-    }
-    if (options.discord_presence) {
-      ImGui::TextWrapped("%s", host::discord::status().c_str());
-      settings_hint("A new Application ID is picked up the next time you switch this off and on.");
-#ifdef MELEE_NO_SLIPPI
-      ImGui::TextWrapped("Your IP address is never published. Who can see what you are playing depends on your Discord activity privacy settings.");
-#else
-      ImGui::TextWrapped("Discord Join sends the other player's code to Online > Direct; selecting Direct automatically uses it for that attempt. Your Slippi code is copied to the clipboard for the other player. Your IP address is never published. Who can see or join depends on your Discord activity privacy settings.");
-#endif
-    } else {
-      settings_hint("Off. Nothing is sent to Discord. Needs an Application ID from discord.com/developers/applications.");
     }
 
       }
@@ -10528,6 +10536,12 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // Its "Skip the 3D scene underneath" switch is under Advanced.
     }
 #endif
+    // Screenshot tooling (MELEE_SETTINGS_SCROLL_TO=controller): bring the controller overlay's rows into view.
+    if (static int scroll_frames = 0; scroll_frames < 30) {
+      const char* target = std::getenv("MELEE_SETTINGS_SCROLL_TO");
+      if (target && std::strcmp(target, "controller") == 0) ImGui::SetScrollHereY(0.0f);
+      ++scroll_frames;
+    }
     // With 20XX TE on this is also TE's "Input display" (te_pairs_linked).
     if (settings_toggle("Controller overlay", &options.input_overlay)) {
       te_follow_ours(options, kTeInputDisplay, options.input_overlay);
@@ -10536,7 +10550,10 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("An on-screen controller for streams. Drag it to move it while this panel is open.%s",
                         te_pair_hover(kTeInputDisplay));
-    if (options.input_overlay) {
+    // Its own choices always show under it (greyed while it is off), so Hide background and the rest
+    // can be found before switching it on; they were hidden until then.
+    {
+      ImGui::BeginDisabled(!options.input_overlay);
       ImGui::SameLine();
       changed |= settings_toggle("Show values", &options.input_overlay_values);
       if (ImGui::IsItemHovered()) ImGui::SetTooltip("Each stick's position as the game reads it. A full press is 1.0000.");
@@ -10544,9 +10561,11 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetNextItemWidth(110.0f);
       changed |= settings_slider("Stick size", &options.input_overlay_stick, 1, 10);
       // Several ports can be shown at once (doubles and crew streams want every player visible);
-      // they stack upward from the bottom left corner.
+      // they stack upward from the bottom left corner. On a row of their own with Hide background:
+      // on the one row above, that switch ran off the panel's right edge and could not be reached.
+      ImGui::Indent(22.0f);
       for (int i = 0; i < 4; ++i) {
-        ImGui::SameLine();
+        if (i) ImGui::SameLine();
         char label[16];
         std::snprintf(label, sizeof label, "P%d", i + 1);
         bool on = (options.input_overlay_ports & (1 << i)) != 0;
@@ -10558,7 +10577,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SameLine();
       changed |= settings_toggle("Hide background", &options.input_overlay_hide_border);
       if (ImGui::IsItemHovered()) ImGui::SetTooltip("Removes the panel behind the overlay, leaving only the buttons and sticks.");
-      settings_hint("  Drag an overlay to move it, and its edges to resize, while this panel is open.");
+      ImGui::Unindent(22.0f);
+      ImGui::EndDisabled();
+      if (options.input_overlay) settings_hint("  Drag an overlay to move it, and its edges to resize, while this panel is open.");
     }
     // ---- Advanced: developer readouts, apart from the player HUD above ----
     if (settings_advanced_group(1, &changed)) {
@@ -10968,6 +10989,16 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     draw_native_practice(state, options, practice, pad, have_pad);
   if (!state.fill_window && !state.open && !state.menu_open && replay_control::active() && !gx::clean_replay_active())
     draw_replay_practice(options, pad, have_pad);
+  // A watcher's window that opened after the match began: while it catches up (not drawn), a plain
+  // card; the match appears as it is now, never as a fast-forward.
+  if (replay_control::catching_up()) {
+    const ImVec2 screen = ImGui::GetIO().DisplaySize;
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    dl->AddRectFilled(ImVec2(0, 0), screen, IM_COL32(8, 10, 16, 255));
+    const char* line = "Joining the match live...";
+    const ImVec2 size = ImGui::CalcTextSize(line);
+    dl->AddText(ImVec2((screen.x - size.x) * 0.5f, (screen.y - size.y) * 0.5f), IM_COL32(230, 232, 240, 255), line);
+  }
 #ifndef MELEE_NO_SLIPPI
   if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active()) draw_arena_panel(options, pad, have_pad);
 #endif

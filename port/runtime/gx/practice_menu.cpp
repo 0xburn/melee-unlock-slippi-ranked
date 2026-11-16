@@ -1420,7 +1420,8 @@ void draw_intro(ImDrawList* dl, const Frame& f) {
     const float u = gu * 0.82f;
     const float fa = std::min(ease((since - kFrom) / 0.35f), ease((kTo - since) / 0.45f));
     const float slide = (1.0f - ease((since - kFrom) / 0.3f)) * 30.0f * u;
-    const char* title = "Practice menu";
+    // Searching for a match while training is what players missed (owner, 0.9.201): it leads.
+    const char* title = "Find a match while you train";
     const float cx = (f.game_x0 + f.game_x1) * 0.5f;
     const float w = text_width(25 * u, title) + 110 * u, left = cx - w * 0.5f, top = f.game_y0 + 170 * u, h = 50 * u;
     draw_bar(dl, left - slide, top, left + w - slide, h, u, true, title, "", true, fa, false);
@@ -1428,7 +1429,8 @@ void draw_intro(ImDrawList* dl, const Frame& f) {
     const float kw = hints(dl, 0, 0, u, keys, fa, false);
     hints(dl, cx - kw * 0.5f, top + h + 8 * u, u, keys, fa);
     // Kept between the Training logo and its damage display.
-    const char* about = "Set up the CPU, use training tools, fight a pro, or find a match while you train.";
+    const char* about = "Search Unranked or Direct and keep practicing: the match starts by itself when one is found. "
+                        "The same menu sets up the CPU and the training tools.";
     float y = top + h + 28 * u;
     for (const std::string& line : wrap(about, 16 * u, 430 * u)) {
       text(dl, cx - text_width(16 * u, line.c_str()) * 0.5f, y, 16 * u, with_alpha(IM_COL32(255, 255, 255, 255), fa), line.c_str());
@@ -1438,7 +1440,7 @@ void draw_intro(ImDrawList* dl, const Frame& f) {
   }
   // Then small at the top right: the buttons and what they open (dimmer after half a minute).
   const float u = gu * 0.8f, alpha = since < 30.0f ? 0.95f : 0.55f;
-  const char* spec = "S:+|D:Up  +|Z:Practice menu";
+  const char* spec = "S:+|D:Up  +|Z:Find a match, practice menu";
   const float hw = hints(dl, 0, 0, u, spec, alpha, false);
   hints(dl, f.game_x1 - hw - 8 * u, f.game_y0 + 30 * u, u, spec, alpha);
 }
