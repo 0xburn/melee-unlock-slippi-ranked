@@ -25,6 +25,7 @@
 #include <nlohmann/json.hpp>
 #include "launcher_mod_catalog.h"
 #include "mod_scan.h"
+#include <array>
 #include <set>
 #include <sstream>
 #include <algorithm>
