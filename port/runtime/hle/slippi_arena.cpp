@@ -502,7 +502,7 @@ void service_links() {
         Matchmaking::MatchSearchSettings search;
         search.mode = Matchmaking::DIRECT;
         search.connect_code = utf8_to_shiftjis(l.code);
-        l.mm->SetLocalPort((uint16_t)(51000 + (now * 7919) % 9000));
+        l.mm->SetLocalPort((uint16_t)(51000 + (now * 7919 + 101 * (uint64_t)(&l - g_links.data())) % 9000));   // links of one tick differ
         l.mm->FindMatch(search);
         event("looking for %s", l.code.c_str());
         continue;
@@ -816,6 +816,7 @@ bool set_test(const std::string& spec) {
   return true;
 }
 bool test_mode() { return g_test.on; }
+bool locks_in_itself() { return g_test.on || test_autolock(); }
 void set_recording_codes(std::vector<uint8_t> codes) { g_codes = std::move(codes); }
 void set_viewer_launcher(std::function<void*(const std::string&)> launch) { g_launch_viewer = std::move(launch); }
 
@@ -864,6 +865,7 @@ void test_add_codes() {
 }
 
 void tick() {
+  if (!rooms_enabled()) return;   // not in this release for players (rooms_enabled)
   test_add_codes();
   {
     std::deque<Pending> todo;
@@ -1085,6 +1087,10 @@ bool fixture(View& out) {
 }  // namespace
 
 bool test_fixture_active() { return !fixture_spec().empty(); }
+bool rooms_enabled() {
+  static const bool test_on = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_ROOMS"); return v && *v == '1'; }();
+  return test_on || g_test.on || test_fixture_active();
+}
 int test_fixture_index() { return fixture_index(); }
 const char* test_fixture_state(int index) { return index >= 0 ? kFixtureStates[index % kFixtureStateCount] : ""; }
 int test_fixture_look() {

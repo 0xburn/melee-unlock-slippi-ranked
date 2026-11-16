@@ -4370,7 +4370,11 @@ static void draw_arena_panel(RenderOptions& options, const host::PadState& pad, 
   f.game_y1 = f.game_y0 + gh;
   if (have_pad) { f.buttons = pad.button; f.stick_x = pad.stick_x; f.stick_y = pad.stick_y; f.sub_x = pad.sub_x; f.sub_y = pad.sub_y; }
   f.time = ImGui::GetTime();
-  f.on_online_menus = slippi::online::in_online_menus() || slippi::arena::test_fixture_active();
+  // Rooms ride on the Source Port's character select, whose game library reports the hand (cmd
+  // 0xEF). The Static Recomp's select never does: it drew an ARENA tab there that nothing opens.
+  float hand_x = 0, hand_y = 0;
+  f.on_online_menus = (slippi::online::in_online_menus() && slippi::arena::css_hand(&hand_x, &hand_y)) ||
+                      slippi::arena::test_fixture_active();
   arena_panel::frame(f);
 }
 #endif
@@ -9824,6 +9828,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         settings_hint("Not serving: starts with the game (see the log if the port is taken).");
       // Arena rooms: the panel beside the picture on the Direct character select. Its two choices
       // are also on the room's Rules page; nothing here changes anything until a room is opened.
+      if (slippi::arena::rooms_enabled()) {
       ImGui::Spacing();
       ImGui::TextUnformatted("Arena rooms");
       if (ImGui::IsItemHovered())
@@ -9842,6 +9847,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("In a room, the panels fold into thin tabs at the screen edges and slide out when your hand\n"
                           "or mouse comes near that side.");
+      }
     }
 #endif
 

@@ -405,8 +405,9 @@ void hint(float x, float y, char b, const std::string& label, float w, float alp
   }
   button_chip(x, y, b, alpha);
   const ImU32 col = lit ? kInk : (kHintText & ~IM_COL32_A_MASK) | ((ImU32)(255 * alpha) << IM_COL32_A_SHIFT);
-  const Ink k{lit ? Face::Bold : Face::Body, 11.5f, col};
-  text(k, x + px(22), line_top(k, y, 16), fit(k, label, w - px(22)));
+  Ink k{lit ? Face::Bold : Face::Body, 11.5f, col};
+  const std::string shown = fit_name(k, label, w - px(22));   // smaller before it is shortened ("Add a friend's co.")
+  text(k, x + px(22), line_top(k, y, 16), shown);
 }
 // Hint rows stacked up from `bottom` (gap 5px), returning the top of the first.
 float hints_up(float x, float w, float bottom, const std::vector<std::pair<char, std::string>>& items, float alpha = 1.0f) {
@@ -823,6 +824,17 @@ void handle_input(const Frame& f, const View& v) {
     int want = 0;
     if (have_hand && hx <= kLeftEdge && f.stick_x < -50) want = 1;
     if (have_hand && hx >= kRightEdge && f.stick_x > 50) want = 2;
+    // Only into a side that has buttons (out of a room the left has none: it went in and out every
+    // 11 frames, taking a frame of input each time), and out of a room only beside the ARENA tab:
+    // higher up the right edge the hand is on Ganondorf or Young Link, whose players hold the stick
+    // right to reach them and then press A to pick.
+    if (want) {
+      const float bar_y = g_bar_y0 + (25.0f - hy) / 47.0f * (g_bar_y1 - g_bar_y0);   // as hover_nearest
+      bool beside = false;
+      for (const Item& it : g_last_items)
+        if (it.side == want && (v.active || (bar_y >= it.y0 && bar_y <= it.y1))) beside = true;
+      if (!beside) want = 0;
+    }
     if (want && want == g.push_side) ++g.push_frames;
     else { g.push_side = want; g.push_frames = want ? 1 : 0; }
     if (want && g.push_frames >= kPushFrames) {
@@ -1005,6 +1017,13 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
       const float w = (left ? lw : rw) - pad * 2;
       const float h = prompt_height(w, v, prompt, &l, &o);
       prompt_box(left ? b.lx0 + pad : b.rx0 + pad, fy - px(10) - h, w, v, prompt);
+    } else if (const std::string said = next_sentence(v); !said.empty()) {
+      // The plain line every other look shows (the link to the room lost, a doubles vote, your own
+      // ask, your place in line), at the foot of the red corner.
+      const Ink dk{Face::Body, 11, kDimText};
+      const std::vector<std::string> lines = wrap(dk, said, lw - pad * 2);
+      float sy = fy - px(8) - lines.size() * px(15);
+      for (const std::string& l : lines) { text(dk, b.lx0 + pad, line_top(dk, sy, 15), l); sy += px(15); }
     }
     return;
   }
@@ -1284,9 +1303,11 @@ void draw_not_in_room(const Bars& b, const View& v) {
     return;
   }
   const Ink sm{Face::Body, 10, kGold, false, 0, false, 1.5f};
-  const Ink md{Face::Title, 13, kWhite, true, 2};
+  Ink md{Face::Title, 13, kWhite, true, 2};
   text(sm, x + px(8), y + px(8), "ARENA");
-  text(md, x + px(8), y + px(20), "PLAY WITH FRIENDS");
+  // The sheet's title is wider than this box: set smaller to fit (the italic leans right by 0.16 h).
+  const std::string title = fit_name(md, "PLAY WITH FRIENDS", tw - px(16) - size_of(md.face, 13) * .16f);
+  text(md, x + px(8), y + px(20), title);
   hint(x + px(10), y + th - px(26), 'Z', "Add a friend's code", tw - px(16));
 }
 
@@ -1351,6 +1372,7 @@ uint16_t withheld_buttons() { return 0; }
 
 void frame(const Frame& f) {
   if (yougame::active()) { leave_panel(); g.page = Page::None; return; }   // rooms are a Slippi Direct feature
+  if (!ar::rooms_enabled()) { leave_panel(); g.page = Page::None; return; }   // not in this release for players
   load();
   if (const int forced = ar::test_fixture_look(); forced >= 0) {   // tests only: the fixture's cycle
     g.look = (Look)forced;
@@ -1381,7 +1403,11 @@ void frame(const Frame& f) {
   float bar = f.game_x0;
   const bool overlay = bar < 90.0f;
   if (overlay) bar = std::min(f.display_w * 0.17f, 220.0f);
-  g_k = std::clamp(bar / 152.0f, 0.6f, 3.0f);
+  // Sized by the bar's width, but never past what the bar's height holds: every layout is made for
+  // a bar about 540 sheet pixels high (16:9 and 16:10 windows); the wider bars of an ultrawide
+  // window are no taller, and at their width's scale the lists, the ask prompt and the foot ran
+  // into each other (2560x1080: 360 sheet pixels high).
+  g_k = std::clamp(std::min(bar / 152.0f, (f.game_y1 - f.game_y0) / 540.0f), 0.6f, 3.0f);
   g_mid = f.display_w * .5f;
   g_bar_y0 = f.game_y0; g_bar_y1 = f.game_y1;
   b.lx0 = 0; b.lx1 = bar;

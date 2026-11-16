@@ -178,6 +178,7 @@ static void wakeup_thread(ENetHost* host) {
   enet_socket_send(host->socket, &address, &buf, 1);
 }
 static int ENET_CALLBACK intercept_callback(ENetHost* host, ENetEvent* event) {
+  if (test_loss_pct() > 0 && test_loss_intercept(host, event)) return 1;   // tests: stays lossy once connected
   if (host->receivedDataLength == 1 && host->receivedData[0] == 0) { event->type = (ENetEventType)42; return 1; }
   return 0;
 }

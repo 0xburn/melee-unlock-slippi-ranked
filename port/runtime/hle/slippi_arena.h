@@ -29,6 +29,7 @@ namespace slippi::arena {
 // as it is connected, since nobody presses Start in a test.
 bool set_test(const std::string& spec);
 bool test_mode();
+bool locks_in_itself();   // tests: the room locks pairs in with a random stage (test room or MELEE_TEST_ARENA_AUTOLOCK)
 // The online recording's code list (a watcher's live recording needs it; the feed does not carry it).
 void set_recording_codes(std::vector<uint8_t> codes);
 // Opens a viewer window on a live recording; returns its process handle, or null. Set by the host.
@@ -80,6 +81,9 @@ void set_css_pick(uint8_t character, uint8_t costume);
 // (x -350 at the left edge, 260 or 290 at the right), and when it last moved.
 void set_css_hand(int16_t x10, int16_t y10);
 bool css_hand(float* x, float* y);   // false before the first report
+// Rooms for players: off in this release (no tab, no panels, no room logic, no settings rows).
+// Test rooms (--arena-test), the panel fixture and MELEE_TEST_ARENA_ROOMS=1 (tests only) still run them.
+bool rooms_enabled();
 
 // ---- tests ----
 // The member's last few log-worthy events, for hidden runs (also in the log as "arena: ...").

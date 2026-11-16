@@ -1983,7 +1983,7 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
         }
         if (c == CMD_ARENA_PAIRING && n == 0) {   // shim/mu_slippi_css.c: an arena room's new pairing
           append_be32(reply, slippi::online::arena_pairing());
-          reply.push_back(slippi::arena::test_mode() ? 1 : 0);   // a test room locks in a random stage itself
+          reply.push_back(slippi::arena::locks_in_itself() ? 1 : 0);   // the room locks in a random stage itself (tests)
           return true;
         }
         if (c == CMD_PRACTICE_CPU) {   // shim/mu_practice_cpu.c: the settings, or what it is doing

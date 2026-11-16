@@ -1735,6 +1735,9 @@ bool local_identity(std::string* code, std::string* name) {
 
 std::unique_ptr<Matchmaking> arena_matchmaking() {
   if (!g_user) init();
+  // Room links search on their own (not through start_find_match): they need this game's own hold on
+  // Windows networking (the spectator server lets go of its own when it cannot open its port).
+  if (!enet_ready()) return nullptr;
   return g_user ? std::make_unique<Matchmaking>(g_user.get()) : nullptr;
 }
 
