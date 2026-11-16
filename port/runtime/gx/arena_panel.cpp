@@ -1260,10 +1260,18 @@ void draw_split(const Bars& b, const View& v) {
   }
 }
 
-void draw_not_in_room(const Bars& b) {
+void draw_not_in_room(const Bars& b, const View& v) {
   // Not in a room: a small tab at the right edge (no clutter for anyone who never uses rooms).
   // The hand pushed into the right edge opens it: "Add a friend's code" starts a room.
   if (g.page != Page::None) return;
+  if (!v.notice.empty()) {   // a full room said no: the reason, in the bar above the tab
+    const Ink nk{Face::Bold, 11, kWhite};
+    const float w = b.rx1 - b.rx0 - px(16);
+    std::vector<std::string> lines = wrap(nk, v.notice, w);
+    float y = b.y0 + (b.y1 - b.y0) * .42f - px(10) - lines.size() * px(16);
+    dl()->AddRectFilled(ImVec2(b.rx0 + px(4), y - px(6)), ImVec2(b.rx1 - px(4), y + lines.size() * px(16) + px(4)), IM_COL32(0, 0, 0, 190), px(5));
+    for (const std::string& l : lines) { text(nk, b.rx0 + px(8), line_top(nk, y, 16), l); y += px(16); }
+  }
   const bool open = g.side == 2;
   const float tw = open ? b.rx1 - b.rx0 - px(16) : px(34), th = open ? px(86) : px(78);
   const float x = b.rx1 - tw - px(open ? 8 : 4), y = b.y0 + (b.y1 - b.y0) * .42f;
@@ -1418,7 +1426,7 @@ void frame(const Frame& f) {
     if (shown[1] > 0.f) draw->AddRectFilled(ImVec2(b.rx0, b.y0), ImVec2(b.rx1, b.y1), IM_COL32(0, 0, 0, 200));
   }
   if (!v.active) {
-    draw_not_in_room(b);
+    draw_not_in_room(b, v);
   } else if (!folded || shown[0] > 0.f || shown[1] > 0.f) {
     switch (g.look) {
       case Look::Combined: draw_combined(b, v, false); break;

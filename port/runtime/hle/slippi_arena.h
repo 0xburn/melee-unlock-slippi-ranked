@@ -56,6 +56,7 @@ struct View {
   std::array<int, kMaxMembers> ping_ms{};   // each member's ping to the host, -1 unknown, 0 the host
   bool watching_live = false;               // a viewer window is open on this game
   std::string status;                       // one plain line: what this member's game is doing
+  std::string notice;                       // a short-lived line beside the room tab (a full room), else empty
 };
 View view();
 // Tests only (MELEE_TEST_ARENA_FIXTURE=<state>[:long]): view() answers a made-up room so the panel can

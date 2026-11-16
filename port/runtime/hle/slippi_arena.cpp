@@ -31,6 +31,17 @@ void watch_feed(const uint8_t* data, size_t size);
 
 namespace {
 
+// Players a room takes before it refuses the next: kRoomLimit. Tests only: MELEE_TEST_ARENA_ROOM_LIMIT
+// (2 to kRoomLimit) lowers it, so the refusal is proven with real games inside the limit of 8 games.
+int room_limit() {
+  static const int n = [] {
+    const char* v = host::test_env::getenv("MELEE_TEST_ARENA_ROOM_LIMIT");
+    const int k = v ? std::atoi(v) : 0;
+    return k >= 2 && k <= kRoomLimit ? k : kRoomLimit;
+  }();
+  return n;
+}
+
 // Room message kinds (first byte of an NP_MSG_MU_ARENA payload).
 enum Msg : uint8_t { kHello = 1, kWelcome = 2, kRoomState = 3, kAction = 4, kReport = 5, kPings = 6, kFeed = 7 };
 enum Report : uint8_t { kStarted = 1, kEnded = 2 };
@@ -44,6 +55,7 @@ struct Link {
   int test_peer = -1;          // test rooms: the other member's index
   uint64_t retry_at = 0;
   uint64_t ready_at = 0;       // when it came up: a link up this long with no hello answered is reopened
+  uint64_t refused_at = 0;     // a full room said no on this link (either way): dropped 3 s later
   bool was_ready = false, hello_sent = false;
 };
 
@@ -55,6 +67,9 @@ struct Test { bool on = false; int index = 0, count = 0, base = 0; uint8_t chara
 
 // Simulation thread.
 bool g_active = false, g_hosting = false;
+std::string g_notice;            // a line for the player beside the room tab (a full room), until g_notice_until
+uint64_t g_notice_until = 0;
+bool g_close_room = false;       // a full room refused this player: leave it at the next tick
 std::string g_code, g_name;
 uint8_t g_self = kNone;
 Room g_room;
@@ -227,6 +242,11 @@ void apply_report(uint8_t what, uint32_t tag, const std::string& winner_code) {
   event("game %08X ended, winner %s", tag, winner_code.empty() ? "none" : winner_code.c_str());
 }
 
+void say_room_full(bool theirs) {
+  g_notice = std::string(theirs ? "That" : "The") + " room is full (" + std::to_string(room_limit()) + " players at most)";
+  g_notice_until = now_ms() + 10000;
+}
+
 void host_message(Link& from, const std::vector<uint8_t>& m) {
   if (m.empty()) return;
   switch (m[0]) {
@@ -236,22 +256,43 @@ void host_message(Link& from, const std::vector<uint8_t>& m) {
       if (!get_str(m, at, code) || !get_str(m, at, name) || from.id != kNone) return;
       const bool they_host = at + 2 <= m.size() && m[at] != 0;
       const size_t their_count = at + 2 <= m.size() ? m[at + 1] : 1;
+      bool full = g_room.members.size() >= (size_t)room_limit();
       if (they_host && !g_test.on) {
         // Two rooms met: the bigger one keeps its host; between equals, the lower connect code hosts.
+        // Not when both together would pass the limit: then neither moves (a host that joined a full
+        // room would leave its own players behind) and the asking room is told it does not fit.
         const size_t mine = g_room.members.size();
-        if (their_count > mine || (their_count == mine && code < g_code)) {
+        if (mine + their_count > (size_t)room_limit()) full = true;
+        else if (their_count > mine || (their_count == mine && code < g_code)) {
           g_yield_to = (void*)&from;   // done once this link's messages are read (the list may not change mid-loop)
           return;
         }
       }
-      const uint8_t id = join(g_room, code, name);
+      const uint8_t id = full ? kNone : join(g_room, code, name);
       from.id = id;
       std::vector<uint8_t> w = {kWelcome, id};
+      if (full) w.push_back(1);   // why: the room is full (older members ignore the extra byte)
       send(from, w);
       g_sent_rev = 0xFFFFFFFFu;   // everyone gets the room with the new member
-      event(id == kNone ? "refused %s (room full or already in it)" : "%s joined as %u", code.c_str(), id);
+      if (full) {
+        event("refused %s (the room is full: %d players)", code.c_str(), room_limit());
+        from.refused_at = now_ms();
+        if (!g_test.on) say_room_full(they_host && their_count > g_room.members.size());   // the smaller side: "That room"
+      } else {
+        event(id == kNone ? "refused %s (already in the room)" : "%s joined as %u", code.c_str(), id);
+      }
       return;
     }
+    case kWelcome:
+      // This game was hosting a room of its own when it asked to join another (two rooms met), and
+      // that room had no place for it: say so; a room of just this player is closed, a bigger one
+      // stays as it was.
+      if (m.size() >= 3 && m[1] == kNone && m[2] == 1 && !g_test.on) {
+        event("the other room has no place for this one (%d players at most): not joining it", room_limit());
+        from.refused_at = now_ms();
+        if (g_room.members.size() <= 1) { say_room_full(true); g_close_room = true; }
+      }
+      return;
     case kAction:
       if (from.id != kNone && m.size() >= 3) apply_action(from.id, (Act)m[1], m[2], m.size() >= 4 ? m[3] : 0);
       return;
@@ -355,6 +396,11 @@ void member_message(const std::vector<uint8_t>& m) {
       if (m.size() >= 2) {
         g_self = m[1];
         event(g_self == kNone ? "the room refused this member" : "in the room as member %u", g_self);
+        if (g_self == kNone && m.size() >= 3 && m[2] == 1 && !g_test.on) {
+          // A full room: this player is not in it. Say so beside the room tab for a while.
+          say_room_full(true);
+          g_close_room = true;
+        }
       }
       return;
     case kRoomState: {
@@ -409,6 +455,11 @@ void do_act(const Pending& p) {
     if (!g_hosting) { event("only the host adds friends"); return; }
     for (const Link& l : g_links) if (l.code == p.text) return;
     for (const Member& m : g_room.members) if (m.code == p.text) return;
+    if (g_room.members.size() >= (size_t)room_limit()) {
+      // Still searched for, so that friend's game is told why it was not let in (the hello decides).
+      event("adding %s to a full room (%d players): they will be told", p.text.c_str(), room_limit());
+      say_room_full(false);
+    }
     Link l;
     l.code = p.text;
     g_links.push_back(std::move(l));
@@ -429,6 +480,10 @@ void do_act(const Pending& p) {
 // ---- links: keep them up, read them ----
 void service_links() {
   const uint64_t now = now_ms();
+  // A link a full room refused (either side) has said why: dropped, so no search for it goes on.
+  const auto refused_done = [now](const Link& l) { return l.refused_at && now - l.refused_at > 3000; };
+  for (Link& l : g_links) if (refused_done(l)) { drop_later(l.np); drop_later(l.mm); }
+  g_links.erase(std::remove_if(g_links.begin(), g_links.end(), refused_done), g_links.end());
   for (Link& l : g_links) {
     if (!l.np && l.test_peer >= 0) {
       if (now < l.retry_at) continue;
@@ -587,6 +642,13 @@ bool target(Target& t) {
   return t.others.size() == 3;
 }
 
+// Tests: MELEE_TEST_ARENA_AUTOLOCK=1 locks a real room's connected pair in at once (test rooms do it
+// always), with the character picked on the select, so hidden games play their matches.
+bool test_autolock() {
+  static const bool on = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_AUTOLOCK"); return v && *v == '1'; }();
+  return on;
+}
+
 void steer_match() {
   if (g_self == kNone || g_room.in_game || g_wait_room || now_ms() < g_next_match_ms) return;
   const online::ArenaMatchStatus st = online::arena_match_status();
@@ -621,6 +683,11 @@ void steer_match() {
     g_status = st.state == (int)Matchmaking::CONNECTION_SUCCESS ? "Ready to fight " + t.label : "Connecting to " + t.label;
     if (g_test.on && st.state == (int)Matchmaking::CONNECTION_SUCCESS && !st.local_ready && online::arena_lock_in(g_test.character, 0))
       event("locked in for %s", t.code.c_str());
+    uint8_t picked = 2, colour = 0;
+    if (!g_test.on && test_autolock() && st.state == (int)Matchmaking::CONNECTION_SUCCESS && !st.local_ready) {
+      online::local_css_selection(&picked, &colour);
+      if (online::arena_lock_in(picked, colour)) event("locked in for %s (test)", t.code.c_str());
+    }
     return;
   }
   if (!online::in_online_menus()) { g_status = "Go to Direct to play " + t.label; return; }
@@ -715,6 +782,7 @@ void run_test_plan() {
 void publish_view() {
   View v;
   v.active = g_active;
+  if (!g_notice.empty() && now_ms() < g_notice_until) v.notice = g_notice;
   v.hosting = g_hosting;
   v.linked = g_hosting || (!g_links.empty() && g_links[0].was_ready);
   v.self = g_self;
@@ -765,7 +833,38 @@ void report_character() {
   do_act({Act::SetCharacter, character, std::string(1, (char)costume)});
 }
 
+// Tests: MELEE_TEST_ARENA_ADD=<code>[,<code>...][@<seconds>] adds those friends, once, as the panel's
+// "Add a friend's code" does, <seconds> (default 5) after the online menus first show.
+void test_add_codes() {
+  static std::vector<std::string> codes;
+  static double after = 5.0;
+  static bool parsed = false, done = false;
+  static uint64_t menus_since = 0;
+  if (done) return;
+  if (!parsed) {
+    parsed = true;
+    const char* v = host::test_env::getenv("MELEE_TEST_ARENA_ADD");
+    std::string s = v ? v : "";
+    if (const size_t at = s.find('@'); at != std::string::npos) { after = std::atof(s.c_str() + at + 1); s.resize(at); }
+    for (size_t i = 0; i < s.size();) {
+      const size_t end = std::min(s.find(',', i), s.size());
+      if (end > i) codes.push_back(s.substr(i, end - i));
+      i = end + 1;
+    }
+    if (codes.empty()) { done = true; return; }
+  }
+  if (!online::in_online_menus()) { menus_since = 0; return; }
+  if (!menus_since) menus_since = now_ms();
+  if (now_ms() - menus_since < (uint64_t)(after * 1000.0)) return;
+  done = true;
+  for (const std::string& c : codes) {
+    event("test: adding %s as the panel does", c.c_str());
+    act(Act::AddCode, 0, c);
+  }
+}
+
 void tick() {
+  test_add_codes();
   {
     std::deque<Pending> todo;
     { std::lock_guard<std::mutex> lk(g_mutex); todo.swap(g_pending); }
@@ -780,7 +879,21 @@ void tick() {
       g_search_busy.store(st.state >= (int)Matchmaking::INITIALIZING && st.state <= (int)Matchmaking::CONNECTION_SUCCESS);
     }
   }
-  if (!g_active) return;
+  if (g_close_room) {
+    g_close_room = false;
+    for (Link& l : g_links) { drop_later(l.np); drop_later(l.mm); }
+    g_links.clear();
+    g_active = false; g_hosting = false; g_room = Room{}; g_self = kNone; g_status.clear();
+    event("left: the room was full");
+  }
+  if (!g_active) {
+    // The room tab's notice (a full room) still reaches the panel while this game is in no room.
+    static bool had_notice = false;
+    const bool notice = !g_notice.empty() && now_ms() < g_notice_until;
+    if (notice || had_notice) publish_view();
+    had_notice = notice;
+    return;
+  }
   service_links();
   send_pings();
   report_character();
@@ -893,7 +1006,7 @@ bool in_room() {
 }
 
 namespace {
-const char* const kFixtureStates[] = {"alone", "n2", "n3", "n5", "n8", "n16", "asking", "prompt", "watching", "doubles", "linklost"};
+const char* const kFixtureStates[] = {"alone", "n2", "n3", "n5", "n8", "refused", "asking", "prompt", "watching", "doubles", "linklost"};
 constexpr int kFixtureStateCount = 11;
 constexpr int kFixtureLooks = 5;
 std::string fixture_spec() {
@@ -912,6 +1025,11 @@ int fixture_index() {
 View build_fixture(const std::string& state, bool wide, const std::string& spec) {
   {
     View v;
+    if (state == "refused") {   // in no room: a full room said no
+      v.notice = "That room is full (" + std::to_string(kRoomLimit) + " players at most)";
+      host::log("arena: test fixture %s (%s)", state.c_str(), spec.c_str());
+      return v;
+    }
     int n = 3;
     if (state.size() > 1 && state[0] == 'n') n = std::atoi(state.c_str() + 1);
     else if (state == "alone") n = 1;

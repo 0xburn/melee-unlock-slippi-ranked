@@ -16,6 +16,9 @@
 namespace slippi::arena {
 
 constexpr int kMaxMembers = 16;
+// Players one room takes (the host refuses the next one). The rules and the wire handle kMaxMembers;
+// rooms ship with the size that real games proved.
+constexpr int kRoomLimit = 8;
 constexpr uint8_t kNone = 0xFF;
 constexpr size_t kMaxCode = 10, kMaxName = 31;
 constexpr int kRingMax = 4;
