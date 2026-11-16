@@ -423,6 +423,13 @@ def main():
             raise SystemExit(f'missing license text: {src}')
         shutil.copy2(src, licenses / dst)
     ship_vulkan_cache(ROOT / 'shadercache/vulkan-v1', folder / 'shadercache/vulkan-v1')
+    # The Lab view's fighter packs, as in the Windows zip (tools/build_lab_assets.py, Slippi Lab, MIT).
+    lab_packs = sorted((ROOT / 'build/lab').glob('*.lab'))
+    if len(lab_packs) != 27:
+        raise SystemExit(f'Lab packs missing: {len(lab_packs)} of 27 in build/lab (run tools/build_lab_assets.py)')
+    (folder / 'Lab').mkdir(exist_ok=True)
+    for pack in lab_packs:
+        shutil.copy2(pack, folder / 'Lab' / pack.name)
     # Mod import tools: the system's 7-Zip and xdelta3, as the Windows release carries its own.
     tools = folder / 'tools'
     tools.mkdir()
