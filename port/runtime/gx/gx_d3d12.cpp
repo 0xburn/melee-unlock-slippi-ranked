@@ -5120,6 +5120,20 @@ void D3D12Backend::swap_in_ready_replacements() {
 // swap chain's buffers in place and the settings panel for the new format.
 void D3D12Backend::update_hdr() {
   if (!swapchain_) return;
+#ifdef GX_PC_SETTINGS
+  // Tests (MELEE_TEST_OVERLAY_REBUILD=<n>): the overlay is rebuilt n times, 300 frames apart from
+  // frame 300, as an HDR switch rebuilds it, so a test can check that its pictures survive.
+  {
+    static int rebuilds = [] { const char* v = host::test_env::getenv("MELEE_TEST_OVERLAY_REBUILD"); return v ? std::atoi(v) : 0; }();
+    if (rebuilds > 0 && settings_ui_ && frame_counter_ >= 300 && frame_counter_ % 300 == 0) {
+      --rebuilds;
+      wait_gpu();
+      settings_ui_.reset();
+      settings_ui_ = std::make_unique<PcSettingsUI>(hwnd_, device_.Get(), queue_.Get(), opts_, (int)backbuffer_format_);
+      host::log("d3d12: overlay rebuilt for a test (%d more)", rebuilds);
+    }
+  }
+#endif
   if (hdr_checked_frame_ == ~0ull || frame_counter_ - hdr_checked_frame_ >= 60) {
     hdr_checked_frame_ = frame_counter_;
     bool display_hdr = false;

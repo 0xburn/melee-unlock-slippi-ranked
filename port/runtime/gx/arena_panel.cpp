@@ -16,6 +16,7 @@
 #include "yougame_link.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "user_texture.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
@@ -283,23 +284,15 @@ void drop_shadow(float x0, float y0, float x1, float y1, float r) {   // 0 2px 4
 // ---------------------------------------------------------------- portraits
 // Each player's picture: the game's own character select portrait of the character and costume they
 // picked (the disc's MnSlChr.usd), as one texture each, shown square from its top like the sheet.
-struct Portrait { ImTextureData* tex = nullptr; bool tried = false; float u0 = 0, v0 = 0, u1 = 1, v1 = 1; };
+struct Portrait { ImTextureData* tex = nullptr; bool tried = false; float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+                  ImGuiContext* context = nullptr; };   // the overlay it is registered with (user_texture.h)
 std::map<int, Portrait> g_portraits;
-ImGuiContext* g_portrait_context = nullptr;
 
 ImTextureData* portrait(uint8_t character, uint8_t costume) {
   if (character == ar::kNone || character >= 26) return nullptr;
   if (character == 19) return nullptr;   // Sheik: the disc keeps her in Zelda's cell; her name tile instead
-  if (g_portrait_context != ImGui::GetCurrentContext()) {
-    g_portrait_context = ImGui::GetCurrentContext();
-    for (auto& p : g_portraits)
-      if (p.second.tex) {
-        if (p.second.tex->Status == ImTextureStatus_Destroyed || p.second.tex->TexID == ImTextureID_Invalid)
-          p.second.tex->Status = ImTextureStatus_WantCreate;
-        ImGui::RegisterUserTexture(p.second.tex);
-      }
-  }
   Portrait& p = g_portraits[character * 16 + (costume & 15)];
+  if (p.tex) gx::keep_user_texture(p.tex, p.context);
   if (!p.tried) {
     p.tried = true;
     std::vector<uint8_t> rgba;
@@ -309,7 +302,7 @@ ImTextureData* portrait(uint8_t character, uint8_t costume) {
       p.tex->Create(ImTextureFormat_RGBA32, w, h);
       std::memcpy(p.tex->GetPixels(), rgba.data(), rgba.size());
       p.tex->UsedRect = ImTextureRect{0, 0, (unsigned short)w, (unsigned short)h};
-      ImGui::RegisterUserTexture(p.tex);
+      gx::keep_user_texture(p.tex, p.context);
       // The face: a square from the top of the drawn figure, centred on it (the sheet crops each
       // portrait to the head the way the character select's own cards frame it).
       int top = -1;

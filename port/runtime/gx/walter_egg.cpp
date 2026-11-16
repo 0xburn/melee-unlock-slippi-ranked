@@ -7,6 +7,7 @@
 #include "render_options.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "user_texture.h"
 
 #include <algorithm>
 #include <atomic>
@@ -51,13 +52,7 @@ ImTextureData* g_texture = nullptr;
 ImGuiContext* g_texture_context = nullptr;
 
 ImTextureData* picture() {
-  if (g_texture && g_texture_context != ImGui::GetCurrentContext()) {
-    if (g_texture->Status == ImTextureStatus_Destroyed || g_texture->TexID == ImTextureID_Invalid)
-      g_texture->Status = ImTextureStatus_WantCreate;
-    ImGui::RegisterUserTexture(g_texture);
-    g_texture_context = ImGui::GetCurrentContext();
-  }
-  if (g_texture) return g_texture;
+  if (g_texture) { gx::keep_user_texture(g_texture, g_texture_context); return g_texture; }
   g_texture = IM_NEW(ImTextureData)();
   g_texture->Create(ImTextureFormat_RGBA32, kPictureSize, kPictureSize);
   uint32_t* out = reinterpret_cast<uint32_t*>(g_texture->GetPixels());
@@ -65,8 +60,7 @@ ImTextureData* picture() {
   for (uint32_t i = 0; i + 1 < kPictureRuns * 2 && at < (size_t)kPictureSize * kPictureSize; i += 2)
     for (uint32_t n = 0; n < kPicture[i] && at < (size_t)kPictureSize * kPictureSize; ++n) out[at++] = kPicture[i + 1];
   g_texture->UsedRect = ImTextureRect{0, 0, (unsigned short)kPictureSize, (unsigned short)kPictureSize};
-  ImGui::RegisterUserTexture(g_texture);
-  g_texture_context = ImGui::GetCurrentContext();
+  gx::keep_user_texture(g_texture, g_texture_context);
   return g_texture;
 }
 
