@@ -46,7 +46,7 @@ void mu_lcancel_view(MuLcancelView* out)
         int port;
         if (Player_GetPlayerSlotType(slot) != Gm_PKind_Human)
             continue;
-        port = (s8) Player_GetSubColor(slot);
+        port = (s8) Player_GetPadPort(slot);   /* pad_port (+0x48); +0x46 is the costume tint */
         if (port < 0 || port > 3)
             continue;
         /* In a network match every player reads the same controller value here, so the second

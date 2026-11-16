@@ -68,7 +68,7 @@ constexpr uint32_t kHsdPadLibData = 0x804C1F78;    // PadLibData HSD_PadLibData
 
 constexpr uint32_t kSpState = 0x00;      // enum_t player_state (0 = not playing)
 constexpr uint32_t kSpType = 0x08;       // Gm_PKind slot_type (0 = human)
-constexpr uint32_t kSpCtrl = 0x46;       // s8 controller_index
+constexpr uint32_t kSpCtrl = 0x48;       // u8 pad_port, the controller (0x46 is the costume tint, sub_color)
 constexpr uint32_t kSpEntity = 0xB0;     // HSD_GObj* player_entity[0]
 constexpr uint32_t kGObjUserData = 0x2C; // HSD_GObj::user_data -> Fighter*
 
