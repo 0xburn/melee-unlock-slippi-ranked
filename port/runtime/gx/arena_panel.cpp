@@ -65,6 +65,9 @@ struct State {
   bool loaded = false;
   Look look = Look::Combined;
   bool tabs = false;            // folded into tabs at the edges
+  int button = 0;               // the Arena card out of a room: 0 briefly, 1 always, 2 never
+  double first_shown = -1;      // this session's first Direct character select (the brief showing)
+  float card_pop = 0;           // the Arena card out of a room: how far it has slid in (0..1)
   bool focus = false;           // the room menu has the controller
   Page page = Page::None;
   int row = 0;                  // the rules page's row, or the prompt's choice
@@ -125,17 +128,18 @@ void load() {
   if (g.loaded) return;
   g.loaded = true;
   std::ifstream f(settings_file());
-  int look = 0, tabs = 0;
+  int look = 0, tabs = 0, button = 0;
   if (f >> look >> tabs) {
     g.look = (Look)std::clamp(look, 0, kLookCount - 1);
     g.tabs = tabs != 0;
+    if (f >> button) g.button = std::clamp(button, 0, kButtonModeCount - 1);
   }
 }
 void save() {
   std::error_code ec;
   std::filesystem::create_directories(settings_file().parent_path(), ec);
   std::ofstream f(settings_file());
-  f << (int)g.look << " " << (g.tabs ? 1 : 0) << "\n";
+  f << (int)g.look << " " << (g.tabs ? 1 : 0) << " " << g.button << "\n";
 }
 void load_recent() {
   g.recent.clear();
@@ -1311,11 +1315,16 @@ void draw_split(const Bars& b, const View& v) {
   }
 }
 
+bool test_open_card() {
+  static const bool on = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_CARD"); return v && *v == '1'; }();
+  return on;
+}
+
 void draw_not_in_room(const Bars& b, const View& v) {
-  // Not in a room: a small tab at the right edge (no clutter for anyone who never uses rooms).
-  // The hand pushed into the right edge opens it: "Add a friend's code" starts a room.
+  // Not in a room: the Arena card in the right bar. Pushing the hand into the right edge beside it
+  // lights it up; A (or Z) then adds a friend's code, which starts a room.
   if (g.page != Page::None) return;
-  if (!v.notice.empty()) {   // a full room said no: the reason, in the bar above the tab
+  if (!v.notice.empty()) {   // a full room said no: the reason, in the bar above the card
     const Ink nk{Face::Bold, 11, kWhite};
     const float w = b.rx1 - b.rx0 - px(16);
     std::vector<std::string> lines = wrap(nk, v.notice, w);
@@ -1324,23 +1333,23 @@ void draw_not_in_room(const Bars& b, const View& v) {
     for (const std::string& l : lines) { text(nk, b.rx0 + px(8), line_top(nk, y, 16), l); y += px(16); }
   }
   const bool open = g.side == 2;
-  const float tw = open ? b.rx1 - b.rx0 - px(16) : px(34), th = open ? px(86) : px(78);
-  const float x = b.rx1 - tw - px(open ? 8 : 4), y = b.y0 + (b.y1 - b.y0) * .42f;
+  const float tw = b.rx1 - b.rx0 - px(16), th = px(86);
+  const float x = b.rx1 - tw - px(8), y = b.y0 + (b.y1 - b.y0) * .42f;
   steel(x, y, x + tw, y + th, open ? kGold : IM_COL32(154, 166, 192, 200));
-  if (!open) {
-    const Ink k{Face::Title, 8.5f, kGold, true, 1};
-    text_center(k, x + tw * .5f, y + px(8), "ARE");
-    text_center(k, x + tw * .5f, y + px(20), "NA");
-    hot(x, y, y + th, Do::AddCode);   // so the hand lands on it
-    return;
-  }
+  hot(x, y, y + th, Do::AddCode);   // so the hand lands on it
   const Ink sm{Face::Body, 10, kGold, false, 0, false, 1.5f};
   Ink md{Face::Title, 13, kWhite, true, 2};
   text(sm, x + px(8), y + px(8), "ARENA");
   // The sheet's title is wider than this box: set smaller to fit (the italic leans right by 0.16 h).
   const std::string title = fit_name(md, "PLAY WITH FRIENDS", tw - px(16) - size_of(md.face, 13) * .16f);
   text(md, x + px(8), y + px(20), title);
-  hint(x + px(10), y + th - px(26), 'Z', "Add a friend's code", tw - px(16));
+  if (open) {
+    hint(x + px(10), y + th - px(26), 'Z', "Add a friend's code", tw - px(16));
+  } else {
+    Ink how{Face::Body, 9.5f, IM_COL32(200, 208, 224, 255)};
+    const std::string line = fit_name(how, "Push the hand here", tw - px(16));
+    text(how, x + px(8), y + th - px(24), line);
+  }
 }
 
 void draw_tabs(const Bars& b, const View& v, const float alpha[2]) {
@@ -1398,6 +1407,12 @@ int look() { load(); return (int)g.look; }
 const char* look_name(int l) { return kLookNames[std::clamp(l, 0, kLookCount - 1)]; }
 void set_look(int l) { load(); g.look = (Look)std::clamp(l, 0, kLookCount - 1); save(); }
 bool tabs() { load(); return g.tabs; }
+int button_mode() { load(); return g.button; }
+const char* button_mode_name(int mode) {
+  static const char* const names[kButtonModeCount] = {"Show briefly", "Always", "Never"};
+  return names[std::clamp(mode, 0, kButtonModeCount - 1)];
+}
+void set_button_mode(int mode) { load(); g.button = std::clamp(mode, 0, kButtonModeCount - 1); save(); }
 void set_tabs(bool on) { load(); g.tabs = on; save(); }
 bool wants_capture() { return g.side != 0 || g.page != Page::None; }
 uint16_t withheld_buttons() { return 0; }
@@ -1469,6 +1484,15 @@ void frame(const Frame& f) {
   auto ease = [](double t) { t = std::clamp(t, 0.0, 1.0); return (float)(1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)); };
   const float enter = ease((f.time - g.shown_at) / 0.35);
   float shown[2] = {enter, enter};
+  if (!v.active) {
+    if (g.first_shown < 0) g.first_shown = f.time;
+    const bool near_right = g.side == 2 || g.page != Page::None || test_open_card() ||
+                            (have_hand && hand_x >= 15.0f) || (mouse.x > f.display_w - bar && mouse.x <= f.display_w);
+    const bool want = g.button == 1 || (g.button == 0 && (f.time - g.first_shown < 10.0 || near_right));
+    g.card_pop = std::clamp(g.card_pop + (float)(dt / 0.35) * (want ? 1.f : -1.f), 0.f, 1.f);
+    shown[1] = std::min(shown[1], ease(g.card_pop));
+    if (g.button == 2 || shown[1] < 1e-3f) shown[1] = 0.f;
+  }
   const bool folded = (g.tabs || overlay) && v.active;   // no bars: always folded into the tabs
   if (folded) {
     for (int s = 0; s < 2; ++s) shown[s] = std::min(shown[s], ease(g.pop[s]) < 1e-3f ? 0.f : ease(g.pop[s]));
@@ -1484,7 +1508,7 @@ void frame(const Frame& f) {
     if (shown[1] > 0.f) draw->AddRectFilled(ImVec2(b.rx0, b.y0), ImVec2(b.rx1, b.y1), IM_COL32(0, 0, 0, 200));
   }
   if (!v.active) {
-    draw_not_in_room(b, v);
+    if (g.button != 2 && (shown[1] > 0.f || g.page != Page::None)) draw_not_in_room(b, v);
   } else if (!folded || shown[0] > 0.f || shown[1] > 0.f) {
     switch (g.look) {
       case Look::Combined: draw_combined(b, v, false); break;

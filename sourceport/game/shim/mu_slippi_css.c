@@ -217,17 +217,19 @@ void mu_slippi_css_hand(int port, float x, float y)
     static unsigned char reply[4096];
     unsigned char payload[4];
     unsigned int got = 0;
-    int ix, iy, packed;
+    int ix, iy, packed, moved;
 
     ix = (int) (x * 10.0f);
     iy = (int) (y * 10.0f);
     packed = (ix & 0xFFFF) << 16 | (iy & 0xFFFF);
+    moved = 0;
     if (port >= 0 && port < 4) {
         /* Every hand on every character select, when it moved: the easter egg's face can be taken
          * hold of. The host only looks at it while the face is out. */
         static int last_any[4] = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF };
         if (packed != last_any[port]) {
             unsigned char any[5];
+            moved = 1;
             last_any[port] = packed;
             any[0] = (unsigned char) port;
             any[1] = (unsigned char) (ix >> 8);
@@ -239,7 +241,10 @@ void mu_slippi_css_hand(int port, float x, float y)
             got = 0;
         }
     }
-    if (!mu_slippi_css_online() || ctrl_port == NULL || port != *ctrl_port) {
+    /* The local player's hand: the controlled port's, or the one that moves. A controller in port 2
+     * drives the online select's cursor while the controlled port stays 0, so the check on the port
+     * alone never reported that player's hand and no room panel ever showed for them (0.9.201). */
+    if (!mu_slippi_css_online() || ctrl_port == NULL || (port != *ctrl_port && !moved)) {
         return;
     }
     if (packed == last) {

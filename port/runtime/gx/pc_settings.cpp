@@ -4363,7 +4363,21 @@ static void draw_replay_practice(RenderOptions& options, const host::PadState& p
 
 #ifndef MELEE_NO_SLIPPI
 // An arena room in the bars beside the picture, on the online character select (gx/arena_panel.h).
-static void draw_arena_panel(RenderOptions& options, const host::PadState& pad, bool have_pad) {
+static void draw_arena_panel(RenderOptions& options, const host::PadState* pads, const host::PadState& followed, bool have_followed) {
+  // The local player's controller: any port can drive the online select's hand (a controller in
+  // port 2 moves it while port 1 reads as connected and idle, as with an adapter), so the panel
+  // reads the pad in use: the one pushing its stick furthest or holding a button, else the followed one.
+  static int arena_port = -1;
+  int best = -1, best_amount = 0;
+  for (int i = 0; i < 4; ++i) {
+    if (pads[i].err != 0) continue;
+    const int amount = std::max(std::abs((int)pads[i].stick_x), std::abs((int)pads[i].stick_y)) + (pads[i].button ? 200 : 0);
+    if (amount > 40 && amount > best_amount) { best = i; best_amount = amount; }
+  }
+  if (best >= 0) arena_port = best;
+  const bool use_kept = arena_port >= 0 && pads[arena_port].err == 0;
+  const host::PadState& pad = use_kept ? pads[arena_port] : followed;
+  const bool have_pad = use_kept || have_followed;
   const ImVec2 screen = ImGui::GetIO().DisplaySize;
   arena_panel::Frame f;
   f.display_w = screen.x;
@@ -9564,6 +9578,17 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImGui::EndCombo();
       }
       if (ImGui::IsItemHovered()) ImGui::SetTooltip("How the room shows in the bars beside the picture. Only you see this choice.");
+      int arena_button = arena_panel::button_mode();
+      ImGui::SetNextItemWidth(180.0f);
+      if (ImGui::BeginCombo("Arena button", arena_panel::button_mode_name(arena_button))) {
+        for (int i = 0; i < arena_panel::kButtonModeCount; ++i)
+          if (ImGui::Selectable(arena_panel::button_mode_name(i), i == arena_button)) arena_panel::set_button_mode(i);
+        ImGui::EndCombo();
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The Arena card beside the Direct character select, out of a room.\n"
+                          "Show briefly: for ten seconds the first time, then when your hand or mouse comes near the right side.\n"
+                          "Never: no card. Friends can still add your code and bring you into their room.");
       bool room_tabs = arena_panel::tabs();
       if (settings_toggle("Hide the room panels until the hand comes near", &room_tabs)) arena_panel::set_tabs(room_tabs);
       if (ImGui::IsItemHovered())
@@ -10991,7 +11016,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     dl->AddText(ImVec2((screen.x - size.x) * 0.5f, (screen.y - size.y) * 0.5f), IM_COL32(230, 232, 240, 255), line);
   }
 #ifndef MELEE_NO_SLIPPI
-  if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active()) draw_arena_panel(options, pad, have_pad);
+  if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active()) draw_arena_panel(options, pads, pad, have_pad);
 #endif
   if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active() && walter_egg::active()) {
     const ImVec2 screen = ImGui::GetIO().DisplaySize;

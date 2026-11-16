@@ -762,6 +762,10 @@ void load_mod_overlay() {
   std::filesystem::path stub_disc;
   for (const auto& file : g_mod_overlay.files()) {
     if (!skins::is_stage_file(file.path) || !file.length || file.length > 1024u * 1024u) continue;
+    // Only a file in place of one of the game's own stages is a stub: a stage file the disc adds has
+    // no game stage to keep, and leaving it out lost it (ACE's Smashville sunset map GrAcSs.dat: every
+    // evening match there stopped the game, 0.9.201 report).
+    if (g_paths.find(file.path) == g_paths.end()) continue;
     std::vector<uint8_t> bytes(file.length);
     if (g_mod_overlay.read(file.start, bytes.data(), file.length) != ModOverlay::Read::Success ||
         !stage_file_is_stub(bytes)) continue;

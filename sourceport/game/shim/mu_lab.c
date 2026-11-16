@@ -773,6 +773,41 @@ int mu_test_vs_stage(void)
     return *v == '\0' ? n : -1;
 }
 
+/* MELEE_TEST_MEX_ICON=<n>[,<n>...] (tests only): on an m-ex disc's stage select, A or START picks
+ * icon n wherever the cursor is, the next number at the next stage select (the last one repeats),
+ * so a hidden run reaches any added stage, or a series of them. Unset: -1. */
+static int mu_test_mex_icon_index;
+int mu_test_mex_icon(void)
+{
+    const char* v = mu_test_getenv("MELEE_TEST_MEX_ICON");
+    int k = 0, n = -1;
+    if (v == NULL) {
+        return -1;
+    }
+    while (*v != '\0') {
+        int value = 0, digits = 0;
+        while (*v >= '0' && *v <= '9' && value <= 1023) {
+            value = value * 10 + (*v++ - '0');
+            ++digits;
+        }
+        if (digits == 0 || value > 1023 || (*v != ',' && *v != '\0')) {
+            return -1;
+        }
+        n = value;
+        if (k++ == mu_test_mex_icon_index) {
+            return n;
+        }
+        if (*v == ',') {
+            ++v;
+        }
+    }
+    return n;
+}
+void mu_test_mex_icon_next(void)
+{
+    ++mu_test_mex_icon_index;
+}
+
 /* MELEE_TEST_CSS_CHAR=<a>[,<b>,<c>,<d>] (tests only): on each visit to a character select, the hand
  * of port 1 (2, 3, 4) is put once on the icon of external character id a (b, c, d), so a hidden run
  * picks any fighter with a plain A. One value applies to every port; '-' or an empty field leaves

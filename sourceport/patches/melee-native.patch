@@ -185214,7 +185214,7 @@ index 6e763078c..c0078e47a 100644
  /* 231804 */ void mn_80231804(HSD_Archive*, int);
  /* 231F80 */ bool mn_80231F80(u8);
 diff --git a/src/melee/mn/mnname.c b/src/melee/mn/mnname.c
-index d62c18523..4f6f8368c 100644
+index d62c18523..c5f8463fd 100644
 --- a/src/melee/mn/mnname.c
 +++ b/src/melee/mn/mnname.c
 @@ -24,12 +24,22 @@
@@ -185244,16 +185244,22 @@ index d62c18523..4f6f8368c 100644
  
  f32 mnName_804D4BD0[2] = { 39.0f, 59.0f };
  f32 mnName_804D4BD8[2] = { 39.0f, 19.0f };
-@@ -603,7 +613,7 @@ void mnName_MainInput(HSD_GObj* arg0)
+@@ -602,8 +612,13 @@ void mnName_MainInput(HSD_GObj* arg0)
+                 mnName_80239878(1U, (HSD_GObj*) gobj2);
                  mnName_80238A04((HSD_GObj*) gobj2, 0x18U, 1U);
                  HSD_SisLib_803A5CC4(gobj2->text2);
++#ifdef MU_NATIVE
++                /* A later selection change frees text2 again; by then its slot can hold the
++                 * name list's new text, which the highlight then writes into. */
++                gobj2->text2 = NULL;
++#endif
                  count = mnName_CountValid();
 -                mnNameNew_EnterFromMnName((void*) (s32) count);
 +                mnNameNew_EnterFromMnName((void*) MU_Z((s32) count));
                  return;
              }
              lbAudioAx_80024030(3);
-@@ -750,7 +760,7 @@ static inline void mnName_80238754_noinline(HSD_GObj* gobj)
+@@ -750,7 +765,7 @@ static inline void mnName_80238754_noinline(HSD_GObj* gobj)
  void mnName_80238754(HSD_GObj* gobj)
  {
      s32 extra;
@@ -185262,7 +185268,7 @@ index d62c18523..4f6f8368c 100644
      s32 count = GetNameCount_noinline();
      s32 col_count;
      f32 f_col;
-@@ -768,7 +778,8 @@ void mnName_80238754(HSD_GObj* gobj)
+@@ -768,7 +783,8 @@ void mnName_80238754(HSD_GObj* gobj)
  
          HSD_JObjClearFlagsAll(jobj, JOBJ_HIDDEN);
          scroll_pos = (f32) (u32) gobj->gx_link * (14.0f / (f_col - 1.0f));
@@ -185272,7 +185278,7 @@ index d62c18523..4f6f8368c 100644
      } else {
          HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
      }
-@@ -779,43 +790,54 @@ static inline HSD_JObj* mnName_802388D4_noinline(HSD_GObj* gobj, u8 index)
+@@ -779,43 +795,54 @@ static inline HSD_JObj* mnName_802388D4_noinline(HSD_GObj* gobj, u8 index)
      return mnName_802388D4(gobj, index);
  }
  
@@ -185347,7 +185353,47 @@ index d62c18523..4f6f8368c 100644
  
  static inline f32 mnName_80238964_noinline(u8 index, u8 target, u8 flag)
  {
-@@ -984,7 +1006,7 @@ void mnName_80238C34(HSD_GObj* arg0, u8 arg1, u8 arg2)
+@@ -897,6 +924,13 @@ void mnName_80238AE0(HSD_GObj* gobj, u8 index, u8 arg2)
+             colorptr = &mnName_804D4BE4;
+         }
+         color = *colorptr;
++#ifdef MU_NATIVE
++        /* mnName_80239FFC frees the name list's text and leaves NULL while the selection
++         * highlight keeps updating; the console read low memory there, natively it faults. */
++        if (((MnName_GObj*) gobj)->text == NULL) {
++            return;
++        }
++#endif
+         HSD_SisLib_803A74F0(((MnName_GObj*) gobj)->text, (s32) index,
+                             (0, (&color)));
+         return;
+@@ -939,6 +973,25 @@ mnName_FindAnimLoop(AnimLoopSettings* const* tableBase, f32 frame)
+         }
+     }
+ 
++#ifdef MU_NATIVE
++    /* A button between loops (the name list was rebuilt mid-animation): the nearest loop
++     * instead of stopping the game. */
++    {
++        AnimLoopSettings* best = table.entries[0];
++        f32 best_gap = 1e30f;
++        for (i = 0; i < 6; i++) {
++            f32 gap = frame < table.entries[i]->start_frame
++                          ? table.entries[i]->start_frame - frame
++                          : frame - table.entries[i]->end_frame;
++            if (gap < best_gap) {
++                best_gap = gap;
++                best = table.entries[i];
++            }
++        }
++        OSReport("mnname: animation frame %.1f between loops, nearest used\n", frame);
++        return best;
++    }
++#endif
+     HSD_ASSERTREPORT(0x3DC, NULL, "But AnimFrame!!!\n");
+ }
+ 
+@@ -984,7 +1037,7 @@ void mnName_80238C34(HSD_GObj* arg0, u8 arg1, u8 arg2)
                  mnName_FindAnimLoop(mnName_803B8510, mn_8022F298(jobj3)));
  
      {
@@ -185356,7 +185402,7 @@ index d62c18523..4f6f8368c 100644
          f32 result;
  
          result = mn_8022ED6C(
-@@ -1036,7 +1058,7 @@ void fn_80239574(HSD_GObj* arg0)
+@@ -1036,7 +1089,7 @@ void fn_80239574(HSD_GObj* arg0)
              break;
          }
          {
@@ -185365,7 +185411,7 @@ index d62c18523..4f6f8368c 100644
              HSD_JObjReqAnim(jobj, anim->start_frame);
              HSD_JObjAnim(jobj);
          }
-@@ -1064,7 +1086,7 @@ void fn_80239574(HSD_GObj* arg0)
+@@ -1064,7 +1117,7 @@ void fn_80239574(HSD_GObj* arg0)
              break;
          }
          {
@@ -185374,7 +185420,7 @@ index d62c18523..4f6f8368c 100644
              new_var = jobj;
              if (mn_8022F298(new_var) >= anim->end_frame) {
                  state = data->gobj.p_link;
-@@ -1133,12 +1155,13 @@ void mnName_80239878(u8 arg0, HSD_GObj* gobj)
+@@ -1133,12 +1186,13 @@ void mnName_80239878(u8 arg0, HSD_GObj* gobj)
  
      if (arg0 == 1) {
          mnName_80239FFC(gobj);
@@ -185390,7 +185436,7 @@ index d62c18523..4f6f8368c 100644
      count = GetNameCount_noinline();
      if (count % 6 != 0) {
          extra = 1;
-@@ -1154,7 +1177,8 @@ void mnName_80239878(u8 arg0, HSD_GObj* gobj)
+@@ -1154,7 +1208,8 @@ void mnName_80239878(u8 arg0, HSD_GObj* gobj)
  
          HSD_JObjClearFlagsAll(jobj, JOBJ_HIDDEN);
          scroll_pos = (f32) gobj->gx_link * (14.0f / (f_col - 1.0f));
@@ -185400,7 +185446,7 @@ index d62c18523..4f6f8368c 100644
      } else {
          HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
      }
-@@ -1210,19 +1234,19 @@ void mnName_80239A24(HSD_GObj* gobj)
+@@ -1210,19 +1265,19 @@ void mnName_80239A24(HSD_GObj* gobj)
          HSD_JObjReqAnimAll(jobj,
                             (f32) ((u8) i == mn_804A04F0.hovered_selection));
          HSD_JObjAnimAll(jobj);
@@ -185426,7 +185472,7 @@ index d62c18523..4f6f8368c 100644
                               child);
          }
      }
-@@ -1326,7 +1350,7 @@ void mnName_80239F5C(HSD_JObj* jobj, f32 x)
+@@ -1326,7 +1381,7 @@ void mnName_80239F5C(HSD_JObj* jobj, f32 x)
  void mnName_80239FFC(HSD_GObj* gobj)
  {
      MnName_GObj* mn = (MnName_GObj*) gobj;
@@ -185435,7 +185481,7 @@ index d62c18523..4f6f8368c 100644
      HSD_JObj* child;
  
      if (jobj == NULL) {
-@@ -1345,7 +1369,7 @@ void mnName_80239FFC(HSD_GObj* gobj)
+@@ -1345,7 +1400,7 @@ void mnName_80239FFC(HSD_GObj* gobj)
  void mnName_8023A058(HSD_GObj* gobj)
  {
      MnName_GObj* mn = (MnName_GObj*) gobj;
@@ -185444,7 +185490,7 @@ index d62c18523..4f6f8368c 100644
      HSD_JObj* child;
  
      if (jobj == NULL) {
-@@ -1505,7 +1529,7 @@ static inline void mnName_SetupScrollbarAndText(s32 count, HSD_JObj* scrollbar,
+@@ -1505,7 +1560,7 @@ static inline void mnName_SetupScrollbarAndText(s32 count, HSD_JObj* scrollbar,
      if (rows > 4.0f) {
          HSD_JObjClearFlagsAll(scrollbar, JOBJ_HIDDEN);
          pos = ((f32) user_data->gobj.gx_link) * (14.0f / (rows - 1.0f));
@@ -185453,7 +185499,7 @@ index d62c18523..4f6f8368c 100644
      } else {
          HSD_JObjSetFlagsAll(scrollbar, JOBJ_HIDDEN);
      }
-@@ -1548,7 +1572,7 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
+@@ -1548,7 +1603,7 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
                         archive->matanim_joint, archive->shapeanim_joint);
      HSD_JObjReqAnimAll(root_jobj[0], 0.0f);
      HSD_JObjAnimAll(root_jobj[0]);
@@ -185462,7 +185508,7 @@ index d62c18523..4f6f8368c 100644
      HSD_ASSERTREPORT(0x67CU, user_data, "Can't get user_data.\n");
      GObj_InitUserData(gobj, 0U, HSD_Free, user_data);
      *(u8*) &user_data->gobj.classifier = (u8) mn_804A04F0.cur_menu;
-@@ -1560,27 +1584,26 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
+@@ -1560,27 +1615,26 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
      user_data->text = NULL;
      user_data->text2 = NULL;
      for (i = 0; i < 0xD; i++) {
@@ -185496,7 +185542,7 @@ index d62c18523..4f6f8368c 100644
          if (user_data->text != NULL) {
              HSD_SisLib_803A5CC4(user_data->text);
              user_data->text = NULL;
-@@ -1588,19 +1611,19 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
+@@ -1588,19 +1642,19 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
          mnName_80239A24((HSD_GObj*) user_data);
          mnName_80238754_noinline((HSD_GObj*) user_data);
      }
@@ -185520,7 +185566,7 @@ index d62c18523..4f6f8368c 100644
      count = GetNameCount_noinline();
      mnName_SetupScrollbarAndText(count, scrollbar_container, user_data);
      return gobj;
-@@ -1609,7 +1632,7 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
+@@ -1609,7 +1663,7 @@ HSD_GObj* mnName_8023A59C(u8 arg0)
  static inline struct mn_80231634_t*
  mnName_8023A9B4_GetUserData(MnName_GObj* gobj2)
  {
@@ -185529,7 +185575,7 @@ index d62c18523..4f6f8368c 100644
  }
  
  static inline void mnName_8023A9B4_ResetDisplayOrder(void)
-@@ -1643,17 +1666,17 @@ void mnName_8023A9B4(u8 arg0)
+@@ -1643,17 +1697,17 @@ void mnName_8023A9B4(u8 arg0)
          if (p == NULL) {
              jobj = NULL;
          } else {
@@ -185551,7 +185597,7 @@ index d62c18523..4f6f8368c 100644
          if (gobj2->text != NULL) {
              HSD_SisLib_803A5CC4(gobj2->text);
              gobj2->text = NULL;
-@@ -1664,8 +1687,8 @@ void mnName_8023A9B4(u8 arg0)
+@@ -1664,8 +1718,8 @@ void mnName_8023A9B4(u8 arg0)
      mnName_80238A04((HSD_GObj*) gobj2, 0x18U, (0, 0U));
      gobj2->gobj.gx_link = arg0;
      mnName_80238754_noinline((HSD_GObj*) gobj2);
@@ -185562,7 +185608,7 @@ index d62c18523..4f6f8368c 100644
      if (gobj2->text != NULL) {
          HSD_SisLib_803A5CC4(gobj2->text);
          gobj2->text = NULL;
-@@ -1676,6 +1699,97 @@ void mnName_8023A9B4(u8 arg0)
+@@ -1676,6 +1730,97 @@ void mnName_8023A9B4(u8 arg0)
  char** NotAllowedNamesList = NULL;
  u8** AutoNamesList = NULL;
  
@@ -185660,7 +185706,7 @@ index d62c18523..4f6f8368c 100644
  static inline void mnName_InitNameDisplayOrder(void)
  {
      u32 i;
-@@ -1728,16 +1842,26 @@ s32 mnName_8023AC40(void)
+@@ -1728,16 +1873,26 @@ s32 mnName_8023AC40(void)
          "MenMainSbaseEtNw_Top_animjoint", &mnNameNew_804A0720[0].matanim_joint,
          "MenMainSbaseEtNw_Top_matanim_joint",
          &mnNameNew_804A0720[0].shapeanim_joint,
@@ -185690,7 +185736,7 @@ index d62c18523..4f6f8368c 100644
      }
  
      mn_804A04F0.prev_menu = mn_804A04F0.cur_menu;
-@@ -1748,15 +1872,6 @@ s32 mnName_8023AC40(void)
+@@ -1748,15 +1903,6 @@ s32 mnName_8023AC40(void)
      return (s32) proc;
  }
  
@@ -187652,7 +187698,7 @@ index e03ab11ef..488225f8d 100644
      proc = HSD_GObj_SetupProc(GObj_Create(0U, 1U, 0x80U), fn_8024B2B0, 0U);
      proc->flags_3 = (u16) HSD_GObj_804D783C;
 diff --git a/src/melee/mn/mnstagesel.c b/src/melee/mn/mnstagesel.c
-index dfb2b5510..0d0e0155b 100644
+index dfb2b5510..7271d7c75 100644
 --- a/src/melee/mn/mnstagesel.c
 +++ b/src/melee/mn/mnstagesel.c
 @@ -2,9 +2,9 @@
@@ -187666,7 +187712,7 @@ index dfb2b5510..0d0e0155b 100644
  #include <melee/gm/gm_unsplit.h>
  #include <melee/gm/gmmain_lib.h>
  #include <melee/lb/lb_00B0.h>
-@@ -15,6 +15,15 @@
+@@ -15,6 +15,18 @@
  #include <melee/lb/lblanguage.h>
  #include <melee/lb/types.h>
  #include <sysdolphin/baselib/controller.h>
@@ -187675,6 +187721,9 @@ index dfb2b5510..0d0e0155b 100644
 +#include <melee/gm/gm_1A3F.h>
 +#include <melee/gm/types.h>
 +#include <mu_hp.h>
++#ifdef MU_NATIVE
++#include <mu_native.h>
++#endif
 +#include <sysdolphin/baselib/dobj.h>
 +#include <sysdolphin/baselib/mobj.h>
 +#include <sysdolphin/baselib/robj.h>
@@ -187682,7 +187731,7 @@ index dfb2b5510..0d0e0155b 100644
  #include <sysdolphin/baselib/fog.h>
  #include <sysdolphin/baselib/gobj.h>
  #include <sysdolphin/baselib/gobjgxlink.h>
-@@ -27,6 +36,255 @@
+@@ -27,6 +39,255 @@
  #include <sysdolphin/baselib/memory.h>
  #include <sysdolphin/baselib/random.h>
  
@@ -187938,7 +187987,7 @@ index dfb2b5510..0d0e0155b 100644
  /// @todo .sdata2 order hack
  #ifdef MUST_MATCH
  static void order_sdata2(void)
-@@ -35,6 +293,377 @@ static void order_sdata2(void)
+@@ -35,6 +296,390 @@ static void order_sdata2(void)
  }
  #endif
  
@@ -188176,6 +188225,19 @@ index dfb2b5510..0d0e0155b 100644
 +    const int at = mnStageSel_804D6CAE;
 +    MnStageSelMexIcon* icon = at < mexsel_count ? &mexsel_icons[at] : NULL;
 +
++#ifdef MU_NATIVE
++    {
++        extern void mu_test_mex_icon_next(void);
++        const int forced = mu_test_mex_icon();   /* tests only */
++        if (forced >= 0 && forced < mexsel_count && (pressed & 0x1100)) {
++            mnStageSel_804D6CAE = forced;
++            mu_test_mex_icon_next();
++            OSReport("[mex] stage select: icon %d picked (ext %d) by MELEE_TEST_MEX_ICON\n", forced,
++                     (int) mexsel_icons[forced].ext);
++            return 1;
++        }
++    }
++#endif
 +    if ((pressed & (HSD_PAD_X | HSD_PAD_Y)) && icon != NULL && icon->x8 == 2) {
 +        const char* file = mu_ground_stage_file(Stage_8022519C((StKind) icon->ext));
 +        if (mu_stage_skin_cycle(file, (pressed & HSD_PAD_X) != 0)) {
@@ -188316,7 +188378,7 @@ index dfb2b5510..0d0e0155b 100644
  /// Random stage selection
  /// Returns an internal stage ID - 2 (since first 2 internal stage IDs are
  /// invalid)
-@@ -45,9 +674,14 @@ int mnStageSel_802599EC(void)
+@@ -45,9 +690,14 @@ int mnStageSel_802599EC(void)
      bool var_r29 = true;
      int i;
  
@@ -188332,7 +188394,7 @@ index dfb2b5510..0d0e0155b 100644
          {
              break;
          }
-@@ -65,7 +699,7 @@ int mnStageSel_802599EC(void)
+@@ -65,7 +715,7 @@ int mnStageSel_802599EC(void)
          }
          for (i = 0; i < NUM_STAGES; i++) {
              if (mnStageSel_803F06D0[i].x4 == 0 &&
@@ -188341,7 +188403,7 @@ index dfb2b5510..0d0e0155b 100644
              {
                  var_r29 = false;
              }
-@@ -75,7 +709,7 @@ int mnStageSel_802599EC(void)
+@@ -75,7 +725,7 @@ int mnStageSel_802599EC(void)
          int tmp = HSD_Randi(NUM_STAGES);
          i = tmp;
          if (mnStageSel_803F06D0[i].x4 == 0) {
@@ -188350,7 +188412,7 @@ index dfb2b5510..0d0e0155b 100644
                  break;
              }
          }
-@@ -106,6 +740,39 @@ void mnStageSel_80259C28(void)
+@@ -106,6 +756,39 @@ void mnStageSel_80259C28(void)
      if (mnStageSel_804D6CA4 != 0) {
          return;
      }
@@ -188390,7 +188452,7 @@ index dfb2b5510..0d0e0155b 100644
      switch (mnStageSel_804D6CAE) {
      case 30:
          if (!(mnStageSel_804D6CA0 & 0x1000)) {
-@@ -131,18 +798,38 @@ void mnStageSel_80259C28(void)
+@@ -131,18 +814,38 @@ void mnStageSel_80259C28(void)
      }
      mnStageSel_804D6CAE = mnStageSel_802599EC();
  skip_randomize:
@@ -188434,7 +188496,7 @@ index dfb2b5510..0d0e0155b 100644
      sfxForward();
  }
  
-@@ -166,7 +853,34 @@ void fn_80259D84(HSD_GObj* gobj)
+@@ -166,7 +869,34 @@ void fn_80259D84(HSD_GObj* gobj)
          if (mnStageSel_804D6CAF == 0) {
              mnStageSel_80259C28();
          }
@@ -188469,7 +188531,7 @@ index dfb2b5510..0d0e0155b 100644
              if (temp_r31->x0 < 0x1E &&
                  mnStageSel_803F06D0[temp_r31->x0].x8 >= 2)
              {
-@@ -175,7 +889,11 @@ void fn_80259D84(HSD_GObj* gobj)
+@@ -175,7 +905,11 @@ void fn_80259D84(HSD_GObj* gobj)
              sfxMove();
              temp_r31->x4 = 0;
              temp_r31->x2 = 2;
@@ -188481,7 +188543,7 @@ index dfb2b5510..0d0e0155b 100644
          }
          break;
      case 2:
-@@ -204,17 +922,47 @@ void mnStageSel_80259ED8(int id)
+@@ -204,17 +938,47 @@ void mnStageSel_80259ED8(int id)
      u8 _[4];
  
      gobj = GObj_Create(HSD_GOBJ_CLASS_FIGHTER, 5, 0x80);
@@ -188533,7 +188595,7 @@ index dfb2b5510..0d0e0155b 100644
      temp_r3_2->x0 = id;
      temp_r3_2->x4 = 0;
      temp_r3_2->x2 = 0;
-@@ -232,6 +980,12 @@ void fn_8025A090(HSD_GObj* gobj)
+@@ -232,6 +996,12 @@ void fn_8025A090(HSD_GObj* gobj)
      }* temp_r30;
      HSD_JObj* jobj;
  
@@ -188546,7 +188608,7 @@ index dfb2b5510..0d0e0155b 100644
      jobj = GET_JOBJ(gobj);
      temp_r30 = HSD_GObjGetUserData(gobj);
      var_r3 = mnStageSel_804D6CAE;
-@@ -299,6 +1053,12 @@ void fn_8025A310(HSD_GObj* gobj)
+@@ -299,6 +1069,12 @@ void fn_8025A310(HSD_GObj* gobj)
  
      HSD_JObjSetTranslate(jobj, &sp1C);
      lb_8000B1CC(jobj, NULL, &sp1C);
@@ -188559,7 +188621,7 @@ index dfb2b5510..0d0e0155b 100644
      for (i = 0; i < 0x1E; i++) {
          if (mnStageSel_803F06D0[i].x8 != 0) {
              lb_8000B1CC(mnStageSel_803F06D0[i].x0, NULL, &sp10);
-@@ -308,6 +1068,11 @@ void fn_8025A310(HSD_GObj* gobj)
+@@ -308,6 +1084,11 @@ void fn_8025A310(HSD_GObj* gobj)
                  if (sp10.y - mnStageSel_803F06D0[i].x10 < sp1C.y &&
                      sp10.y + mnStageSel_803F06D0[i].x10 > sp1C.y)
                  {
@@ -188571,7 +188633,7 @@ index dfb2b5510..0d0e0155b 100644
                      mnStageSel_804D6CAE = i;
                      return;
                  }
-@@ -325,6 +1090,23 @@ void fn_8025A560(HSD_GObj* gobj)
+@@ -325,6 +1106,23 @@ void fn_8025A560(HSD_GObj* gobj)
      HSD_JObj* jobj = GET_JOBJ(gobj);
      temp_r30 = HSD_GObjGetUserData(gobj);
  
@@ -188595,7 +188657,7 @@ index dfb2b5510..0d0e0155b 100644
      if (mnStageSel_804D6CAE < 0x16 && (mnStageSel_804D6CAE & 1) &&
          mnStageSel_803F06D0[mnStageSel_804D6CAE].x8 == 0)
      {
-@@ -360,7 +1142,7 @@ void fn_8025A91C(HSD_GObj* gobj)
+@@ -360,7 +1158,7 @@ void fn_8025A91C(HSD_GObj* gobj)
      }
  }
  
@@ -188604,7 +188666,7 @@ index dfb2b5510..0d0e0155b 100644
  {
      HSD_FogSet(gobj->hsd_obj);
  }
-@@ -372,26 +1154,26 @@ static inline void make_stage_icon(HSD_JObj** out)
+@@ -372,26 +1170,26 @@ static inline void make_stage_icon(HSD_JObj** out)
      HSD_GObj* gobj;
      HSD_JObj* jobj;
      gobj = GObj_Create(4, 5, 0x80);
@@ -188639,7 +188701,7 @@ index dfb2b5510..0d0e0155b 100644
  }
  
  static inline void make_bg_model(HSD_JObj** out)
-@@ -399,13 +1181,18 @@ static inline void make_bg_model(HSD_JObj** out)
+@@ -399,13 +1197,18 @@ static inline void make_bg_model(HSD_JObj** out)
      HSD_GObj* gobj;
      HSD_JObj* jobj;
      gobj = GObj_Create(4, 5, 0x80);
@@ -188662,7 +188724,7 @@ index dfb2b5510..0d0e0155b 100644
      *out = gobj->hsd_obj;
  }
  
-@@ -414,13 +1201,13 @@ static inline void make_icon_root(HSD_JObj** icons)
+@@ -414,13 +1217,13 @@ static inline void make_icon_root(HSD_JObj** icons)
      HSD_GObj* gobj;
      HSD_JObj* jobj;
      gobj = GObj_Create(4, 5, 0x80);
@@ -188680,7 +188742,7 @@ index dfb2b5510..0d0e0155b 100644
      icons[0] = GET_JOBJ(gobj)->child;
      HSD_JObjReqAnimAll(icons[0], 0.0F);
      HSD_JObjAnimAll(icons[0]);
-@@ -439,35 +1226,77 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -439,35 +1242,77 @@ void mnStageSel_Scene_OnEnter(void* arg0)
      Vec3 spCC;
  
      int i;
@@ -188769,7 +188831,7 @@ index dfb2b5510..0d0e0155b 100644
  
          {
              HSD_GObj* gobj = mnStageSel_804D6C9C = GObj_Create(2, 3, 0x80);
-@@ -483,8 +1312,8 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -483,8 +1328,8 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_LObj* lobj1;
              HSD_LObj* lobj2;
              gobj = GObj_Create(3, 4, 0x80);
@@ -188780,7 +188842,7 @@ index dfb2b5510..0d0e0155b 100644
              HSD_LObjSetNext(lobj1, lobj2);
              HSD_GObjObject_80390A70(gobj, (u8) HSD_GObj_LightKind, lobj1);
              GObj_SetupGXLink(gobj, HSD_GObj_LObjCallback, 0, 0x80);
-@@ -492,7 +1321,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -492,7 +1337,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
  
          {
              HSD_GObj* gobj = GObj_Create(0xE, 0xF, 0);
@@ -188789,7 +188851,7 @@ index dfb2b5510..0d0e0155b 100644
              HSD_GObjObject_80390A70(gobj, HSD_GObj_FogKind, fog);
              GObj_SetupGXLink(gobj, fn_8025A974, 0, 0x80);
          }
-@@ -518,6 +1347,12 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -518,6 +1363,12 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObjAnimAll(temp_r22_4);
          }
  
@@ -188802,7 +188864,7 @@ index dfb2b5510..0d0e0155b 100644
          make_icon_root(spDC);
  
          for (i = 0; i < 0x12; i++) {
-@@ -529,6 +1364,9 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -529,6 +1380,9 @@ void mnStageSel_Scene_OnEnter(void* arg0)
          for (i = 0; i < 0x1D; i++) {
              mnStageSel_803F06D0[i].x8 =
                  gm_80164430(mnStageSel_803F06D0[i].stkind) ? 2 : 1;
@@ -188812,7 +188874,7 @@ index dfb2b5510..0d0e0155b 100644
          }
  
          for (i = 0; i <= 0xA; i++) {
-@@ -578,13 +1416,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -578,13 +1432,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              s32 temp_r22_7;
              HSD_JObj* temp_r23_3;
@@ -188830,7 +188892,7 @@ index dfb2b5510..0d0e0155b 100644
              temp_r23_3 = gobj->hsd_obj;
              lb_8000C1C0(temp_r23_3, spDC[i]);
              mnStageSel_803F06D0[i + 13].x0 = temp_r23_3;
-@@ -606,13 +1444,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -606,13 +1460,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObj* jobj;
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              HSD_JObj* temp_r22_8;
@@ -188848,7 +188910,7 @@ index dfb2b5510..0d0e0155b 100644
              temp_r22_8 = gobj->hsd_obj;
              lb_8000C1C0(temp_r22_8, spDC[0x10]);
              do_anim(temp_r22_8, 2);
-@@ -625,14 +1463,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -625,14 +1479,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              s32 temp_r22_9;
              HSD_JObj* temp_r23_6;
@@ -188867,7 +188929,7 @@ index dfb2b5510..0d0e0155b 100644
  
              temp_r23_6 = gobj->hsd_obj;
              lb_8000C1C0(temp_r23_6, spDC[i]);
-@@ -650,24 +1488,36 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -650,24 +1504,36 @@ void mnStageSel_Scene_OnEnter(void* arg0)
                  break;
              }
          }
@@ -188908,7 +188970,7 @@ index dfb2b5510..0d0e0155b 100644
                  g = gobj;
                  jobj2 = jobj;
                  HSD_GObj_SetupProc(g, fn_8025A310, 2);
-@@ -680,20 +1530,24 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -680,20 +1546,24 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObj* jobj;
              HSD_GObj* gobj;
              gobj = GObj_Create(HSD_GOBJ_CLASS_FIGHTER, 5, 0x80);
@@ -188937,7 +188999,7 @@ index dfb2b5510..0d0e0155b 100644
                  userdata->x4 = 0;
                  userdata->x2 = 0;
              }
-@@ -702,13 +1556,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -702,13 +1572,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
          {
              HSD_JObj* jobj;
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
@@ -188955,7 +189017,7 @@ index dfb2b5510..0d0e0155b 100644
  
              {
                  HSD_GObj* g;
-@@ -735,14 +1589,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -735,14 +1605,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObj* jobj;
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              HSD_JObj* temp_r3_15 =
@@ -188974,7 +189036,7 @@ index dfb2b5510..0d0e0155b 100644
              jobj = gobj->hsd_obj;
              temp_r3_16 = HSD_MemAlloc(sizeof(*temp_r3_16));
              GObj_InitUserData(gobj, 4, HSD_Free, temp_r3_16);
-@@ -765,16 +1619,35 @@ void mnStageSel_Scene_OnFrame(void)
+@@ -765,16 +1635,35 @@ void mnStageSel_Scene_OnFrame(void)
  {
      if (sss_data->force_stage_id >= 0) {
          mnStageSel_804D6CAF = 2;
@@ -189010,7 +189072,7 @@ index dfb2b5510..0d0e0155b 100644
          gm_801A4B60();
          return;
      }
-@@ -819,15 +1692,58 @@ void mnStageSel_Scene_OnFrame(void)
+@@ -819,15 +1708,58 @@ void mnStageSel_Scene_OnFrame(void)
          mnStageSel_804D6CA4 -= 1;
          return;
      }
@@ -189069,7 +189131,7 @@ index dfb2b5510..0d0e0155b 100644
          gm_801A4B60();
      }
  }
-@@ -838,6 +1754,10 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
+@@ -838,6 +1770,10 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
          lbArchive_80016EFC(mnStageSel_804D6C94);
          mnStageSel_804D6C94 = NULL;
      }
@@ -189080,7 +189142,7 @@ index dfb2b5510..0d0e0155b 100644
      {
          SSSData* sss = sss_data;
          sss->start_game = mnStageSel_804D6CAF == 2 ? true : false;
-@@ -851,10 +1771,22 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
+@@ -851,10 +1787,22 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
  
  int mnSelStageRandom(void)
  {

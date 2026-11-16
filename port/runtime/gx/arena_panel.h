@@ -39,6 +39,12 @@ const char* look_name(int look);
 void set_look(int look);
 bool tabs();
 void set_tabs(bool on);
+// Out of a room, the Arena card in the right bar: 0 shows for ten seconds at the session's first Direct
+// character select and again when the hand or mouse comes near that side, 1 always, 2 never.
+constexpr int kButtonModeCount = 3;
+int button_mode();
+const char* button_mode_name(int mode);
+void set_button_mode(int mode);
 
 // UI thread, once per overlay frame, inside ImGui. Draws nothing outside the online menus.
 void frame(const Frame& f);
