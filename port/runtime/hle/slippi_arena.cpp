@@ -799,6 +799,13 @@ void steer_match() {
     g_status = "Connecting to " + t.label;
   } else {
     event("could not search for %s: %s", t.code.c_str(), error.c_str());
+    // A pair that ended without its game being cleaned up (the other side left at the very start of
+    // a match) still counts as an online session, and no new search can start until it is closed: on
+    // the select, outside a match, it is closed here (one PC with a slow member: it searched forever).
+    if (st.active && !st.in_match && online::in_online_menus()) {
+      event("an ended pair was still open: closing it");
+      online::native_cleanup_match();
+    }
   }
   g_next_match_ms = now_ms() + 1000;
 }
