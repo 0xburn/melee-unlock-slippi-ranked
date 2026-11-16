@@ -2074,7 +2074,9 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       if (const char* ms = g_launcher_test ? std::getenv("MELEE_LAUNCHER_TEST_CAPTURE_MS") : nullptr)
         std::thread([ms = std::atoi(ms)] { Sleep(ms); PostMessageW(g_main, WM_APP + 41, 0, 0); }).detach();
 #ifndef MELEE_NO_SLIPPI   // the public releases are the other build: this one must never install them over itself
-      if (!g_launcher_test) { host::updater::check(MELEE_PORT_VERSION); refresh_updater(); }
+      // Test runs skip the update check, unless MELEE_LAUNCHER_TEST_UPDATER=1 asks for the real release
+      // list (the version picker test reads it; nothing installs without a click).
+      if (!g_launcher_test || std::getenv("MELEE_LAUNCHER_TEST_UPDATER")) { host::updater::check(MELEE_PORT_VERSION); refresh_updater(); }
       if (!g_launcher_test) PostMessageW(hwnd, WM_APP + 77, 0, 0);   // offer DLSS 5 once the window is up
 #endif
       SetTimer(hwnd, ID_TIMER, 500, nullptr);

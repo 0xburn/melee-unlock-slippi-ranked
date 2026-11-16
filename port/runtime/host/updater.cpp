@@ -506,6 +506,16 @@ void check(const std::string& current_version, bool install_experimental) {
     std::string body; int status = 0;
     if (!http_get(REPO_API, &body, &status) || status != 200) { set_message(status ? "Update check failed (HTTP " + std::to_string(status) + ")" : "Update check failed (no connection)"); host::log("updater: GET %s failed, HTTP %d, error %lu", REPO_API, status, (unsigned long)GetLastError()); g_state = State::Failed; return; }
     auto list = nlohmann::json::parse(body, nullptr, false);
+    // GitHub gives at most 100 releases a page: the older ones (157 by 0.9.200) are on the next
+    // pages, and the version picker lists every release. A page that fails only shortens the list.
+    for (int page = 2; list.is_array() && list.size() == (size_t)(page - 1) * 100 && page <= 20; ++page) {
+      std::string more; int more_status = 0;
+      const std::string url = std::string(REPO_API) + "&page=" + std::to_string(page);
+      if (!http_get(url.c_str(), &more, &more_status) || more_status != 200) { host::log("updater: GET %s failed, HTTP %d", url.c_str(), more_status); break; }
+      const auto next = nlohmann::json::parse(more, nullptr, false);
+      if (!next.is_array() || next.empty()) break;
+      for (const auto& r : next) list.push_back(r);
+    }
     nlohmann::json j;
     std::vector<Download> catalog;
     if (list.is_array()) for (auto& r : list) {
@@ -529,6 +539,7 @@ void check(const std::string& current_version, bool install_experimental) {
       if (!j.is_object()) j = r;
     }
     if (!j.is_object()) { set_message("Update check failed (bad response)"); g_state = State::Failed; return; }
+    host::log("updater: %zu releases on GitHub, %zu with a download for this platform", list.is_array() ? list.size() : (size_t)0, catalog.size());
     std::string tag = j["tag_name"].get<std::string>();
     if (!tag.empty() && tag[0] == 'v') tag.erase(0, 1);
     std::string zip, zip_digest;
