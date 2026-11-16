@@ -2304,6 +2304,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "audio_device") options.audio_device = value;
       else if (key == "audio_buffer_ms") options.audio_buffer_ms = std::clamp(std::stoi(value), 5, 120);
       else if (key == "audio_early_keyon") gx::RenderOptions::live_audio_early_keyon() = kShowFasterSoundEffects && value == "1";
+      else if (key == "mute_voices") gx::RenderOptions::live_mute_voices() = value == "1";
       else if (key == "quickchat") slippi::online::config().chat = std::clamp(std::atoi(value.c_str()), 0, 2);
       else if (key == "blockcode1" || key == "blockcode2" || key == "blockcode3")
         slippi::online::config().blocked_codes[key.back() - '1'] = value.substr(0, 16);
@@ -4411,6 +4412,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nwindow " << (options.window_pinned ? std::to_string(options.window_w) + "x" + std::to_string(options.window_h) : std::string("follow"))
        << "\nvolume " << g_volume << "\nperformance " << options.performance_overlay
        << "\naudio_early_keyon " << (gx::RenderOptions::live_audio_early_keyon() ? 1 : 0)
+       << "\nmute_voices " << (gx::RenderOptions::live_mute_voices() ? 1 : 0)
        << "\naudio_mode " << options.audio_mode << "\naudio_buffer_ms " << options.audio_buffer_ms << "\naudio_device " << options.audio_device
        << "\naudio_asio_driver " << options.audio_asio_driver << "\naudio_asio_buffer " << options.audio_asio_buffer
        << "\nshowfps " << options.show_fps << "\nshowvram " << (options.show_vram ? 1 : 0) << "\nshowping " << options.show_ping
@@ -7968,6 +7970,15 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImGui::SetTooltip("Starts each new sound effect in the sound frame being mixed now instead of the next one,\n"
                           "up to one sound frame (5 ms) sooner. Music is not affected. Offline only: online matches and replays\n"
                           "always use console timing. Source Port only.");
+    }
+    {
+      // Mute character voices (Source Port: the game library plays the fighters' voices at volume 0).
+      ImGui::BeginDisabled(!g_settings_standalone && host::game_image == nullptr);
+      if (settings_toggle("Mute character voices", &gx::RenderOptions::live_mute_voices())) changed = true;
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("The fighters' voices are silent: shouts, grunts, taunts and KO screams. Every other sound\n"
+                          "plays as before. Only you hear the difference; online and in replays too. Source Port only.");
     }
     {
       // Output device picker: the Windows default, or one named device (virtual cables, interfaces).

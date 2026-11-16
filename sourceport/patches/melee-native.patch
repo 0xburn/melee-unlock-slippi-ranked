@@ -53908,10 +53908,35 @@ index 39c9a2f26..5abb674c0 100644
  /* 3C57DC */ extern char ftMr_Init_DataName[];
  /* 3C595C */ extern char ftMr_Init_AnimDatFilename[];
 diff --git a/src/melee/ft/ft_0881.c b/src/melee/ft/ft_0881.c
-index 630404cc4..696f4d8dc 100644
+index 630404cc4..0fadef940 100644
 --- a/src/melee/ft/ft_0881.c
 +++ b/src/melee/ft/ft_0881.c
-@@ -18,8 +18,8 @@ void ft_800881D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -9,8 +9,24 @@
+ #include <melee/pl/plstale.h>
+ #include <sysdolphin/baselib/random.h>
+ 
++#ifdef MU_NATIVE
++/* Audio > Mute character voices (shim/mu_audio.c, MU_AUDIO_OPTION_MUTE_VOICES): a voice plays at
++ * volume 0, so it still runs its length; Game & Watch and Samus have sound effects here, kept. */
++unsigned int mu_audio_options(void);
++static u8 mu_voice_volume(const Fighter* fp, u8 vol)
++{
++    if ((mu_audio_options() & 2u) && fp->kind != Ft_Kind_GameWatch && fp->kind != Ft_Kind_Samus) {
++        return 0;
++    }
++    return vol;
++}
++#endif
++
+ void ft_800881D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+ {
++#ifdef MU_NATIVE
++    sfx_vol = mu_voice_volume(fp, sfx_vol);
++#endif
+     if (!fp->x2225_b6) {
+         if (sfx_id != 0x83D60) {
+             if (sfx_id != 0x83D61) {
+@@ -18,8 +34,8 @@ void ft_800881D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
                  ft_80088770(fp);
                  ft_800887CC(fp);
                  fp->x2144 = lbAudioAx_80023870(sfx_id, sfx_vol, sfx_pan,
@@ -53922,7 +53947,7 @@ index 630404cc4..696f4d8dc 100644
                  return;
              }
              ft_80088770(fp);
-@@ -34,8 +34,8 @@ void ft_800881D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -34,8 +50,8 @@ void ft_800881D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
                      ft_80088770(fp);
                      ft_800887CC(fp);
                      fp->x2144 = lbAudioAx_80023870(sfx_id, sfx_vol, sfx_pan,
@@ -53933,7 +53958,17 @@ index 630404cc4..696f4d8dc 100644
                      return;
                  }
                  ft_80088770(fp);
-@@ -58,8 +58,8 @@ void ft_80088328(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -49,6 +65,9 @@ void ft_800881D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+ void ft_80088328(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+ {
+     s32 temp_r30;
++#ifdef MU_NATIVE
++    sfx_vol = mu_voice_volume(fp, sfx_vol);
++#endif
+ 
+     if (!(fp->x2225_b6)) {
+         if (sfx_id != 0x83D60) {
+@@ -58,8 +77,8 @@ void ft_80088328(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
                  ft_80088770(fp);
                  ft_800887CC(fp);
                  fp->x2148 = lbAudioAx_80023870(temp_r30, sfx_vol, sfx_pan,
@@ -53944,7 +53979,7 @@ index 630404cc4..696f4d8dc 100644
                  return;
              }
              ft_800887CC(fp);
-@@ -74,8 +74,8 @@ void ft_80088328(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -74,8 +93,8 @@ void ft_80088328(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
                      ft_80088770(fp);
                      ft_800887CC(fp);
                      fp->x2148 = lbAudioAx_80023870(temp_r30, sfx_vol, sfx_pan,
@@ -53955,7 +53990,7 @@ index 630404cc4..696f4d8dc 100644
                      return;
                  }
                  ft_800887CC(fp);
-@@ -92,9 +92,9 @@ void ft_80088478(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -92,9 +111,9 @@ void ft_80088478(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
      if (sfx_id != 0x83D60) {
          if (sfx_id != 0x83D61) {
              sfx_id = ft_80087D0C(fp, sfx_id);
@@ -53968,7 +54003,7 @@ index 630404cc4..696f4d8dc 100644
              return;
          }
          ft_80088828(fp);
-@@ -106,9 +106,9 @@ void ft_80088510(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -106,9 +125,9 @@ void ft_80088510(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
      if (sfx_id != 0x83D60) {
          if (sfx_id != 0x83D61) {
              sfx_id = ft_80087D0C(fp, sfx_id);
@@ -53981,7 +54016,7 @@ index 630404cc4..696f4d8dc 100644
              return;
          }
          ft_80088884(fp);
-@@ -120,9 +120,9 @@ void ft_800885A8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -120,9 +139,9 @@ void ft_800885A8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
      if (sfx_id != 0x83D60) {
          if (sfx_id != 0x83D61) {
              sfx_id = ft_80087D0C(fp, sfx_id);
@@ -53994,7 +54029,7 @@ index 630404cc4..696f4d8dc 100644
              return;
          }
          ft_800888E0(fp);
-@@ -134,9 +134,9 @@ void ft_80088640(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -134,9 +153,9 @@ void ft_80088640(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
      if (sfx_id != 0x83D60) {
          if (sfx_id != 0x83D61) {
              sfx_id = ft_80087D0C(fp, sfx_id);
@@ -54007,7 +54042,7 @@ index 630404cc4..696f4d8dc 100644
              return;
          }
          ft_8008893C(fp);
-@@ -146,7 +146,7 @@ void ft_80088640(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -146,7 +165,7 @@ void ft_80088640(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
  static inline int inline0(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
  {
      return lbAudioAx_80023870(sfx_id, sfx_vol, sfx_pan,
@@ -54016,7 +54051,7 @@ index 630404cc4..696f4d8dc 100644
  }
  
  void ftCo_800886D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
-@@ -164,81 +164,81 @@ void ftCo_800886D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
+@@ -164,81 +183,81 @@ void ftCo_800886D8(Fighter* fp, int sfx_id, u8 sfx_vol, u8 sfx_pan)
  void ft_80088770(Fighter* fp)
  {
      lbAudioAx_80023870(0x83D61, 0, 0x40,
@@ -54120,7 +54155,7 @@ index 630404cc4..696f4d8dc 100644
      fp->x215C = -1;
      fp->x2160 = -1;
      lbAudioAx_8002500C(fp->x2164);
-@@ -278,26 +278,26 @@ void ft_80088C5C(Fighter_GObj* gobj)
+@@ -278,26 +297,26 @@ void ft_80088C5C(Fighter_GObj* gobj)
      if (fp->x215C != -1 && lbAudioAx_800265C4(gobj, fp->x215C) == 1) {
          ft_80088998(fp);
      }
@@ -54161,7 +54196,7 @@ index 630404cc4..696f4d8dc 100644
      fp->x215C = -1;
      fp->x2160 = -1;
      lbAudioAx_8002500C(fp->x2164);
-@@ -327,10 +327,6 @@ void ft_800890D0(Fighter* fp, u32 move_id)
+@@ -327,10 +346,6 @@ void ft_800890D0(Fighter* fp, u32 move_id)
      }
  }
  
@@ -54172,7 +54207,7 @@ index 630404cc4..696f4d8dc 100644
  /**
   * Seems to handle move staling damage reduction
   * Each time the move exists in the stale move table, decreases the result
-@@ -351,32 +347,37 @@ static f32 ft_80089118(StaleMoveTable* table, int move_id, int arg2)
+@@ -351,32 +366,37 @@ static f32 ft_80089118(StaleMoveTable* table, int move_id, int arg2)
              return var_f1;
          }
          if (move_id == table->StaleMoves[var_r8].move_id) {

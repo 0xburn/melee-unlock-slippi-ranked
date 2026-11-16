@@ -1357,12 +1357,18 @@ uint32_t h_game_options2() {
 // never during an online match or a replay (see mu_host.h).
 float h_picture_widen() { return gx::true_widescreen_active() ? 1.0f / gx::true_widescreen_factor() : 1.0f; }
 uint32_t h_audio_options() {
-  if (g_replaying || slippi::online::session_mode() >= 0 || source_p2p::requested()) return 0;
+  // Mute character voices: everywhere (online and replays too); it changes no timing.
+  static const int mute_env = [] { const char* v = host::test_env::getenv("MELEE_TEST_MUTE_VOICES"); return v && *v ? (*v == '1' ? 1 : 0) : -1; }();
+  const bool mute = mute_env >= 0 ? mute_env == 1 : gx::RenderOptions::live_mute_voices();
+  static int mute_logged = -1;
+  if ((int)mute != mute_logged) { host::log("audio: character voices %s", mute ? "muted" : "on"); mute_logged = mute; }
+  const uint32_t voices = mute ? MU_AUDIO_OPTION_MUTE_VOICES : 0u;
+  if (g_replaying || slippi::online::session_mode() >= 0 || source_p2p::requested()) return voices;
   static const int env = [] { const char* v = std::getenv("MELEE_AUDIO_EARLY_KEYON"); return v && *v ? (*v == '1' ? 1 : 0) : -1; }();
   const bool on = env >= 0 ? env == 1 : gx::RenderOptions::live_audio_early_keyon();
   static int logged = -1;
   if ((int)on != logged) { host::log("audio: faster sound effects %s", on ? "on" : "off"); logged = on; }
-  return on ? MU_AUDIO_OPTION_EARLY_KEYON : 0u;
+  return (on ? MU_AUDIO_OPTION_EARLY_KEYON : 0u) | voices;
 }
 
 uint32_t h_game_options3() {

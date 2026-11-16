@@ -350,9 +350,10 @@ typedef struct MuHostApi {
      * in a replay and never sent to an opponent: nothing the simulation reads follows them. */
     uint32_t (*display_options)(void);
 
-    /* Version 19. Audio options (MU_AUDIO_OPTION_*), read live once per sound frame. Never recorded
-     * in a replay; the host returns 0 during online matches and replay playback, because early
-     * key-on lets the game see a sound finish one tick sooner (crowd loops, a stage text box). */
+    /* Version 19. Audio options (MU_AUDIO_OPTION_*), read live once per sound frame (and per fighter
+     * voice). Never recorded in a replay; the host leaves EARLY_KEYON out during online matches and
+     * replay playback, because early key-on lets the game see a sound finish one tick sooner (crowd
+     * loops, a stage text box). MUTE_VOICES changes no timing and stays on everywhere. */
     uint32_t (*audio_options)(void);
 
     /* Version 20. How much wider the presented picture is than the game's own camera sees: True
@@ -398,6 +399,10 @@ typedef struct MuHostApi {
  * the game's sound callback owed at the end of a frame runs at the top of the next one, before
  * the voices are synced (axnative/AXOut.c). Offline only. */
 #define MU_AUDIO_OPTION_EARLY_KEYON 0x00000001u
+/* Audio > Mute character voices: the fighters' voices play at volume 0 (Game & Watch and Samus,
+ * whose "voices" are sound effects, excepted). Allowed online and in replays: the sound still runs
+ * its length, so nothing the game reads changes. */
+#define MU_AUDIO_OPTION_MUTE_VOICES 0x00000002u
 
 /* "Low poly fighters": the fighter draw shows the game's own far model (the one it draws in the
  * Fountain of Dreams reflection, the shadow pass and the magnifier bubble) in place of the full

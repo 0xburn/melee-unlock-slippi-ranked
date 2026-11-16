@@ -271,6 +271,8 @@ struct RenderOptions {
   // Faster sound effects (Audio): each new sound starts in the sound frame mixed now, 5 ms sooner.
   // Offline only (the host gives the game 0 online and in replays).
   static bool& live_audio_early_keyon() { static bool value = false; return value; }
+  // Audio > Mute character voices (Source Port): the fighters' voices play silent.
+  static bool& live_mute_voices() { static bool value = false; return value; }
   bool offline_delay = false;
   int offline_delay_frames = 2;  // independent of the online delay; enabled separately for old settings
   // Early inputs (Online, ini key early_inputs, on unless the file says 0): controller changes go
