@@ -184,6 +184,19 @@ static u32 arena_pairing(int* test_room)
     return (u32) reply[0] << 24 | (u32) reply[1] << 16 | (u32) reply[2] << 8 | reply[3];
 }
 
+#define CMD_CSS_FRAME 0xEC
+/* mnCharSel_Scene_OnFrame, every mode's character select, offline and online: tells the host a
+ * character select is on screen (its easter egg lives only there, drawn by the host, never in a
+ * match), and plays the menu sound the host asks for. Local only: nothing in the match changes. */
+void mu_css_frame(void)
+{
+    static unsigned char reply[4096];   /* the host's minimum response capacity */
+    unsigned int got = 0;
+    if (mu_online_abi_command(CMD_CSS_FRAME, NULL, 0, reply, sizeof reply, &got) == 0 && got >= 1 && reply[0] != 0) {
+        lbAudioAx_80024030(reply[0]);
+    }
+}
+
 #define CMD_ARENA_HAND 0xEF
 /* mnCharSel_CursorThink, after the hand moved: the online CSS's own player's hand goes to the host
  * (x, y as the screen's units, 0.1 steps) when it moved, for an arena room's side panels: a hand

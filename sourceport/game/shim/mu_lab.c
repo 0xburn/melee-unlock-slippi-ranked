@@ -772,6 +772,57 @@ int mu_test_vs_stage(void)
     return *v == '\0' ? n : -1;
 }
 
+/* MELEE_TEST_CSS_CHAR=<a>[,<b>,<c>,<d>] (tests only): on each visit to a character select, the hand
+ * of port 1 (2, 3, 4) is put once on the icon of external character id a (b, c, d), so a hidden run
+ * picks any fighter with a plain A. One value applies to every port; '-' or an empty field leaves
+ * that port's hand alone. Unset: -1, nothing moves. */
+static int css_char_visit = 1;
+static int css_char_done[4];
+void mu_test_css_enter(void)
+{
+    ++css_char_visit;
+}
+int mu_test_css_char(int port)
+{
+    const char* v;
+    int field = 0, n = -1, single = 1;
+    const char* p;
+    if (port < 0 || port > 3 || css_char_done[port] == css_char_visit) {
+        return -1;
+    }
+    css_char_done[port] = css_char_visit;   /* asked once per visit: no environment read each frame */
+    v = mu_test_getenv("MELEE_TEST_CSS_CHAR");
+    if (v == NULL) {
+        return -1;
+    }
+    for (p = v; *p; ++p) {
+        if (*p == ',') {
+            single = 0;
+        }
+    }
+    for (p = v; ; ++p) {
+        if (*p == ',' || *p == '\0') {
+            if (field == port || (single && field == 0)) {
+                break;
+            }
+            if (*p == '\0') {
+                n = -1;
+                break;
+            }
+            ++field;
+            n = -1;
+        } else if (*p >= '0' && *p <= '9') {
+            n = (n < 0 ? 0 : n * 10) + (*p - '0');
+            if (n > 40) {
+                return -1;
+            }
+        } else {
+            n = -1;
+        }
+    }
+    return n;
+}
+
 /* MELEE_TEST_ADVENTURE_SCENE=<n> (tests only): Adventure starts at scene n, the decimal minor id
  * (stage * 8 + part: 33 is the Kirby team, 34 Giant Kirby, 25 the Zelda fight). Unset: -1. */
 int mu_test_adventure_scene(void)

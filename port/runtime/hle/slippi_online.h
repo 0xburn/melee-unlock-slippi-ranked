@@ -92,6 +92,9 @@ int local_player_index();
 // True while the game is polling the online menus (mode select, the online character select screen,
 // waiting for an opponent) and not running a match.
 bool in_online_menus();
+// Direct only: a connected opponent announced automatic L-cancel in its build message. Slippi
+// Dolphin and builds before 0.9.200 never send it, so it is false against them.
+bool opponent_auto_lcancel();
 
 // Native practice uses the same Slippi matchmaking implementation as the game's online menus.
 // These calls are simulation-thread only. native_poll_match is deliberately side-effecting and

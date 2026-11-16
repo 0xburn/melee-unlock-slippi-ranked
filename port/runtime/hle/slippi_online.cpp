@@ -1589,6 +1589,14 @@ int ping_ms() { return p2p_session_up() ? host::netplay::ping_ms() : (g_netplay 
 // g_last_search keeps the mode of the last search for the whole session, so it only means anything
 // while an online session is actually up: searching, set up (the online character select screen),
 // or in the match. Everywhere else this is offline and the answer is -1.
+bool opponent_auto_lcancel() {
+  if (!g_netplay || g_last_search.mode != Matchmaking::DIRECT) return false;
+  if (g_netplay->GetSlippiConnectStatus() != NetplayClient::ConnectStatus::CONNECTED) return false;
+  const int n = std::min<int>(bounded_remote_count(), REMOTE_PLAYER_MAX);
+  for (int i = 0; i < n; ++i) if (g_netplay->GetRemoteBuild(i).auto_lcancel) return true;
+  return false;
+}
+
 int session_mode() {
   const bool session = g_in_online_match || g_play_session_active || (g_matchmaking && g_matchmaking->IsSearching());
   if (!session) return host::netplay::session_mode();   // a peer-to-peer session, or -1

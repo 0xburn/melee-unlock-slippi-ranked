@@ -9,6 +9,8 @@
 #include "arena_panel.h"
 #include "cosmetic_mods.h"
 #include "host.h"
+#include "render_options.h"
+#include "test_env.h"
 #include "slippi_arena.h"
 #include "slippi_online.h"
 #include "yougame_link.h"
@@ -22,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -193,9 +196,21 @@ void raw_text(const Ink& k, float x, float y, ImU32 col, const std::string& s) {
     pen += f->CalcTextSizeA(size, 1e6f, 0.f, one).x + px(k.spacing);
   }
 }
+// Tests (MELEE_TEST_ARENA_TEXTCHECK=1): every string's box, checked against its panel each frame.
+struct TextBox { std::string s; float x0, y0, x1, y1; };
+bool textcheck_on() {
+  static const bool on = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_TEXTCHECK"); return v && *v == '1'; }();
+  return on;
+}
+std::vector<TextBox> g_text_boxes;
 // Text with the sheet's shadow, slanted when italic (the vertices are sheared about the line).
 void text(const Ink& k, float x, float y, const std::string& s) {
   if (s.empty()) return;
+  if (textcheck_on()) {
+    const float h = size_of(k.face, k.css);
+    // the glyphs' own height sits inside the line box ImGui reports; italic leans up to 0.16 h right
+    g_text_boxes.push_back({s, x, y + h * 0.12f, x + text_w(k, s) + (k.italic ? h * 0.16f : 0.f), y + h * 0.88f});
+  }
   ImDrawList* d = dl();
   const int start = d->VtxBuffer.Size;
   const float a = (float)((k.col >> IM_COL32_A_SHIFT) & 0xFF) / 255.0f;
@@ -1207,15 +1222,65 @@ void draw_tabs(const Bars& b, const View& v, const float alpha[2]) {
   }
 }
 
+// Every string inside its own panel (the bar it starts in) and clear of every other string. Each
+// problem is logged once per run; a count every two seconds.
+void check_text(const Bars& b) {
+  static std::set<std::string> said;
+  static int frames = 0, problems = 0;
+  const float tol = 1.0f;
+  auto say = [&](const std::string& line) { if (said.insert(line).second) { ++problems; host::log("arena panel textcheck: %s", line.c_str()); } };
+  char buf[512];
+  for (size_t i = 0; i < g_text_boxes.size(); ++i) {
+    const TextBox& t = g_text_boxes[i];
+    const bool left = t.x0 < (b.lx1 + b.rx0) * 0.5f;
+    const float px0 = left ? b.lx0 : b.rx0, px1 = left ? b.lx1 : b.rx1;
+    if (t.x0 < px0 - tol || t.x1 > px1 + tol || t.y0 < b.y0 - tol || t.y1 > b.y1 + tol) {
+      std::snprintf(buf, sizeof buf, "look %d '%s' at %.0f..%.0f x %.0f..%.0f leaves the %s panel %.0f..%.0f x %.0f..%.0f",
+                    (int)g.look, t.s.c_str(), t.x0, t.x1, t.y0, t.y1, left ? "left" : "right", px0, px1, b.y0, b.y1);
+      say(buf);
+    }
+    for (size_t j = i + 1; j < g_text_boxes.size(); ++j) {
+      const TextBox& u = g_text_boxes[j];
+      if (u.s == t.s && std::abs(u.x0 - t.x0) < 0.5f && std::abs(u.y0 - t.y0) < 0.5f) continue;   // the same string again
+      const float ox = std::min(t.x1, u.x1) - std::max(t.x0, u.x0), oy = std::min(t.y1, u.y1) - std::max(t.y0, u.y0);
+      if (ox > tol && oy > tol) {
+        std::snprintf(buf, sizeof buf, "look %d '%s' overlaps '%s' (%.0f x %.0f px)", (int)g.look, t.s.c_str(), u.s.c_str(), ox, oy);
+        say(buf);
+      }
+    }
+  }
+  if (++frames % 120 == 0)
+    host::log("arena panel textcheck: %zu strings this frame, %d problems so far (look %d, %.0fx%.0f bars %.0f)",
+              g_text_boxes.size(), problems, (int)g.look, b.rx1, b.y1 - b.y0, b.lx1 - b.lx0);
+}
+
 }  // namespace
 
 void set_fonts(const Fonts& fonts) { g_fonts = fonts; }
+int look() { load(); return (int)g.look; }
+const char* look_name(int l) { return kLookNames[std::clamp(l, 0, kLookCount - 1)]; }
+void set_look(int l) { load(); g.look = (Look)std::clamp(l, 0, kLookCount - 1); save(); }
+bool tabs() { load(); return g.tabs; }
+void set_tabs(bool on) { load(); g.tabs = on; save(); }
 bool wants_capture() { return g.side != 0 || g.page != Page::None; }
 uint16_t withheld_buttons() { return 0; }
 
 void frame(const Frame& f) {
   if (yougame::active()) { leave_panel(); g.page = Page::None; return; }   // rooms are a Slippi Direct feature
   load();
+  if (const int forced = ar::test_fixture_look(); forced >= 0) {   // tests only: the fixture's cycle
+    g.look = (Look)forced;
+    static int last = -1;
+    static double since = 0;
+    static bool shot = false;
+    const int index = ar::test_fixture_index();
+    if (index != last) { last = index; since = f.time; shot = false; }
+    if (!shot && f.time - since > 0.6) {   // after the slide-in
+      shot = true;
+      gx::gx_capture_request_set(1);
+      host::log("arena panel: fixture shot %s look %d", ar::test_fixture_state(index), forced);
+    }
+  }
   const View v = ar::view();
   const bool visible = f.on_online_menus && !(v.active && v.room.in_game && ar::role(v.room, v.self) == Role::Fighter);
   if (!visible) {
@@ -1269,6 +1334,7 @@ void frame(const Frame& f) {
     draw_tabs(b, v, tab_alpha);
   }
   g_items.clear();
+  g_text_boxes.clear();
   ImDrawList* draw = dl();
   const int start = draw->VtxBuffer.Size;
   if (!v.active) {
@@ -1292,6 +1358,7 @@ void frame(const Frame& f) {
       if (vert.pos.x < g_mid) vert.pos.x -= shift[0];
       else vert.pos.x += shift[1];
     }
+  if (textcheck_on() && shown[0] >= 0.999f && shown[1] >= 0.999f) check_text(b);
   // The buttons drawn this frame are the ones the hand moves over next frame.
   g_last_items.swap(g_items);
   g_items.clear();

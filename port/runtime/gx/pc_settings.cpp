@@ -1,4 +1,5 @@
 ﻿// SPDX-License-Identifier: GPL-2.0-or-later
+#include "walter_egg.h"
 #include "test_env.h"
 #include "pc_settings.h"
 #include "settings_imgui_input.h"
@@ -89,6 +90,7 @@ static constexpr bool kShowFasterSoundEffects = true;
 #include "replay_hud.h"
 #ifndef MELEE_NO_SLIPPI
 #include "arena_panel.h"
+#include "slippi_arena.h"
 static bool arena_capture() { return arena_panel::wants_capture(); }
 static uint16_t arena_withheld() { return arena_panel::withheld_buttons(); }
 #else
@@ -2058,6 +2060,20 @@ static void draw_lcancel_overlays() {
       ImGui::End();
     }
   }
+#ifndef MELEE_NO_SLIPPI
+  // A Direct opponent on 0.9.200 or later says in its build message whether its automatic
+  // L-cancel is on; Slippi Dolphin and older builds never do, so nothing shows against them.
+  if (lcancel::online_session_pending() && slippi::online::opponent_auto_lcancel()) {
+    const OverlayBounds bounds = overlay_bounds();
+    ImGui::SetNextWindowPos(ImVec2((bounds.left + bounds.right) * 0.5f, bounds.top + 10), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.75f);
+    ImGui::Begin("LCancelOpponentNotice", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                                       ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
+    clamp_overlay_window();
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Your opponent has automatic L-cancel on.");
+    ImGui::End();
+  }
+#endif
 }
 
 // A friend pressed Join on the player's Discord presence. All that does inside the game is put
@@ -4351,7 +4367,7 @@ static void draw_arena_panel(RenderOptions& options, const host::PadState& pad, 
   f.game_y1 = f.game_y0 + gh;
   if (have_pad) { f.buttons = pad.button; f.stick_x = pad.stick_x; f.stick_y = pad.stick_y; f.sub_x = pad.sub_x; f.sub_y = pad.sub_y; }
   f.time = ImGui::GetTime();
-  f.on_online_menus = slippi::online::in_online_menus();
+  f.on_online_menus = slippi::online::in_online_menus() || slippi::arena::test_fixture_active();
   arena_panel::frame(f);
 }
 #endif
@@ -9780,6 +9796,26 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         settings_hint(("Serving on port " + std::to_string(slippi::spectate::port()) + ".").c_str());
       else if (options.slippi_spectator)
         settings_hint("Not serving: starts with the game (see the log if the port is taken).");
+      // Arena rooms: the panel beside the picture on the Direct character select. Its two choices
+      // are also on the room's Rules page; nothing here changes anything until a room is opened.
+      ImGui::Spacing();
+      ImGui::TextUnformatted("Arena rooms");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("On the Direct character select, push your hand against the right edge of the screen to open a room.\n"
+                          "Friends join by code; two play while the others watch live and rotate in.");
+      int room_look = arena_panel::look();
+      ImGui::SetNextItemWidth(180.0f);
+      if (ImGui::BeginCombo("Room look", arena_panel::look_name(room_look))) {
+        for (int i = 0; i < arena_panel::kLookCount; ++i)
+          if (ImGui::Selectable(arena_panel::look_name(i), i == room_look)) arena_panel::set_look(i);
+        ImGui::EndCombo();
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("How the room shows in the bars beside the picture. Only you see this choice.");
+      bool room_tabs = arena_panel::tabs();
+      if (settings_toggle("Hide the room panels until the hand comes near", &room_tabs)) arena_panel::set_tabs(room_tabs);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("In a room, the panels fold into thin tabs at the screen edges and slide out when your hand\n"
+                          "or mouse comes near that side.");
     }
 #endif
 
@@ -10903,6 +10939,17 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
 #ifndef MELEE_NO_SLIPPI
   if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active()) draw_arena_panel(options, pad, have_pad);
 #endif
+  if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active() && walter_egg::active()) {
+    const ImVec2 screen = ImGui::GetIO().DisplaySize;
+    const float aspect = presented_aspect(options, (int)screen.x, (int)screen.y, true);
+    float gw = screen.x, gh = gw / std::max(aspect, 0.1f);
+    if (gh > screen.y) { gh = screen.y; gw = gh * aspect; }
+    walter_egg::Frame ef;
+    ef.game_x0 = (screen.x - gw) * 0.5f; ef.game_y0 = (screen.y - gh) * 0.5f;
+    ef.game_x1 = ef.game_x0 + gw; ef.game_y1 = ef.game_y0 + gh;
+    ef.time = ImGui::GetTime();
+    walter_egg::draw(ef);
+  }
   if (practice_was_open && !state.practice_open) state.practice_release_capture = true;
   // Practice menu changes (the CPU, your setups, skipped codes, the hint count) are saved as they happen.
   // The panel's own autosave runs only while the panel shows, so these were lost at exit before.

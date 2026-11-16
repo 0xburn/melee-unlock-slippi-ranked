@@ -32,6 +32,14 @@ struct Frame {
 struct Fonts { ImFont* title = nullptr; ImFont* black = nullptr; ImFont* bold = nullptr; ImFont* body = nullptr; };
 void set_fonts(const Fonts& fonts);
 
+// The two choices a player makes about the panel (also on the room's Rules page), for Settings:
+// its look and whether it folds into tabs until the hand comes near. Saved at once.
+int look();
+const char* look_name(int look);
+void set_look(int look);
+bool tabs();
+void set_tabs(bool on);
+
 // UI thread, once per overlay frame, inside ImGui. Draws nothing outside the online menus.
 void frame(const Frame& f);
 // True while the room menu has the controller (the game must not see those presses).

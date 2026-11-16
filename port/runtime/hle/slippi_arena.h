@@ -58,6 +58,15 @@ struct View {
   std::string status;                       // one plain line: what this member's game is doing
 };
 View view();
+// Tests only (MELEE_TEST_ARENA_FIXTURE=<state>[:long]): view() answers a made-up room so the panel can
+// be seen in every state on any character select, offline included. States: alone, n2, n3, n5, n8,
+// n12, n16, asking (this member asked to play), prompt (this fighter is asked), watching, doubles
+// (a vote to switch), linklost. ":long" gives 8-wide names, 3-digit records and pings.
+bool test_fixture_active();
+// MELEE_TEST_ARENA_FIXTURE=cycle: the look to show now (each state in turn under each look), else -1.
+int test_fixture_look();
+int test_fixture_index();                 // -1 unless cycling
+const char* test_fixture_state(int index);
 // True while this game is in a room (any thread).
 bool in_room();
 // True while a Slippi search or a connected pair is up (any thread): then Z belongs to the game

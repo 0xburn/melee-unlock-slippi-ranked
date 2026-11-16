@@ -5,6 +5,7 @@
 #include "slippi_net.h"
 #include "slippi_online.h"
 #include "host.h"
+#include "test_env.h"
 #include "yougame_link.h"
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -890,7 +892,97 @@ bool in_room() {
   return g_view.active;
 }
 
+namespace {
+const char* const kFixtureStates[] = {"alone", "n2", "n3", "n5", "n8", "n16", "asking", "prompt", "watching", "doubles", "linklost"};
+constexpr int kFixtureStateCount = 11;
+constexpr int kFixtureLooks = 5;
+std::string fixture_spec() {
+  static const std::string spec = [] { const char* s = host::test_env::getenv("MELEE_TEST_ARENA_FIXTURE"); return std::string(s ? s : ""); }();
+  return spec;
+}
+// "cycle[:long]": every second (60 retraces) the next state, and after all states the next look.
+int fixture_index() {
+  const std::string spec = fixture_spec();
+  if (spec.rfind("cycle", 0) != 0) return -1;
+  static uint32_t start = 0;
+  const uint32_t now = host::retrace_count();
+  if (!start) start = now;
+  return (int)(((now - start) / 60) % (kFixtureStateCount * kFixtureLooks));
+}
+View build_fixture(const std::string& state, bool wide, const std::string& spec) {
+  {
+    View v;
+    int n = 3;
+    if (state.size() > 1 && state[0] == 'n') n = std::atoi(state.c_str() + 1);
+    else if (state == "alone") n = 1;
+    else if (state == "doubles") n = 5;
+    else if (state == "watching" || state == "asking" || state == "prompt" || state == "linklost") n = 4;
+    n = std::clamp(n, 1, kMaxMembers);
+    static const char* const kNames[] = {"HERO", "WISE", "PEACE", "MOONKEH", "PARTY", "JJASHYA", "KAI", "ROSE",
+                                         "AXE", "LUNA", "MILO", "ZED", "NOVA", "IVY", "OTTO", "PIX"};
+    static const uint8_t kChars[] = {19, 3, 2, 20, 9, 15, 0, 12, 13, 16, 6, 21, 25, 14, 18, 10};
+    Room r;
+    for (int i = 0; i < n; ++i) {
+      char code[16];
+      std::snprintf(code, sizeof code, "TEST#%03d", i + 1);
+      const uint8_t id = join(r, code, wide ? "WWWWWWWW" : kNames[i]);
+      if (id == kNone) break;
+      Member* m = nullptr;
+      for (Member& e : r.members) if (e.id == id) m = &e;
+      if (!m) continue;
+      m->character = kChars[i % 16];
+      m->costume = (uint8_t)(i % 4);
+      m->wins = (uint16_t)(wide ? 100 + 7 * i : (i * 3) % 7);
+      m->losses = (uint16_t)(wide ? 900 - 9 * i : (i * 2) % 5);
+      v.ping_ms[id] = i == 0 ? 0 : wide ? 999 : 18 + 11 * i;
+    }
+    r.games = wide ? 123 : 4;
+    if (n >= 2) { r.streak_id = r.ring[0]; r.streak = wide ? 101 : 3; }
+    v.active = true; v.hosting = true; v.linked = true;
+    v.self = r.members.empty() ? kNone : r.members[0].id;
+    v.status = "Ready to fight " + (r.members.size() > 1 ? r.members[1].code : std::string("a friend"));
+    if (state == "alone") v.status = "Add a friend's code to start";
+    if (state == "watching" && n >= 4) { v.self = r.members[3].id; toggle_line(r, v.self); v.watching_live = true; v.hosting = false; v.status = "Watching"; }
+    if (state == "asking" && n >= 3) { v.self = r.members[2].id; ask(r, v.self); v.hosting = false; v.status = "Asked to play next"; }
+    if (state == "prompt" && n >= 3) { ask(r, r.members[2].id); }
+    if (state == "doubles") { propose_switch(r, r.members[0].id); vote_switch(r, r.members[0].id, true); }
+    if (state == "linklost" && n >= 2) { v.self = r.members[2].id; v.hosting = false; v.linked = false; v.status = "Lost the link to the room. Reconnecting"; }
+    v.room = r;
+    host::log("arena: test fixture %s (%s), %d members, valid %d", state.c_str(), spec.c_str(), (int)r.members.size(), valid(r) ? 1 : 0);
+    return v;
+  }
+}
+bool fixture(View& out) {
+  const std::string spec = fixture_spec();
+  if (spec.empty()) return false;
+  const bool wide = spec.find(":long") != std::string::npos;
+  static std::map<std::string, View> made;
+  const int index = fixture_index();
+  const std::string state = index >= 0 ? kFixtureStates[index % kFixtureStateCount] : spec.substr(0, spec.find(':'));
+  auto it = made.find(state);
+  if (it == made.end()) it = made.emplace(state, build_fixture(state, wide, spec)).first;
+  out = it->second;
+  return true;
+}
+}  // namespace
+
+bool test_fixture_active() { return !fixture_spec().empty(); }
+int test_fixture_index() { return fixture_index(); }
+const char* test_fixture_state(int index) { return index >= 0 ? kFixtureStates[index % kFixtureStateCount] : ""; }
+int test_fixture_look() {
+  const int index = fixture_index();
+  if (index < 0) return -1;
+  static int last = -1;
+  if (index != last) {
+    last = index;
+    host::log("arena: test fixture now %s, look %d", kFixtureStates[index % kFixtureStateCount], index / kFixtureStateCount);
+  }
+  return index / kFixtureStateCount;
+}
+
 View view() {
+  View f;
+  if (fixture(f)) return f;
   std::lock_guard<std::mutex> lk(g_mutex);
   return g_view;
 }

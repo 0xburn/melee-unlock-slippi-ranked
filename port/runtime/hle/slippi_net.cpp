@@ -16,6 +16,7 @@
 #include "host.h"
 #include "gx_core.h"   // the player's own shield colour for the build message
 #include "early_input.h"
+#include "lcancel.h"   // automatic L-cancel, announced in the build message
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -615,11 +616,12 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       {
         std::lock_guard<std::mutex> lk(build_mutex_);
         remote_build_[pidx] = {true, mod_view != 0, fp, name, (caps & 1) != 0, (caps & 2) != 0, (caps & 4) != 0, shield, port, rules_digest,
-                               (caps & 16) != 0};
+                               (caps & 16) != 0, (caps & 32) != 0};
       }
       host::log("slippi: opponent %u build: %s%s%s%s, shield colour %s%06X", port, mod_view ? "mod " : "retail game",
                 mod_view ? name.c_str() : "", mod_view ? (" " + fp.substr(0, 16)).c_str() : "",
                 (caps & 1) ? ", takes early inputs" : "", shield ? "" : "none ", shield & 0xFFFFFFu);
+      if (caps & 32) host::log("slippi: opponent %u has automatic L-cancel on", port);
       if (caps & 2) SendPrematchPing();   // at once: a match set up right after connecting needs a ping now
       break;
     }
@@ -730,8 +732,10 @@ void NetplayClient::SendBuild() {
   // rules digest follows the shield colour (absent outside verified remix Ranked). Older peers mask
   // only the bits they know and stop reading after the shield colour, so the layout stays compatible.
   const std::string rules_digest = online::ranked_rules_digest(online::session_mode());
-  // Bit 4: this side takes arena room messages (NP_MSG_MU_ARENA).
-  *p << (uint8_t)((early ? 1 : 0) | 2 | (me.static_engine ? 4 : 0) | (rules_digest.empty() ? 0 : 8) | 16);
+  // Bit 4: this side takes arena room messages (NP_MSG_MU_ARENA). Bit 5: automatic L-cancel is on
+  // for this session (the opponent's character select says so; older builds ignore the bit).
+  *p << (uint8_t)((early ? 1 : 0) | 2 | (me.static_engine ? 4 : 0) | (rules_digest.empty() ? 0 : 8) | 16 |
+                  (lcancel::automatic_active_online() ? 32 : 0));
   // Then the player's own shield colour ("Shield colours", Online): a byte 1 and the three RGB bytes, or
   // a byte 0. Builds before it stop reading at the capabilities byte.
   const uint32_t shield = gx::shield_color_online();

@@ -39,6 +39,7 @@
 #include "sim_work.h"
 #include "early_input.h"
 #include "window.h"
+#include "walter_egg.h"
 #include "replay_control.h"
 #include "input_bindings.h"
 #include "controller_relay.h"
@@ -1234,7 +1235,50 @@ static std::atomic<bool> g_xinput_present[4];
 // Advanced by the game's read only; the controls screen reads the copy.
 static BoxXInputDetect g_box_xinput[4];
 static std::atomic<int> g_box_xinput_state[4];
+// MELEE_TEST_XINPUT_SCRIPT=<file> (hidden tests): XInput slot 1 plays raw reports from the file
+// instead of asking Windows, so a pad's real XInput reports (a Frame1's grid values, an Xbox pad's
+// arbitrary ones) go through the real read path; slots 2 to 4 read as empty. Lines:
+//   <frame> <buttons hex> <LT> <RT> <LX> <LY> <RX> <RY>
+// frame in retraces from the input script's release (`@release N`), or from boot when the script
+// has no @release (or there is none), each report held until the next; before the first line the
+// pad rests at zero. '#' starts a comment.
+struct XInputFeedRow { uint32_t frame; XINPUT_GAMEPAD pad; };
+static const std::vector<XInputFeedRow>* xinput_feed() {
+  static const std::vector<XInputFeedRow>* feed = [] () -> const std::vector<XInputFeedRow>* {
+    const char* path = host::test_env::getenv("MELEE_TEST_XINPUT_SCRIPT");
+    if (!path || !*path) return nullptr;
+    auto* rows = new std::vector<XInputFeedRow>();
+    if (FILE* f = fopen(path, "r")) {
+      char line[256];
+      while (fgets(line, sizeof line, f)) {
+        if (line[0] == '#') continue;
+        unsigned fr = 0, buttons = 0; int lt = 0, rt = 0, lx = 0, ly = 0, rx = 0, ry = 0;
+        if (sscanf(line, "%u %x %d %d %d %d %d %d", &fr, &buttons, &lt, &rt, &lx, &ly, &rx, &ry) != 8) continue;
+        XInputFeedRow r{fr, {}};
+        r.pad.wButtons = (WORD)buttons; r.pad.bLeftTrigger = (BYTE)lt; r.pad.bRightTrigger = (BYTE)rt;
+        r.pad.sThumbLX = (short)lx; r.pad.sThumbLY = (short)ly; r.pad.sThumbRX = (short)rx; r.pad.sThumbRY = (short)ry;
+        rows->push_back(r);
+      }
+      fclose(f);
+    }
+    log("input: test XInput feed %s, %zu reports on slot 1", path, rows->size());
+    return rows;
+  }();
+  return feed;
+}
 static DWORD xinput_ask(int idx, XINPUT_STATE* state) {
+  if (const auto* feed = xinput_feed()) {
+    if (idx != 0) return ERROR_DEVICE_NOT_CONNECTED;
+    const uint32_t now = retrace_count();
+    const uint32_t start = g_script_release_after ? g_script_release_at : 1;
+    *state = {};
+    if (start && now >= start) {
+      const uint32_t rel = now - start;
+      for (const XInputFeedRow& r : *feed) { if (r.frame > rel) break; state->Gamepad = r.pad; }
+      state->dwPacketNumber = rel;
+    }
+    return ERROR_SUCCESS;
+  }
   static const int slow_ms = [] { const char* v = host::test_env::getenv("MELEE_TEST_XINPUT_SLOW_MS"); return v ? std::atoi(v) : 0; }();
   const DWORD result = yougame::relay_pads::poll(idx, state, [&] {
     return XInputGetState((DWORD)idx, state) == ERROR_SUCCESS;
@@ -1635,6 +1679,7 @@ void input_poll(PadState out[4]) {
           g_practice_toggle.store(true, std::memory_order_release);   // same as Tab
       }
       if (toggle_settings) g_settings_toggle.store(true, std::memory_order_release);
+      walter_egg::watch_pads(pads);   // the character select's easter egg: reads only
       g_ui_pad = pads[0];
       g_ui_gamecube = gamecube;
       g_ui_has_pad = false;

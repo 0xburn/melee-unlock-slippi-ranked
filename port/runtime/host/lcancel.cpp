@@ -364,6 +364,11 @@ bool online_session_pending() {
   return slippi::online::session_mode() >= 0 && slippi::online::in_online_menus();
 }
 
+bool automatic_active_online() {
+  return automatic_enabled() && !host::gameplay::vanilla_only() &&
+         policy::automatic_allowed(slippi::online::session_mode(), true);
+}
+
 void apply(host::PadState pads[4]) {
   const bool want_indicator = indicator_enabled();
   const bool want_auto = automatic_enabled() && !host::gameplay::vanilla_only();

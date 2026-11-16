@@ -236,7 +236,8 @@ class NetplayClient {
                        uint32_t shield_rgb = 0;   // their own shield colour, 0x1000000 | RGB, 0 none sent
                        uint8_t port = 0xFF;       // their in-game slot
                        std::string ranked_rules_digest;
-                       bool arena = false; };      // takes arena room messages
+                       bool arena = false;         // takes arena room messages
+                       bool auto_lcancel = false; };  // presses for L-cancels this session (automatic L-cancel)
   // The shield colour the opponent on in-game `slot` sent (0 none).
   uint32_t RemoteShieldColor(int slot);
   RemoteBuild GetRemoteBuild(int index);

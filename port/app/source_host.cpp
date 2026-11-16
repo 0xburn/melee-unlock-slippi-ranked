@@ -73,6 +73,7 @@
 #include "native_state_layout.h"
 #include "native_savestate.h"
 #include "lab_view.h"
+#include "walter_egg.h"
 #include "../runtime/abi/mu_look_snapshot.h"
 // Both builds: the neutral netplay state. In the build without the Slippi layer it also answers the
 // Slippi names; in the normal build a peer-to-peer session (--p2p-*) is found through it.
@@ -1641,6 +1642,7 @@ constexpr uint8_t CMD_LAB_SAVE = 0xF2, CMD_LAB_LOAD = 0xF3, CMD_LAB_ADVANTAGE = 
 constexpr uint8_t CMD_PRACTICE_CPU = 0xF6;   // the practice CPU's settings (port/runtime/hle/practice_cpu.h)
 constexpr uint8_t CMD_FRAME_EVENT = 0xE8;   // replay frame data for the coach (shim/mu_framedata.c, host/replay_coach.h)
 constexpr uint8_t CMD_REPLAY_DEFENSE = 0xE9;   // a takeover's opponents once the game leaves the replay (shim/mu_replay_defend.c)
+constexpr uint8_t CMD_CSS_FRAME = 0xEC;       // every character select frame (shim/mu_slippi_css.c): the easter egg
 constexpr uint8_t CMD_ARENA_HAND = 0xEF;      // the online CSS hand (shim/mu_slippi_css.c): an arena room's side panels
 constexpr uint8_t CMD_ARENA_PICK = 0xEE;      // the online CSS pick (shim/mu_slippi_sss.c): an arena room's portraits
 constexpr uint8_t CMD_ARENA_PAIRING = 0xED;   // an arena room's pairing count (shim/mu_slippi_css.c, hle/slippi_arena.h)
@@ -1954,6 +1956,7 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
           }
           return true;
         }
+        if (c == CMD_CSS_FRAME && n == 0) { reply.push_back(walter_egg::css_frame()); return true; }
         if (c == CMD_ARENA_HAND && n == 4) {   // shim/mu_slippi_css.c: the CSS hand, in tenths
           slippi::arena::set_css_hand((int16_t)(p[0] << 8 | p[1]), (int16_t)(p[2] << 8 | p[3]));
           return true;
