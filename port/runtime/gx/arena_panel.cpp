@@ -1438,6 +1438,7 @@ void frame(const Frame& f) {
   const bool visible = f.on_online_menus && !(v.active && v.room.in_game && ar::role(v.room, v.self) == Role::Fighter);
   if (!visible) {
     g.was_visible = false;
+    g.card_pop = 0;
     leave_panel();
     g.page = Page::None;
     g.prev = f.buttons;

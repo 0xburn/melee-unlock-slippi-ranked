@@ -1245,6 +1245,7 @@ void h_poll() {
 
 static void (*g_look_snapshot)(MuLookSnapshot*) = nullptr;
 static void (*g_look_items)(MuLookItems*) = nullptr;
+static void (*g_look_extras)(MuLookExtras*) = nullptr;
 void native_retrace() {
   rollback_log();
   native_audio_tick();
@@ -1255,7 +1256,10 @@ void native_retrace() {
     g_look_snapshot(&snapshot);
     MuLookItems items{};
     if (g_look_items) g_look_items(&items);
-    lab::native_frame(snapshot, g_look_items ? &items : nullptr);
+    MuLookExtras extras{};
+    if (g_look_extras) g_look_extras(&extras);
+    const std::array<std::string, 4> names = slippi::online::player_names_for_overlay();
+    lab::native_frame(snapshot, g_look_items ? &items : nullptr, g_look_extras ? &extras : nullptr, names.data());
   }
 }
 
@@ -4114,6 +4118,15 @@ bool set_replay(const char* path) {
       names[i] = "P" + std::to_string(i + 1) + " " + (c < 26 ? kNames[c] : "Fighter");
     }
     replay_control::set_players(ports, names);
+    // The Lab view's HUD names the players as Slippi Lab does: the display name, else the connect code.
+    std::string lab_names[4];
+    for (int i = 0; i < 4; ++i) {
+      if (!(ports & (1u << i))) continue;
+      const auto& p = s->players[(uint8_t)i];
+      lab_names[i] = lab::name_from_sjis(p.displayName.data(), p.displayName.size());
+      if (lab_names[i].empty()) lab_names[i] = lab::name_from_sjis(p.connectCode.data(), p.connectCode.size());
+    }
+    lab::set_replay_names(lab_names);
   }
   replay_control::set_replay_path(path);
   replay_control::begin(Slippi::GAME_FIRST_FRAME, g_replay->GetLatestIndex(), engine);
@@ -4428,6 +4441,7 @@ int run(void (*shutdown)(int)) {
   auto entry = (MuGameEntry)game_proc("mu_game_entry");
   g_look_snapshot = (void (*)(MuLookSnapshot*))game_proc("mu_look_snapshot_v1");
   g_look_items = (void (*)(MuLookItems*))game_proc("mu_look_items_v1");
+  g_look_extras = (void (*)(MuLookExtras*))game_proc("mu_look_extras_v1");
   user_gecko::set_native_writer((user_gecko::NativeWrite)game_proc("mu_user_gecko_write"));
   user_gecko::set_native_reader((user_gecko::NativeRead)game_proc("mu_user_gecko_read"));
   {

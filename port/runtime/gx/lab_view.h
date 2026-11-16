@@ -13,10 +13,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include <cstdint>
+#include <string>
 
 struct ImFont;
 struct MuLookSnapshot;
 struct MuLookItems;
+struct MuLookExtras;
 
 namespace lab {
 
@@ -24,7 +26,10 @@ namespace lab {
 // received it. Cheap; copies the fields the view uses and returns.
 void feed(const uint8_t* event, uint32_t size);
 // Source Port: a read-only geometry snapshot captured at a simulation boundary.
-void native_frame(const MuLookSnapshot& snapshot, const MuLookItems* items = nullptr);
+// extras: the replay-event values the geometry lacks (frame number, time limit, L-cancel, hurtbox
+// state, stick, trigger); names: each port's online display name, empty when none.
+void native_frame(const MuLookSnapshot& snapshot, const MuLookItems* items = nullptr,
+                  const MuLookExtras* extras = nullptr, const std::string* names = nullptr);
 
 // Render thread, between ImGui::NewFrame and ImGui::Render. Covers the window when enabled and a
 // match is in progress; does nothing otherwise, so menus and the character select stay normal.
@@ -49,6 +54,16 @@ void set_enabled(bool on);
 bool active();
 // The heavy font the view's HUD draws its percent with (loaded large by the settings UI). Null: ImGui's default.
 void set_hud_font(ImFont* font);
+// Pixels at the bottom of the window the view leaves to other controls (a replay's buttons and bar):
+// Slippi Lab's box and its HUD are fitted above them, as Slippi Lab keeps its controls under the
+// picture. 0: the whole window.
+void set_bottom_reserve(float pixels);
+// A name from a Slippi replay field (Shift-JIS, NUL padded) for the HUD: full-width Latin letters,
+// digits and the connect code's sign brought to ASCII, anything else left out.
+std::string name_from_sjis(const uint8_t* bytes, size_t max);
+// The players' names of the replay being played on the Source Port (Slippi Lab's order: the
+// display name, else the connect code), shown in place of online names. Empty strings: none.
+void set_replay_names(const std::string names[4]);
 
 // True while a match is running and the view has a frame to show.
 bool match_in_progress();

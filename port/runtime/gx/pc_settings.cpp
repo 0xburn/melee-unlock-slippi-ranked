@@ -3450,7 +3450,17 @@ void settings_context_create(void* window, bool open_at_startup) {
   if (std::filesystem::exists(heading_font_path))
     g_settings_heading_font = io.Fonts->AddFontFromFileTTF(heading_font_path.c_str(), 28.0f);
   if (std::filesystem::exists(heading_font_path))   // the Lab view's percent, drawn large: rasterised at that size
-    lab::set_hud_font(io.Fonts->AddFontFromFileTTF(heading_font_path.c_str(), 72.0f));
+    {
+      // The Lab view's HUD is Slippi Lab's: bold 15 px sans-serif, which a browser on Windows draws in
+      // Arial Bold. Without it, the heading font.
+      ImFont* lab_font = nullptr;
+#ifdef _WIN32
+      if (std::filesystem::exists("C:\\Windows\\Fonts\\arialbd.ttf"))
+        lab_font = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\arialbd.ttf", 48.0f);
+#endif
+      if (!lab_font) lab_font = io.Fonts->AddFontFromFileTTF(heading_font_path.c_str(), 72.0f);
+      lab::set_hud_font(lab_font);
+    }
 #ifndef MELEE_NO_SLIPPI
   {
     // The arena room's lettering (gx/arena_panel.h): Arial Black for the corners, records and tags,
@@ -5433,6 +5443,14 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   lab::set_enabled(options.lab_view && kLabViewAvailable);
   lab::set_colors(options.lab_colour, options.lab_colour_background, options.lab_colour_stage);
   const bool lab_on = options.lab_view && (kLabViewAvailable || options.look_lab_fighters != 0);   // the styles need no packs
+  {   // a replay's controls keep the bottom: the Lab view's box and HUD sit above them
+    float reserve = 0.0f;
+    if (replay_bar::active() && !replay_bar::all_hidden()) {
+      reserve = 80.0f * ImGui::GetIO().DisplaySize.y / 720.0f;
+      if (replay_bar::shown()) reserve = std::max(reserve, 2.0f * ImGui::GetFontSize() + 46.0f);
+    }
+    lab::set_bottom_reserve(reserve);
+  }
   lab::draw(lab_on && !state.fill_window, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
   // 20XX TE's Input display is the same switch as the Controller overlay (te_pairs_linked), and the
   // overlay already shows the controllers: with it on, TE's own display is not drawn as well.
