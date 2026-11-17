@@ -105390,7 +105390,7 @@ index 693498879..6bfcfced1 100644
      case 33:
          result->x0_0 = base[0].icons[c_kind];
 diff --git a/src/melee/gm/gm_1832.c b/src/melee/gm/gm_1832.c
-index 406c85597..3de8a5f05 100644
+index 406c85597..a50eafe24 100644
 --- a/src/melee/gm/gm_1832.c
 +++ b/src/melee/gm/gm_1832.c
 @@ -1,8 +1,12 @@
@@ -105829,18 +105829,52 @@ index 406c85597..3de8a5f05 100644
              Player_SetSlottype(player_slot, Gm_PKind_Demo);
              Player_SetFacingDirection(player_slot, 0.0f);
              Player_SetModelScale(player_slot, 1.0f);
-@@ -917,12 +1022,22 @@ void fn_80185F5C(s32 arg0)
+@@ -910,19 +1015,56 @@ s32 fn_80185E34(void)
+     return player_slot;
+ }
+ 
++#ifdef MU_NATIVE
++const char* mu_test_getenv(const char* name);
++#endif
+ void fn_80185F5C(s32 arg0)
+ {
+     ClassicProcArray local;
+     int i = 0;
      local = lbl_803B7C40;
++#ifdef MU_NATIVE
++    /* MELEE_TEST_CLASSIC_NO_FIGHTER=1 (tests only): the first opponent shown is a character kind with no
++     * fighter mapped, as a player's Akaneia disc gave (=guardless also skips the check below). */
++    {
++        const char* t = mu_test_getenv("MELEE_TEST_CLASSIC_NO_FIGHTER");
++        if (t != NULL && t[0] != ' ' && lbl_8047368C.xF0 > 0) {
++            int ck;
++            for (ck = CK_KIND_TABLE_MAX - 1; ck > 0x21 && Player_MuCkindHasFighter(ck); ck--) {
++            }
++            if (!Player_MuCkindHasFighter(ck)) {
++                lbl_8047368C.xF4[0] = (u8) ck;
++                OSReport("[test] classic intro: opponent 0 is kind %d, which has no fighter%c", ck, 10);
++            }
++        }
++    }
++#endif
  
      while (i < lbl_8047368C.xF0) {
++#ifdef MU_NATIVE
++        /* A slot with no fighter mapped (an added fighter the mod's content view does not have) is
++         * no one: building it read the fighter tables at kind -1 (a crash on an Akaneia disc).
++         * MELEE_TEST_CLASSIC_NO_FIGHTER=guardless (tests only) builds it anyway. */
++        const char* guardless = mu_test_getenv("MELEE_TEST_CLASSIC_NO_FIGHTER");
++        const int has_fighter = Player_MuCkindHasFighter(lbl_8047368C.xF4[i]) ||
++                                (guardless != NULL && guardless[0] == 'g');
++#endif
 +#if MU_ROGUE  /* rogueMelee */
-+        if ((RogueNativeIntro_Held() ? lbl_8047368C.xF4[i] : lbl_8047368C.xF1[i]) != 0x21) {
++        if ((RogueNativeIntro_Held() ? lbl_8047368C.xF4[i] : lbl_8047368C.xF1[i]) != 0x21 && has_fighter) {
 +#elif defined(MU_NATIVE)
 +        /* The right side's own slot. Retail tests the left side's (xF1) here, which never matters
 +         * while both sides hold the console's fighters; with an added fighter shown as no one
 +         * (0x21, mu_slippi_menu.c) on one side, the other side's fighter was left out, or an
 +         * empty one was built from kind 0x21. */
-+        if (lbl_8047368C.xF4[i] != 0x21) {
++        if (lbl_8047368C.xF4[i] != 0x21 && has_fighter) {
 +#else
          if (lbl_8047368C.xF1[i] != 0x21) {
 +#endif
@@ -105853,7 +105887,7 @@ index 406c85597..3de8a5f05 100644
              Player_SetSlottype(arg0, Gm_PKind_Demo);
              Player_SetFacingDirection(arg0, 0.0f);
              Player_SetModelScale(arg0, 1.0f);
-@@ -985,11 +1100,21 @@ void fn_801861B8(void)
+@@ -985,11 +1127,21 @@ void fn_801861B8(void)
          text->font_size.y = 1.0f;
          ((HSD_Text*) lbl_804735A8.x4[7 + i])->default_alignment = 1;
          HSD_SisLib_803A6B98((HSD_Text*) lbl_804735A8.x4[7 + i],
@@ -105875,7 +105909,7 @@ index 406c85597..3de8a5f05 100644
      }
  
      for (i = 0; i < (s32) lbl_8047368C.xF0; i++) {
-@@ -1001,32 +1126,56 @@ void fn_801861B8(void)
+@@ -1001,32 +1153,56 @@ void fn_801861B8(void)
          ((HSD_Text*) lbl_804735A8.x4[10 + i])->default_alignment = 1;
          if (lbl_8047368C.model_scale_kind == 4) {
              HSD_SisLib_803A6B98((HSD_Text*) lbl_804735A8.x4[10 + i],
@@ -105934,7 +105968,7 @@ index 406c85597..3de8a5f05 100644
      HSD_JObjReqAnimAll(jobj, 0.0F);
      HSD_JObjAnimAll(jobj);
      if (lbl_8047368C.model_scale_kind != 3) {
-@@ -1050,7 +1199,7 @@ typedef struct ClassicArchiveNameLocal {
+@@ -1050,7 +1226,7 @@ typedef struct ClassicArchiveNameLocal {
  
  static inline void* gm_80186634_LoadLightList(void)
  {
@@ -105943,7 +105977,7 @@ index 406c85597..3de8a5f05 100644
  }
  
  static inline void gm_80186634_SetupLight(void)
-@@ -1071,8 +1220,8 @@ static inline void gm_80186634_SetupCamera(void)
+@@ -1071,8 +1247,8 @@ static inline void gm_80186634_SetupCamera(void)
      HSD_CObj* cobj2;
  
      gobj = GObj_Create(0x13, 0x14, 0);
@@ -105954,7 +105988,7 @@ index 406c85597..3de8a5f05 100644
      HSD_GObjObject_80390A70(gobj, HSD_GObj_CameraKind, cobj);
      GObj_SetupGXLinkMax(gobj, HSD_GObj_803910D8, 8);
      gobj->gxlink_prios = 0x801;
-@@ -1091,11 +1240,14 @@ static inline void gm_80186634_SetupModel(void)
+@@ -1091,11 +1267,14 @@ static inline void gm_80186634_SetupModel(void)
      HSD_JObj* jobj;
  
      gobj = GObj_Create(0xE, 0xF, 0);
@@ -105971,7 +106005,7 @@ index 406c85597..3de8a5f05 100644
      HSD_JObjReqAnimAll(jobj, (f32) ((lbl_8047368C.xEE - 1) * 0x32));
      HSD_JObjAnimAll(jobj);
      lb_80011E24(jobj, &lbl_804735A8.x4[4], 0xE, -1);
-@@ -1108,7 +1260,7 @@ static inline void gm_80186634_SetupFog(void)
+@@ -1108,7 +1287,7 @@ static inline void gm_80186634_SetupFog(void)
      HSD_Fog* fog;
  
      gobj = GObj_Create(0xE, 0xF, 0);
@@ -105980,7 +106014,7 @@ index 406c85597..3de8a5f05 100644
      HSD_GObjObject_80390A70(gobj, HSD_GObj_FogKind, fog);
      GObj_SetupGXLink(gobj, HSD_GObj_FogCallback, 0xB, 0);
  }
-@@ -1118,7 +1270,7 @@ void fn_80186634(void* arg0)
+@@ -1118,7 +1297,7 @@ void fn_80186634(void* arg0)
      ClassicArchiveNameLocal local;
      PAD_STACK(12);
  
@@ -105989,7 +106023,7 @@ index 406c85597..3de8a5f05 100644
      Camera_Init(0xC);
      lb_8000FCDC();
      mpColl_80041C78();
-@@ -1132,9 +1284,9 @@ void fn_80186634(void* arg0)
+@@ -1132,9 +1311,9 @@ void fn_80186634(void* arg0)
  
      local.names = *(const ClassicArchiveNameArray*) lbl_803B7C58;
      lbl_804D65F4 = lbArchive_80016DBC(local.names.v[lbl_8047368C.game_type],
@@ -106001,7 +106035,7 @@ index 406c85597..3de8a5f05 100644
  
      gm_80186634_SetupLight();
  
-@@ -1159,6 +1311,10 @@ void fn_80186634(void* arg0)
+@@ -1159,6 +1338,10 @@ void fn_80186634(void* arg0)
          gm_80186634_SetupFog();
          fn_801861B8();
          fn_80185D64();
@@ -106012,7 +106046,7 @@ index 406c85597..3de8a5f05 100644
          fn_80185F5C(fn_80185E34());
          break;
      case 4:
-@@ -1168,12 +1324,89 @@ void fn_80186634(void* arg0)
+@@ -1168,12 +1351,89 @@ void fn_80186634(void* arg0)
          gm_80186634_SetupFog();
          fn_801861B8();
          fn_80185D64();
@@ -106102,7 +106136,7 @@ index 406c85597..3de8a5f05 100644
  }
  
  void gm_Scene_IntroEasy_OnFrame(void)
-@@ -1216,6 +1449,11 @@ void gm_Scene_IntroEasy_OnEnter(void* arg0_)
+@@ -1216,6 +1476,11 @@ void gm_Scene_IntroEasy_OnEnter(void* arg0_)
      lbl_804735A8.x3C = 0;
      *(ClassicModeEnterData*) &lbl_8047368C.model_scale_kind = *arg0;
      fn_80186634(arg0_);
@@ -192975,7 +193009,7 @@ index d0344361c..9bc7a2462 100644
  
  void pl_80040FBC(int slot, int unused, int arg2, int arg3, int arg4)
 diff --git a/src/melee/pl/player.c b/src/melee/pl/player.c
-index d97b3cc64..2acd53dc3 100644
+index d97b3cc64..1b266674a 100644
 --- a/src/melee/pl/player.c
 +++ b/src/melee/pl/player.c
 @@ -1,3 +1,6 @@
@@ -193005,7 +193039,7 @@ index d97b3cc64..2acd53dc3 100644
      //////ftMapping_list
      /* CKind_Captain   */ { Ft_Kind_Captain, 0xFF },
      /* CKind_Donkey    */ { Ft_Kind_Donkey, 0xFF },
-@@ -74,9 +70,28 @@ ftMapping ftMapping_list[ChKind_Max] = {
+@@ -74,9 +70,35 @@ ftMapping ftMapping_list[ChKind_Max] = {
      /* CKind_GKoops    */ { Ft_Kind_GKoops, 0xFF },
      /* CKind_CrezyH    */ { Ft_Kind_CrezyH, 0xFF },
      /* ChKind_Sandbag  */ { Ft_Kind_Sandbag, 0xFF },
@@ -193032,10 +193066,17 @@ index d97b3cc64..2acd53dc3 100644
 +}
 +#endif
 +
++#ifdef MU_NATIVE
++int Player_MuCkindHasFighter(int ckind)
++{
++    return ckind >= 0 && ckind < CK_KIND_TABLE_MAX && ftMapping_list[ckind].internal_id != -1;
++}
++#endif
++
  ////.bss
  StaticPlayer player_slots[Gm_Player_NumMax];
  HSD_ObjAllocData Player_AllocData;
-@@ -112,15 +127,14 @@ void Player_80031790(int slot)
+@@ -112,15 +134,14 @@ void Player_80031790(int slot)
      Player_CheckSlot(slot);
      player = &player_slots[slot];
  
@@ -193054,7 +193095,7 @@ index d97b3cc64..2acd53dc3 100644
              }
          }
      }
-@@ -134,15 +148,14 @@ void Player_80031848(int slot)
+@@ -134,15 +155,14 @@ void Player_80031848(int slot)
      Player_CheckSlot(slot);
      player = &player_slots[slot];
  
@@ -193073,7 +193114,7 @@ index d97b3cc64..2acd53dc3 100644
              }
          }
      }
-@@ -150,13 +163,12 @@ void Player_80031848(int slot)
+@@ -150,13 +170,12 @@ void Player_80031848(int slot)
  
  static void func_8008688C_wrapper(StaticPlayer* player)
  {
@@ -193090,7 +193131,7 @@ index d97b3cc64..2acd53dc3 100644
              }
          }
      }
-@@ -224,11 +236,11 @@ void Player_80031AD0(int slot)
+@@ -224,11 +243,11 @@ void Player_80031AD0(int slot)
      // temp_vec = unused_ptr = ftMapping_list;
      offset_arr = (&ftMapping_list[0].extra_internal_id);
  
@@ -193104,7 +193145,7 @@ index d97b3cc64..2acd53dc3 100644
      Player_CheckSlot(slot);
  
      first_struct.internal_id = internal_id;
-@@ -240,12 +252,10 @@ void Player_80031AD0(int slot)
+@@ -240,12 +259,10 @@ void Player_80031AD0(int slot)
      player->player_entity[0] = Fighter_Create(&first_struct);
      player->player_state = 2;
  
@@ -193119,7 +193160,7 @@ index d97b3cc64..2acd53dc3 100644
  
          Player_CheckSlot(slot);
  
-@@ -303,15 +313,11 @@ void Player_80031DC8(void func_arg(s32, s32))
+@@ -303,15 +320,11 @@ void Player_80031DC8(void func_arg(s32, s32))
          Player_CheckSlot(slot);
  
          if (player_slots[slot].player_state) {
@@ -193140,7 +193181,7 @@ index d97b3cc64..2acd53dc3 100644
              }
          }
      }
-@@ -355,8 +361,6 @@ void Player_80031FB0(int slot, s32 entity_index)
+@@ -355,8 +368,6 @@ void Player_80031FB0(int slot, s32 entity_index)
  void Player_80032070(int slot, bool bool_arg)
  {
      StaticPlayer* player;
@@ -193149,7 +193190,7 @@ index d97b3cc64..2acd53dc3 100644
      Player_CheckSlot(slot);
      player = &player_slots[slot];
  
-@@ -364,7 +368,7 @@ void Player_80032070(int slot, bool bool_arg)
+@@ -364,7 +375,7 @@ void Player_80032070(int slot, bool bool_arg)
          ftCo_800D4FF4(player->player_entity[player->transformed[0]]);
  
          if (player->flags.b2 &&
@@ -193158,7 +193199,7 @@ index d97b3cc64..2acd53dc3 100644
              ftLib_8008701C(player->player_entity[player->transformed[1]]))
          {
              ftCo_800D4FF4(player->player_entity[player->transformed[1]]);
-@@ -420,7 +424,7 @@ CharacterKind Player_GetPlayerCharacter(int slot)
+@@ -420,7 +431,7 @@ CharacterKind Player_GetPlayerCharacter(int slot)
      StaticPlayer* player;
      Player_CheckSlot(slot);
      player = &player_slots[slot];
@@ -193167,7 +193208,7 @@ index d97b3cc64..2acd53dc3 100644
  }
  
  void Player_SetPlayerCharacter(s32 slot, CharacterKind value)
-@@ -428,7 +432,16 @@ void Player_SetPlayerCharacter(s32 slot, CharacterKind value)
+@@ -428,7 +439,16 @@ void Player_SetPlayerCharacter(s32 slot, CharacterKind value)
      StaticPlayer* player;
      Player_CheckSlot(slot);
      player = &player_slots[slot];
@@ -193185,7 +193226,7 @@ index d97b3cc64..2acd53dc3 100644
  }
  
  Gm_PKind Player_GetPlayerSlotType(s32 slot)
-@@ -437,15 +450,13 @@ Gm_PKind Player_GetPlayerSlotType(s32 slot)
+@@ -437,15 +457,13 @@ Gm_PKind Player_GetPlayerSlotType(s32 slot)
      StaticPlayer* player;
      Player_CheckSlot(slot);
      player = &player_slots[slot];
@@ -193202,7 +193243,7 @@ index d97b3cc64..2acd53dc3 100644
      StaticPlayer* player;
  
      Player_CheckSlot(slot);
-@@ -453,15 +464,15 @@ Gm_PKind Player_8003248C(s32 slot, bool arg1)
+@@ -453,15 +471,15 @@ Gm_PKind Player_8003248C(s32 slot, bool arg1)
      player = &player_slots[slot];
  
      if (arg1 == 1) {
@@ -193222,7 +193263,7 @@ index d97b3cc64..2acd53dc3 100644
  
      return slot_type;
  }
-@@ -471,11 +482,16 @@ void Player_SetSlottype(s32 slot, Gm_PKind value)
+@@ -471,11 +489,16 @@ void Player_SetSlottype(s32 slot, Gm_PKind value)
      StaticPlayer* player;
      Player_CheckSlot(slot);
      player = &player_slots[slot];
@@ -193240,7 +193281,7 @@ index d97b3cc64..2acd53dc3 100644
      if (!b) {
          return ftMapping_list[kind].internal_id;
      } else if (b == 1) {
-@@ -488,19 +504,22 @@ s8 Player_800325C8(CharacterKind kind, bool b)
+@@ -488,19 +511,22 @@ s8 Player_800325C8(CharacterKind kind, bool b)
  s8 Player_80032610(s32 slot, bool arg1)
  { //// decomp.me/scratch/pHTx2
  
@@ -193267,7 +193308,7 @@ index d97b3cc64..2acd53dc3 100644
      }
  
      return error_value;
-@@ -745,22 +764,22 @@ void Player_SetCostumeId(int slot, int costume_id)
+@@ -745,22 +771,22 @@ void Player_SetCostumeId(int slot, int costume_id)
      player->costume_id = costume_id;
  }
  
@@ -193296,7 +193337,7 @@ index d97b3cc64..2acd53dc3 100644
  }
  
  int Player_GetTeam(int slot)
-@@ -781,22 +800,22 @@ void Player_SetTeam(int slot, s8 team)
+@@ -781,22 +807,22 @@ void Player_SetTeam(int slot, s8 team)
      player->team = team;
  }
  
@@ -193325,7 +193366,7 @@ index d97b3cc64..2acd53dc3 100644
  }
  
  int Player_GetCpuLevel(int slot)
-@@ -1294,13 +1313,11 @@ s32 Player_GetRemainingHPByIndex(s32 slot, s32 index)
+@@ -1294,13 +1320,11 @@ s32 Player_GetRemainingHPByIndex(s32 slot, s32 index)
  s32 Player_GetFalls(s32 slot)
  { /// decomp.me/scratch/8ijor
      StaticPlayer* player;
@@ -193341,7 +193382,7 @@ index d97b3cc64..2acd53dc3 100644
      {
          return player->falls[player->transformed[0]] +
                 player->falls[player->transformed[1]];
-@@ -1360,6 +1377,9 @@ void Player_UpdateKOsBySlot(int slot, bool bool_arg, int other_slot)
+@@ -1360,6 +1384,9 @@ void Player_UpdateKOsBySlot(int slot, bool bool_arg, int other_slot)
  
          if (kos < U32_MAX) {
              player->kos_by_player[other_slot]++;
@@ -193351,7 +193392,7 @@ index d97b3cc64..2acd53dc3 100644
          }
  
          if (slot == other_slot) {
-@@ -1410,41 +1430,41 @@ void Player_UpdateMatchFrameCount(int slot, bool condition)
+@@ -1410,41 +1437,41 @@ void Player_UpdateMatchFrameCount(int slot, bool condition)
      }
  }
  
@@ -193403,7 +193444,7 @@ index d97b3cc64..2acd53dc3 100644
              ifStatus_802F6C04(slot);
          }
      }
-@@ -1808,7 +1828,7 @@ u32 Player_GetUnk45(s32 slot)
+@@ -1808,7 +1835,7 @@ u32 Player_GetUnk45(s32 slot)
      StaticPlayer* player;
      Player_CheckSlot(slot);
      player = &player_slots[slot];
@@ -193412,7 +193453,7 @@ index d97b3cc64..2acd53dc3 100644
          return player->unk45;
      }
  
-@@ -1912,7 +1932,7 @@ void Player_InitOrResetPlayer(s32 slot)
+@@ -1912,7 +1939,7 @@ void Player_InitOrResetPlayer(s32 slot)
      player = &player_slots[slot];
  
      player->player_state = 0;
@@ -193421,7 +193462,7 @@ index d97b3cc64..2acd53dc3 100644
      transformed0 = &player->transformed[0];
      transformed1 = &player->transformed[1];
  
-@@ -1933,14 +1953,14 @@ void Player_InitOrResetPlayer(s32 slot)
+@@ -1933,14 +1960,14 @@ void Player_InitOrResetPlayer(s32 slot)
      player->player_poses.byIndex[3].x = zerofloat;
  
      player->costume_id = 0;
@@ -193439,7 +193480,7 @@ index d97b3cc64..2acd53dc3 100644
      player->cpu_level = 0;
  
      player->cpu_type = 4;
-@@ -1972,7 +1992,7 @@ void Player_InitOrResetPlayer(s32 slot)
+@@ -1972,7 +1999,7 @@ void Player_InitOrResetPlayer(s32 slot)
      player->kos_by_player[5] = 0;
  
      player->match_frame_count = -1;
@@ -193448,7 +193489,7 @@ index d97b3cc64..2acd53dc3 100644
      player->stocks = 0;
  
      player->current_coins = 0;
-@@ -2042,22 +2062,21 @@ void Player_80036DA4(void)
+@@ -2042,22 +2069,21 @@ void Player_80036DA4(void)
  
  void Player_80036DD8(void)
  {
@@ -193479,7 +193520,7 @@ index d97b3cc64..2acd53dc3 100644
      }
  }
  
-@@ -2085,20 +2104,19 @@ void Player_80036F34(s32 slot, s32 arg1)
+@@ -2085,20 +2111,19 @@ void Player_80036F34(s32 slot, s32 arg1)
  
      Player_CheckSlot(slot);
      player = &player_slots[slot];
@@ -193505,7 +193546,7 @@ index d97b3cc64..2acd53dc3 100644
          some_struct.has_transformation = 1;
          player->player_entity[1] = ftDemo_CreateFighter(&some_struct);
      }
-@@ -2112,20 +2130,19 @@ void Player_80037054(s32 slot, s32 arg1)
+@@ -2112,20 +2137,19 @@ void Player_80037054(s32 slot, s32 arg1)
  
      Player_CheckSlot(slot);
      player = &player_slots[slot];
@@ -193532,10 +193573,10 @@ index d97b3cc64..2acd53dc3 100644
          player->player_entity[1] = ftDemo_CreateFighter(&some_struct);
      }
 diff --git a/src/melee/pl/player.h b/src/melee/pl/player.h
-index d9a6db88a..e43bd48df 100644
+index d9a6db88a..4121dc3a8 100644
 --- a/src/melee/pl/player.h
 +++ b/src/melee/pl/player.h
-@@ -4,28 +4,33 @@
+@@ -4,28 +4,37 @@
  #include <Runtime/platform.h>
  
  #include <melee/ft/forward.h>
@@ -193553,6 +193594,10 @@ index d9a6db88a..e43bd48df 100644
 +
 +#if defined(MU_NATIVE) && defined(MU_AKANEIA_FIGHTERS)
 +void Player_MuSetAkKind(int ckind, int kind);
++#endif
++#ifdef MU_NATIVE
++/* Whether a character kind has a fighter to build (an added slot nothing is mapped to has none). */
++int Player_MuCkindHasFighter(int ckind);
 +#endif
 +
  typedef struct _StaticPlayer {
@@ -193577,7 +193622,7 @@ index d9a6db88a..e43bd48df 100644
      /*0x0E*/ s16 unk0E;
  
      union {
-@@ -37,19 +42,22 @@ typedef struct _StaticPlayer {
+@@ -37,19 +46,22 @@ typedef struct _StaticPlayer {
              /*0x34-0x3f*/ Vec3 some_other_player_pos;
          } byVecName;
  
@@ -193608,7 +193653,7 @@ index d9a6db88a..e43bd48df 100644
      /*0x4B*/ u8 handicap;
  
      /*0x4C*/ s8 unk4C;
-@@ -71,18 +79,17 @@ typedef struct _StaticPlayer {
+@@ -71,18 +83,17 @@ typedef struct _StaticPlayer {
              /*0x64*/ s16 stamina;
              /*0x66*/ s16 unk66;
          } byName;
@@ -193631,7 +193676,7 @@ index d9a6db88a..e43bd48df 100644
  
      /*0x8E*/ s8 stocks;
      /*0x8F*/ s8 unk8F;
-@@ -93,10 +100,11 @@ typedef struct _StaticPlayer {
+@@ -93,10 +104,11 @@ typedef struct _StaticPlayer {
      /*0x98*/ s32 unk98;
      /*0x9C*/ s32 unk9C;
  
@@ -193647,7 +193692,7 @@ index d9a6db88a..e43bd48df 100644
  
      /*0xA8*/ int nametag_slot_id;
  
-@@ -134,7 +142,7 @@ typedef struct _StaticPlayer {
+@@ -134,7 +146,7 @@ typedef struct _StaticPlayer {
  
      /*0xAF*/ s8 unkAF;
  
@@ -193656,7 +193701,7 @@ index d9a6db88a..e43bd48df 100644
      /*0xB4*/ /*void* sub_character_entity;*/ // Used for followers, such as
                                               // Nana
  
-@@ -188,12 +196,12 @@ void Player_SetFacingDirection(s32 slot, f32 direction);
+@@ -188,12 +200,12 @@ void Player_SetFacingDirection(s32 slot, f32 direction);
  void Player_SetFacingDirectionConditional(s32 slot, bool b, f32 direction);
  u32 Player_GetCostumeId(int slot);
  void Player_SetCostumeId(int slot, int costume_id);
@@ -193673,7 +193718,7 @@ index d9a6db88a..e43bd48df 100644
  int Player_GetCpuLevel(int slot);
  void Player_SetPlayerAndEntityCpuLevel(int slot, int cpu_level);
  int Player_GetCpuType(int slot);
-@@ -247,9 +255,9 @@ s32 Player_GetKOsByPlayerIndex(int slot, int idx);
+@@ -247,9 +259,9 @@ s32 Player_GetKOsByPlayerIndex(int slot, int idx);
  void Player_UpdateKOsBySlot(int slot, bool bool_arg, int other_slot);
  u32 Player_GetMatchFrameCount(int slot);
  void Player_UpdateMatchFrameCount(int slot, bool condition);
