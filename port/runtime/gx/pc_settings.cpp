@@ -6091,6 +6091,10 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // controls their own inset instead of relying on inherited child padding, which can be zero
     // under the legacy child flags used by some builds. This keeps rows away from the glass edge.
     ImGui::PushTextWrapPos(0.0f);
+    // Search every page at once (settings_search_box, pc_settings_visuals.inl). "Go to" on a result
+    // switches to its page first.
+    if (g_goto_page >= 0 && !g_goto_label.empty() && state.active_tab != g_goto_page) state.active_tab = g_goto_page;
+    settings_search_box();
     static constexpr const char* titles[] = {
         "VIDEO", "AUDIO", "GAME", "CONTROLS", "OVERLAYS", "CUSTOMIZE", "GECKO CODES", "MODS"};
     if (wide_detail_theme) {
@@ -6115,7 +6119,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     ImGui::PopFont();
     ImGui::Separator();
     }
-    if (state.active_tab == 0) {
+    if (settings_page(state.active_tab, 0)) {
     // One width for every combo and slider on this tab, so their labels all begin at the same x.
     // Left to itself ImGui sizes each control from the space its own label needs, which staggered
     // the labels down the column.
@@ -7045,7 +7049,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ++scroll_frames;
       }
     }
-    ImGui::SeparatorText("HDR");
+    settings_section("HDR");
     ImGui::BeginDisabled(d3d11 || !hdr_display_available());
     if (settings_toggle("HDR output", &options.hdr_output)) changed = true;
     ImGui::EndDisabled();
@@ -7057,7 +7061,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       if (settings_slider("Peak brightness", &options.hdr_peak, 0, 4000, options.hdr_peak ? "%d nits" : "From Windows")) changed = true;
       if (ImGui::IsItemHovered()) ImGui::SetTooltip("The brightest highlights (path tracing). From Windows uses the display's own value.");
     }
-    ImGui::SeparatorText("Ray tracing");
+    settings_section("Ray tracing");
     ImGui::BeginDisabled(!path_available);
     if (settings_toggle("Path tracing", &options.path_tracing)) changed = true;
     ImGui::EndDisabled();
@@ -7524,7 +7528,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
     // Two different things draw a CRT here: the game's own tube model (crt_shader.h) and a RetroArch
     // preset of the player's choice. Each has its own heading so nobody mistakes one for the other.
-    ImGui::SeparatorText("Built-in CRT");
+    settings_section("Built-in CRT");
     settings_hint("Melee Unlocked's own tube model, made for Melee. Light on frame time.");
     ImGui::BeginDisabled(!options.shader_preset.empty());
     static const char* crt_looks[] = {"Off", "Studio monitor", "Home television"};
@@ -7544,7 +7548,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     ImGui::EndDisabled();
     if (!options.shader_preset.empty() && options.crt_filter)
       settings_hint("Off while a RetroArch shader preset is applied (set the preset to None to use it).");
-    ImGui::SeparatorText("RetroArch shader presets");
+    settings_section("RetroArch shader presets");
     settings_hint("Community shaders, grouped by the people who made them. Applying one turns the built-in CRT off.");
     // A shader preset of the player's choice (RetroArch slang presets in the Shaders folder).
     {
@@ -7929,7 +7933,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
         ImGui::PopItemWidth();
       }
-      if (state.active_tab == 1) {
+      if (settings_page(state.active_tab, 1)) {
     ImGui::PushItemWidth(330.0f);
     int music = slippi::jukebox::user_volume();
     if (settings_slider("Music", &music, 0, 100, "%d%%")) { slippi::jukebox::set_user_volume(music); changed = true; }
@@ -8084,7 +8088,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("A short tick when you move through the settings, and when a page opens or closes.");
       }
-      if (state.active_tab == 5) {
+      if (settings_page(state.active_tab, 5)) {
         ImGui::TextUnformatted("Customize");
         ImGui::TextDisabled("Choose the menu layout, colors, and transparency.");
         ImGui::Spacing();
@@ -8573,7 +8577,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImGui::Spacing();
         ImGui::Separator();
       }
-      if (state.active_tab == 7) {
+      if (settings_page(state.active_tab, 7)) {
         static std::string mod_message;
         if (host::gameplay::vanilla_only())
           ImGui::TextWrapped("Vanilla-only session: gameplay mods are disabled. Your saved mod choices are kept for normal launches.");
@@ -9318,7 +9322,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                                    details->kind == "stage_visual" ? "stage" : "file", details->online_message.c_str());
             }
             draw_cosmetic_preview(*details);
-            if (!details->availability_message.empty())
+            // A stage's note is the same for every stage: said once, at the top of Stages.
+            if (!details->availability_message.empty() && details->kind != "stage_visual")
               ImGui::TextWrapped("%s", details->availability_message.c_str());
             ImGui::PopID();
           };
@@ -9326,11 +9331,20 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
             draw_resource_slot("Pause screen", pause_screens);
             settings_hint("Choose a pause-screen style or Vanilla. Restart to apply it.");
           }
-          if (!pictures.empty() && ImGui::CollapsingHeader("Portraits and stock icons", ImGuiTreeNodeFlags_DefaultOpen))
+          // Folded until opened: each holds a row per character or stage.
+          if (!pictures.empty() && ImGui::CollapsingHeader("Portraits and stock icons"))
             for (const auto& slot : pictures) draw_resource_slot(slot.first, slot.second);
-          if (!stages.empty() && ImGui::CollapsingHeader("Stages", ImGuiTreeNodeFlags_DefaultOpen))
+          if (!stages.empty() && ImGui::CollapsingHeader("Stages")) {
+            const std::string note = [&]() -> std::string {
+              for (const auto& stage : stages)
+                for (const CosmeticAsset* a : stage.second)
+                  if (!a->availability_message.empty()) return a->availability_message;
+              return {};
+            }();
+            if (!note.empty()) ImGui::TextDisabled("%s", note.c_str());
             for (const auto& stage : stages) draw_resource_slot(stage.second.back()->costume, stage.second);
-          if (!fighter_sounds.empty() && ImGui::CollapsingHeader("Fighter move sounds", ImGuiTreeNodeFlags_DefaultOpen))
+          }
+          if (!fighter_sounds.empty() && ImGui::CollapsingHeader("Fighter move sounds"))
             for (const auto& sounds : fighter_sounds) draw_resource_slot(sounds.first + " move sounds", sounds.second);
           if (!effects.empty() && ImGui::CollapsingHeader("Effects")) {
             if (ImGui::Button("Enable project effects")) {
@@ -9375,7 +9389,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         if (mod_message.empty()) mod_message = host::cosmetics::last_message();
         if (!mod_message.empty()) ImGui::TextWrapped("%s", mod_message.c_str());
       }
-      if (state.active_tab == 2) {
+      if (settings_page(state.active_tab, 2)) {
 
     ImGui::TextUnformatted("In-game overlay");
     changed |= settings_toggle("Auto-open in-game overlay on startup", &options.settings_open);
@@ -9383,7 +9397,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetTooltip("%s", yougame::stdio_bridge() ? yougame::parity::kMenuHint : "Off starts directly in the game. Press F1 to open the overlay anytime.");
 
     // ---- Input ----
-    ImGui::TextUnformatted("Input");
+    settings_section("Input");
     if (settings_toggle("Background input", &host::g_background_input)) changed = true;
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("On: controllers keep playing while another window is in front\n"
@@ -9393,7 +9407,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // The game's own language option (Options > Language) lives in its save. This offers the same
     // choice here: the game is answered with it wherever it asks for its saved language, on both
     // engines, and the save is left as it is.
-    ImGui::TextUnformatted("Language");
+    settings_section("Language");
     {
       int language = host::g_game_language.load();
       const char* languages[] = {"The game's own choice", "Japanese", "English"};
@@ -9486,7 +9500,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
     // Input delay, Online and Discord sit here, right below the game's own switches (owner, 0.9.201);
     // they were at the very end of this tab.
-    ImGui::TextUnformatted("Input delay");
+    settings_section("Input delay");
     {
       static const char* offline_choices[] = {"Off (0 frames)", "1 frame", "2 frames", "3 frames",
                                               "4 frames", "5 frames", "6 frames", "7 frames", "8 frames", "9 frames"};
@@ -9525,7 +9539,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
 
 #ifndef MELEE_NO_SLIPPI
-    ImGui::TextUnformatted("Online");
+    settings_section("Online");
     {
       // Early inputs (host/early_input.h): the other player's game learns of a press up to a frame
       // sooner, so it guesses right more often and rolls back less. Only between two Melee Unlocked
@@ -9659,7 +9673,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // ---- Discord presence ----
     // Off by default, and inert without an application ID. Nothing reaches Discord until the box
     // below is ticked. See scratchpad/discord_invite_design.md for the whole design.
-    ImGui::TextUnformatted("Discord");
+    settings_section("Discord");
     char app_id[32];
     std::snprintf(app_id, sizeof app_id, "%s", options.discord_app_id.c_str());
     if (ImGui::InputText("Application ID", app_id, sizeof app_id, ImGuiInputTextFlags_CharsDecimal)) {
@@ -9687,7 +9701,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     } else {
       settings_hint("Off. Nothing is sent to Discord. Needs an Application ID from discord.com/developers/applications.");
     }
-    ImGui::TextUnformatted("Stages");
+    settings_section("Stages");
     if (settings_toggle("Freeze Final Destination", &options.freeze_fd)) {
       RenderOptions::live_freeze_fd() = options.freeze_fd;
       host::g_freeze_fd.store(options.freeze_fd, std::memory_order_relaxed);
@@ -9768,7 +9782,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
 
     // Slippi's Lagless FoD code is a real game patch, so expose it as an offline/direct setting
     // instead of silently forcing the performance-oriented variant on every player.
-    ImGui::TextUnformatted("Stage effects");
+    settings_section("Stage effects");
     // Both engines. The Source Port reads it (MU_DISPLAY_OPTION_FOD_REFLECTIONS) as each Fountain of
     // Dreams match is set up. It was greyed there with "always Lagless FoD", so a player who had
     // turned it on (Static Recomp) kept the reflection on the Source Port with no way to turn it off.
@@ -9826,7 +9840,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // A port code compiled into the game (recomp/gecko.py PORT_CODES): the stock row drawn at PAL's
     // size and height. Display only, read when the HUD is built, so it applies from the next match.
     // The native game has its own versions of both (MuHostApi.game_options), so both engines show them.
-    ImGui::TextUnformatted("HUD");
+    settings_section("HUD");
     // The two size sliders rescale the HUD roots: in guest RAM on the Static Recomp, from the HUD's
     // draw callbacks in the native game (sourceport/game/shim/mu_hud_scale.c).
     {
@@ -9907,7 +9921,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
 
     // Community codes: players' favourite Gecko codes, built in (shim/mu_code_features.c). Picture and
     // sound only, so each is yours alone, online and in replays too.
-    ImGui::TextUnformatted("Community codes");
+    settings_section("Community codes");
     {
       struct Code { uint32_t bit; const char* name; const char* tip; };
       static const Code kCodes[] = {
@@ -9974,7 +9988,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
 
       }
-      if (state.active_tab == 3) {
+      if (settings_page(state.active_tab, 3)) {
 
     bool rumble_enabled = host::g_rumble_enabled.load(std::memory_order_relaxed);
     if (settings_toggle("Controller rumble", &rumble_enabled)) {
@@ -10556,7 +10570,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       }
     }
       }
-      if (state.active_tab == 4) {
+      if (settings_page(state.active_tab, 4)) {
     if (settings_toggle("Clean replays", &options.clean_replays)) {
       RenderOptions::live_clean_replays().store(options.clean_replays, std::memory_order_relaxed);
       changed = true;
@@ -10680,7 +10694,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
 #endif
     }
       }
-      if (state.active_tab == 6 && options.native_source) {
+      if (settings_page(state.active_tab, 6) && options.native_source) {
     // The Source Port runs the game as C: a Gecko code is PowerPC written over console addresses,
     // so there is nothing for it to patch. Slippi's optional codes are rebuilt in C instead, and
     // these switches are the same settings as their copies on the other tabs.
@@ -10791,7 +10805,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     ImGui::Separator();
     if (gecko_add_code_button()) changed = true;
     ImGui::EndDisabled();
-      } else if (state.active_tab == 6) {
+      } else if (settings_page(state.active_tab, 6)) {
     // ---- Gecko codes (the player's own, from GeckoCodes.ini beside the settings file) ----
     ImGui::TextWrapped("Imported Gecko codes run offline. They are suspended online and during replay playback.");
     if (host::gameplay::vanilla_only())
@@ -10834,6 +10848,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     if (gecko_add_code_button()) changed = true;
     ImGui::EndDisabled();
     }
+    settings_pages_end();   // the last section closes; a search sizes the list to its results
     if (gd_page && g_settings_gd_list && g_settings_gd_list == ImGui::GetCurrentWindow() &&
         g_settings_gd_snap_found) {
       // GD Melee: once the wheel or the scrollbar has stopped, the nearest row's top moves to the
