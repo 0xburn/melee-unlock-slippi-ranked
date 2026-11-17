@@ -127,6 +127,37 @@ static void settings_row_end(const SettingsRow& r) {
   ImGui::BeginDisabled();
 }
 
+// The pages' own ImGui controls, searchable the same way (a search shows the matching ones).
+static std::vector<SettingsRow> g_open_combos;
+static bool settings_begin_combo(const char* label, const char* preview, ImGuiComboFlags flags = 0) {
+  SettingsRow row = settings_row_begin(label);
+  if (!row.shown) return false;
+  if (!ImGui::BeginCombo(label, preview, flags)) { settings_row_end(row); return false; }
+  g_open_combos.push_back(std::move(row));
+  return true;
+}
+static void settings_end_combo() {
+  ImGui::EndCombo();
+  if (g_open_combos.empty()) return;
+  const SettingsRow row = std::move(g_open_combos.back());
+  g_open_combos.pop_back();
+  settings_row_end(row);
+}
+template <class Draw> static bool settings_searchable(const char* label, Draw draw) {
+  const SettingsRow row = settings_row_begin(label);
+  if (!row.shown) return false;
+  const bool changed = draw();
+  settings_row_end(row);
+  return changed;
+}
+static bool settings_checkbox(const char* label, bool* v) { return settings_searchable(label, [&] { return ImGui::Checkbox(label, v); }); }
+static bool settings_slider_int(const char* label, int* v, int lo, int hi, const char* format = "%d", ImGuiSliderFlags flags = 0) {
+  return settings_searchable(label, [&] { return ImGui::SliderInt(label, v, lo, hi, format, flags); });
+}
+static bool settings_color_edit3(const char* label, float col[3], ImGuiColorEditFlags flags = 0) {
+  return settings_searchable(label, [&] { return ImGui::ColorEdit3(label, col, flags); });
+}
+
 // A page starts (pc_settings.cpp: `if (settings_page(state.active_tab, N))`). During a search every
 // page draws, hidden; otherwise only the active one.
 static bool settings_page(int active_tab, int page) {
@@ -190,6 +221,12 @@ static void settings_pages_end() {
 
 // The search box at the top of every page. Typing starts a search over every page.
 static void settings_search_box() {
+  // MELEE_TEST_SETTINGS_SEARCH=<words> (tests): the box starts with that query.
+  static bool test_query_set = false;
+  if (!test_query_set) {
+    test_query_set = true;
+    if (const char* q = host::test_env::getenv("MELEE_TEST_SETTINGS_SEARCH")) std::snprintf(g_search_text, sizeof g_search_text, "%s", q);
+  }
   ImGui::SetNextItemWidth(-1.0f);
   ImGui::InputTextWithHint("##settings_search", "Search all settings", g_search_text, sizeof g_search_text);
   g_search = g_search_text[0] != 0;
