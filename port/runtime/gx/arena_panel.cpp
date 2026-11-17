@@ -85,6 +85,8 @@ struct State {
   int side = 0;
   int push_side = 0, push_frames = 0, push_needed = 10;   // push_needed: kPushFrames or kPushFramesOverCard
   uint8_t hover = 0, hover_member = 0xFF;   // a Do and, for a player card, whose
+  int stay_level = 2;                       // in a panel: how level the glove must stay (1 when it went in over the card from above)
+  uint16_t swallow = 0;                     // panel buttons still held from the panel: kept from the game until let go
   float pop[2] = {0, 0};                    // Hidden: how far each panel has slid in (0..1)
   double pop_seen[2] = {-10, -10};          // when the hand was last near that side
   double last_time = 0;
@@ -749,12 +751,15 @@ void submit_code() {
 void open_code_page() { g.page = Page::Code; g.code.clear(); g.recent_pick = -1; g.key_row = 0; g.key_col = 0; load_recent(); }
 
 // The character select's hand reaches the panels: held against the left or right edge of the
-// screen for a moment it goes into that side's panel. There the stick moves it over the buttons
-// (each lights up gold), A presses, X, Y and Z do what their chips say, and B or the stick back
-// toward the picture lets the hand out again. While the hand is in a panel the game sees nothing.
+// screen for a moment it goes into that side's panel. The hand keeps moving as it does everywhere
+// else: the button level with it lights up gold, A presses it, X, Y, R and Z do what their chips
+// say, and the hand is out again once it leaves the edge (or on B). In a panel the game still sees
+// the stick, but not those buttons.
 constexpr float kLeftEdge = -34.8f, kRightEdge = 25.8f;   // the hand's limits: -35, and 26 (29 with m-ex)
+constexpr float kEdgeSlack = 0.5f;        // in a panel, this far off the edge still counts as at it
 constexpr int kPushFrames = 10;
 constexpr int kPushFramesOverCard = 30;   // half a second: the glove only reaches the card from above
+constexpr uint16_t kPanelButtons = kA | kB | kX | kY | kZ | kR;
 float g_bar_y0 = 0, g_bar_y1 = 1;
 
 void leave_panel() {
@@ -762,9 +767,29 @@ void leave_panel() {
   g.side = 0; g.push_side = 0; g.push_frames = 0;
 }
 
-// The button under the hand's height on that side, from last frame's buttons.
+// Where the hand is on screen, the way the game draws it (the picture is 57.3 of the select's
+// units tall, its middle 0; walter_egg.cpp measured it). The old estimate, (25 - hy) / 47 of the
+// picture, sat a fifth off at the card's height (0.9.204, 2560x1440).
+float hand_unit() { return (g_bar_y1 - g_bar_y0) / 57.3f; }
+float hand_screen_y(float hy) { return (g_bar_y0 + g_bar_y1) * 0.5f - hy * hand_unit(); }
+
+// How level the glove is with that side's buttons: 2 level with one, 1 only the glove's lower part
+// over one (it hangs about seven units below the point the game reports), 0 neither. In a room the
+// whole edge is the panel.
+int hand_level(int side, float hy, bool in_room) {
+  const float unit = hand_unit(), hand_y = hand_screen_y(hy);
+  int level = 0;
+  for (const Item& it : g_last_items) {
+    if (it.side != side) continue;
+    if (in_room || (hand_y + 2.0f * unit >= it.y0 && hand_y - 5.0f * unit <= it.y1)) return 2;
+    if (hand_y + 7.0f * unit >= it.y0 && hand_y <= it.y1) level = 1;
+  }
+  return level;
+}
+
+// The button level with the hand on that side, from last frame's buttons.
 void hover_nearest(int side, float hand_y) {
-  const float y = g_bar_y0 + (25.0f - hand_y) / 47.0f * (g_bar_y1 - g_bar_y0);
+  const float y = hand_screen_y(hand_y);
   const Item* best = nullptr;
   float best_d = 1e9f;
   for (const Item& it : g_last_items) {
@@ -867,6 +892,7 @@ void handle_input(const Frame& f, const View& v) {
     return;
   }
 
+  g.swallow &= f.buttons;   // let go: the game sees that button again
   float hx = 0, hy = 0;
   const bool have_hand = ar::css_hand(&hx, &hy);
   if (g.side == 0) {
@@ -879,37 +905,26 @@ void handle_input(const Frame& f, const View& v) {
     // higher up the right edge the hand is on Ganondorf or Young Link, whose players hold the stick
     // right to reach them and then press A to pick.
     if (want) {
-      // Where the hand is on screen, the way the game draws it (the picture is 57.3 of the select's
-      // units tall, its middle 0; walter_egg.cpp measured it), and the glove's height around that:
-      // beside the card when any of the glove is level with it. The old estimate, (25 - hy) / 47 of
-      // the picture, sat a fifth off at the card's height, so a hand pushed against the card's upper
-      // half read as above it and never went in (0.9.204, 2560x1440).
-      const float unit = (g_bar_y1 - g_bar_y0) / 57.3f;
-      const float hand_y = (g_bar_y0 + g_bar_y1) * 0.5f - hy * unit;
-      // The glove hangs about seven units below the point the game reports. Level with the card: in
-      // after the usual push. Only the glove's lower part over the card (its point is up on Young
-      // Link, whose players hold the stick right to reach him): in after a longer push, so picking
-      // him never opens the panel, while pushing into the card still does (0.9.204, 2560x1440).
-      int level = 0;   // 2 level with the card, 1 the glove's lower part over it
-      for (const Item& it : g_last_items) {
-        if (it.side != want) continue;
-        if (v.active || (hand_y + 2.0f * unit >= it.y0 && hand_y - 5.0f * unit <= it.y1)) level = 2;
-        else if (level < 1 && hand_y + 7.0f * unit >= it.y0 && hand_y <= it.y1) level = 1;
-      }
+      // Level with the card: in after the usual push. Only the glove's lower part over the card (its
+      // point is up on Young Link, whose players hold the stick right to reach him): in after a
+      // longer push, so picking him never opens the panel, while pushing into the card still does
+      // (0.9.204, 2560x1440).
+      const int level = hand_level(want, hy, v.active);
       if (!level) want = 0;
       g.push_needed = level == 1 ? kPushFramesOverCard : kPushFrames;
     }
     {
-      // MELEE_TEST_ARENA_HANDLOG=1 (tests): the hand and the push, every 15 frames while it is right of 20.
+      // MELEE_TEST_ARENA_HANDLOG=1 (tests): the hand and the push, every 15 frames while it is near an edge.
       static const bool log_hand = [] { const char* e = host::test_env::getenv("MELEE_TEST_ARENA_HANDLOG"); return e && *e == '1'; }();
       static int n = 0;
-      if (log_hand && have_hand && hx > 20.0f && ++n % 15 == 0)
+      if (log_hand && have_hand && (hx > 20.0f || hx < -29.0f) && ++n % 15 == 0)
         host::log("arena panel: hand %.1f %.1f stick %d want %d", hx, hy, (int)f.stick_x, want);
     }
     if (want && want == g.push_side) ++g.push_frames;
     else { g.push_side = want; g.push_frames = want ? 1 : 0; }
     if (want && g.push_frames >= g.push_needed) {
       g.side = want;
+      g.stay_level = g.push_needed == kPushFramesOverCard ? 1 : 2;
       g.push_frames = 0;
       hover_nearest(want, hy);
       host::log("arena panel: the hand went into the %s panel (on button %d)", want == 1 ? "left" : "right", (int)g.hover);
@@ -918,22 +933,15 @@ void handle_input(const Frame& f, const View& v) {
     }
     return;
   }
-  // In a panel: up and down over its buttons, in their order on screen.
-  std::vector<const Item*> items;
-  for (const Item& it : g_last_items) if (it.side == g.side) items.push_back(&it);
-  std::sort(items.begin(), items.end(), [](const Item* x, const Item* y) { return x->y0 < y->y0; });
-  if (items.empty()) { leave_panel(); return; }
-  int at = -1;
-  for (size_t i = 0; i < items.size(); ++i)
-    if ((uint8_t)items[i]->what == g.hover && (items[i]->what != Do::Member || items[i]->member == g.hover_member)) at = (int)i;
-  if (at < 0) { at = 0; g.hover = (uint8_t)items[0]->what; g.hover_member = items[0]->member; }
-  if (step == 1 || step == 2) {
-    at = std::clamp(at + (step == 1 ? -1 : 1), 0, (int)items.size() - 1);
-    g.hover = (uint8_t)items[at]->what;
-    g.hover_member = items[at]->member;
-  }
-  // Out: B, or the stick back toward the picture.
-  if ((pressed & kB) || (g.side == 1 && step == 4) || (g.side == 2 && step == 3)) { leave_panel(); return; }
+  // In a panel: the hand moves on as the game moves it (nothing holds it at a button), and the
+  // button level with it lights up. Out once it leaves the edge or is level with no button, or on B.
+  g.swallow |= f.buttons & kPanelButtons;
+  const bool at_edge = have_hand && (g.side == 1 ? hx <= kLeftEdge + kEdgeSlack : hx >= kRightEdge - kEdgeSlack);
+  if (!at_edge || !(hand_level(g.side, hy, v.active) >= g.stay_level) || (pressed & kB)) { leave_panel(); return; }
+  const uint8_t was = g.hover, was_member = g.hover_member;
+  hover_nearest(g.side, hy);
+  if (!g.hover) { leave_panel(); return; }
+  if (g.hover != was || g.hover_member != was_member) host::log("arena panel: the hand is on button %d", (int)g.hover);
   if (pressed & kA) { host::log("arena panel: A on button %d", (int)g.hover); press((Do)g.hover, v); }
   if (pressed & kX) press(Do::Spot, v);
   if (pressed & kY) press(Do::Rules, v);
@@ -1466,8 +1474,10 @@ const char* button_mode_name(int mode) {
 }
 void set_button_mode(int mode) { load(); g.button = std::clamp(mode, 0, kButtonModeCount - 1); save(); }
 void set_tabs(bool on) { load(); g.tabs = on; save(); }
-bool wants_capture() { return g.side != 0 || g.page != Page::None; }
-uint16_t withheld_buttons() { return 0; }
+// The pages (rules, the code keyboard) take the controller. The hand in a panel keeps the stick and
+// loses only the panel's buttons, and any of them still held from the panel until they are let go.
+bool wants_capture() { return g.page != Page::None; }
+uint16_t withheld_buttons() { return g.side != 0 && g.page == Page::None ? kPanelButtons : g.swallow; }
 
 void frame(const Frame& f) {
   if (yougame::active()) { leave_panel(); g.page = Page::None; return; }   // rooms are a Slippi Direct feature

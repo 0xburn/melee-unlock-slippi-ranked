@@ -35,10 +35,10 @@ CODE_HISTORY = '[\n  {\n    "connectCode": "PEER#001",\n    "lastPlayed": ""\n  
 def bot_script(index, hand=False):
     """Online Play > Direct > pick a character, then in each match: run left (off the stage) from
     a point in every 4-second cycle that comes later for a higher member index. hand: also push the
-    character select hand into the left panel, move down two buttons, press A, then B twice."""
+    character select hand into the left panel, move it down the edge, press A, then B (which a second B would take back the pick)."""
     run_from = 20 + 50 * index
     hand_steps = ["400 sx=-127", "560", "600 sy=-127", "606", "640 sy=-127", "646",
-                  "700 A", "706", "900 B", "906", "960 B", "966"] if hand else []
+                  "700 A", "706", "900 B", "906"] if hand else []
     return "\n".join([
         "# The online menu's first page has the cursor on Slippi: A opens Slippi's page (Unranked,",
         "# Direct, Teams, Party), one row down is Direct. On the Direct CSS (scene 8) move onto a",
@@ -183,7 +183,7 @@ def main():
         script = d / "bot.txt"
         script.write_text(bot_script(i, hand=i == args.hand_test))
         settings = d / "settings.ini"
-        shots = args.capture & (1 << i)
+        shots = bool(args.capture & (1 << i)) or i == args.hand_test   # the panel lives in the overlay
         settings.write_text("startup 0\nvolume 0\nslippi_spectator 0\n" + ("backend d3d11\n" if shots else ""))
         cmd = [str(exe), "--iso", str(iso), "--hidden", "--volume", "0", "--frames", str(args.frames),
                "--script", str(script), "--replay-dir", str(d), "--log-file", str(d / "port.log"),
