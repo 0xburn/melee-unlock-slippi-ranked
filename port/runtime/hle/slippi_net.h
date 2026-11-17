@@ -47,6 +47,9 @@ enum NetMsg : uint8_t {
   // Melee Unlocked only: arena room traffic (slippi_arena.h) on a room link, sent only to a peer
   // whose build message said it takes it (capability bit 4). Never on a match connection's pads.
   NP_MSG_MU_ARENA = 0xE3,
+  // Melee Unlocked only: Gecko codes offered, answered and agreed for the match (gecko_online.h),
+  // sent only to a peer whose build message said it takes them (capability bit 6).
+  NP_MSG_MU_GECKO = 0xE4,
 };
 
 // sf::Packet wire format: integers big-endian, bool as one byte, strings as u32 length + bytes.
@@ -237,7 +240,8 @@ class NetplayClient {
                        uint8_t port = 0xFF;       // their in-game slot
                        std::string ranked_rules_digest;
                        bool arena = false;         // takes arena room messages
-                       bool auto_lcancel = false; };  // presses for L-cancels this session (automatic L-cancel)
+                       bool auto_lcancel = false;     // presses for L-cancels this session (automatic L-cancel)
+                       bool gecko = false; };         // takes Gecko code messages (NP_MSG_MU_GECKO)
   // The shield colour the opponent on in-game `slot` sent (0 none).
   uint32_t RemoteShieldColor(int slot);
   RemoteBuild GetRemoteBuild(int index);
@@ -253,6 +257,10 @@ class NetplayClient {
   bool ArenaReady();
   bool SendArena(const uint8_t* data, size_t size, bool bulk);
   bool PopArena(std::vector<uint8_t>& out);
+  // Gecko codes for the match (one remote): SendGecko queues one gecko_online message for a peer that
+  // takes them (false otherwise); PopGecko takes the oldest received.
+  bool SendGecko(const std::vector<uint8_t>& message);
+  bool PopGecko(std::vector<uint8_t>& out);
 
  private:
   struct FrameTiming { int32_t frame = 0; uint64_t time_us = 0; };
@@ -330,6 +338,8 @@ class NetplayClient {
   host::early_input::Buffer early_pads_[REMOTE_PLAYER_MAX];   // under pad_mutex_
   std::mutex arena_mutex_;                       // arena_inbox_ (network thread in, game thread out)
   std::deque<std::vector<uint8_t>> arena_inbox_;
+  std::mutex gecko_mutex_;                       // gecko_inbox_ (network thread in, game thread out)
+  std::deque<std::vector<uint8_t>> gecko_inbox_;
   void SendBuild();
 };
 

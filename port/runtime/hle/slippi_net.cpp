@@ -654,7 +654,7 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       {
         std::lock_guard<std::mutex> lk(build_mutex_);
         remote_build_[pidx] = {true, mod_view != 0, fp, name, (caps & 1) != 0, (caps & 2) != 0, (caps & 4) != 0, shield, port, rules_digest,
-                               (caps & 16) != 0, (caps & 32) != 0};
+                               (caps & 16) != 0, (caps & 32) != 0, (caps & 64) != 0};
       }
       host::log("slippi: opponent %u build: %s%s%s%s, shield colour %s%06X", port, mod_view ? "mod " : "retail game",
                 mod_view ? name.c_str() : "", mod_view ? (" " + fp.substr(0, 16)).c_str() : "",
@@ -728,6 +728,20 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       arena_inbox_.emplace_back(packet.data() + head, packet.data() + packet.size());
       break;
     }
+    case NP_MSG_MU_GECKO: {
+      // A gecko_online message ('M' 'U' 'G' ...), from a peer that announced it takes them. Kept as is
+      // for the game thread, which decodes and checks it (gecko_online::decode).
+      {
+        std::lock_guard<std::mutex> lk(build_mutex_);
+        if (!remote_build_[0].gecko) break;
+      }
+      const size_t head = 1;   // the id
+      if (packet.size() <= head || packet.size() > 64 * 1024) break;
+      std::lock_guard<std::mutex> lk(gecko_mutex_);
+      if (gecko_inbox_.size() >= 16) { host::log("slippi: gecko inbox full, message dropped"); break; }
+      gecko_inbox_.emplace_back(packet.data() + head, packet.data() + packet.size());
+      break;
+    }
     case NP_MSG_SLIPPI_CONN_SELECTED: break;
     case NP_MSG_SLIPPI_COMPLETE_STEP: {
       if (!yougame::session()) break;
@@ -771,9 +785,10 @@ void NetplayClient::SendBuild() {
   // only the bits they know and stop reading after the shield colour, so the layout stays compatible.
   const std::string rules_digest = online::ranked_rules_digest(online::session_mode());
   // Bit 4: this side takes arena room messages (NP_MSG_MU_ARENA). Bit 5: automatic L-cancel is on
-  // for this session (the opponent's character select says so; older builds ignore the bit).
+  // for this session (the opponent's character select says so; older builds ignore the bit). Bit 6:
+  // this side takes Gecko code messages (NP_MSG_MU_GECKO).
   *p << (uint8_t)((early ? 1 : 0) | 2 | (me.static_engine ? 4 : 0) | (rules_digest.empty() ? 0 : 8) | 16 |
-                  (lcancel::automatic_active_online() ? 32 : 0));
+                  (lcancel::automatic_active_online() ? 32 : 0) | 64);
   // Then the player's own shield colour ("Shield colours", Online): a byte 1 and the three RGB bytes, or
   // a byte 0. Builds before it stop reading at the capabilities byte.
   const uint32_t shield = gx::shield_color_online();
@@ -811,6 +826,28 @@ bool NetplayClient::SendArena(const uint8_t* data, size_t size, bool bulk) {
   *p << (uint8_t)NP_MSG_MU_ARENA << (uint8_t)'M' << (uint8_t)'U' << (uint8_t)'A' << (uint8_t)1 << (uint8_t)(bulk ? 1 : 0);
   p->append(data, size);
   SendAsync(std::move(p));
+  return true;
+}
+
+bool NetplayClient::SendGecko(const std::vector<uint8_t>& message) {
+  if (message.empty() || message.size() > 64 * 1024) return false;
+  if (status_.load(std::memory_order_acquire) != ConnectStatus::CONNECTED) return false;
+  {
+    std::lock_guard<std::mutex> lk(build_mutex_);
+    if (remote_player_count_ != 1 || !remote_build_[0].received || !remote_build_[0].gecko) return false;
+  }
+  auto p = std::make_unique<Packet>();
+  *p << (uint8_t)NP_MSG_MU_GECKO;
+  p->append(message.data(), message.size());
+  SendAsync(std::move(p));
+  return true;
+}
+
+bool NetplayClient::PopGecko(std::vector<uint8_t>& out) {
+  std::lock_guard<std::mutex> lk(gecko_mutex_);
+  if (gecko_inbox_.empty()) return false;
+  out = std::move(gecko_inbox_.front());
+  gecko_inbox_.pop_front();
   return true;
 }
 
@@ -905,6 +942,11 @@ void NetplayClient::Send(Packet& packet) {
       std::lock_guard<std::mutex> lk(build_mutex_);
       if (i >= (size_t)REMOTE_PLAYER_MAX || !remote_build_[i].arena) continue;
       if (packet.size() > 5 && packet.data()[5] == 1) channel = 2;   // the live feed: its own reliable channel
+    }
+    if (mid == NP_MSG_MU_GECKO) {
+      // Only to a peer whose build said it takes them; reliable, on the control channel.
+      std::lock_guard<std::mutex> lk(build_mutex_);
+      if (i >= (size_t)REMOTE_PLAYER_MAX || !remote_build_[i].gecko) continue;
     }
     ENetPacket* epac = enet_packet_create(packet.data(), packet.size(), flags);
     enet_peer_send(server_[i], channel, epac);
