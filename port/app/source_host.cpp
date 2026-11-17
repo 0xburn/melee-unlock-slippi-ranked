@@ -1971,7 +1971,14 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
           }
           return true;
         }
-        if (c == CMD_CSS_FRAME && n == 0) { reply.push_back(walter_egg::css_frame()); return true; }
+        if (c == CMD_CSS_FRAME && n == 0) { walter_egg::set_camera(nullptr); reply.push_back(walter_egg::css_frame()); return true; }
+        if (c == CMD_CSS_FRAME && n == 13 * sizeof(float)) {   // with the menu camera (shim mu_menu_camera): the C-stick's turn
+          float camera[13];
+          std::memcpy(camera, p, sizeof camera);
+          walter_egg::set_camera(camera);
+          reply.push_back(walter_egg::css_frame());
+          return true;
+        }
         if (c == CMD_CSS_FRAME && n == 5) {   // with five bytes: a hand moved (the port, then x and y in tenths)
           walter_egg::set_hand(p[0], (int16_t)(p[1] << 8 | p[2]), (int16_t)(p[3] << 8 | p[4]));
           return true;

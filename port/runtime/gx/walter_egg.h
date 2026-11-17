@@ -2,10 +2,12 @@
 // B A or A B) sends a dog's face bouncing around the picture like the old DVD screensaver: B A is
 // Bailey, A B is Walter. Each code sends one more, from any port, up to 200 at once (then the oldest
 // leaves for each new one). Most launches never meet a corner; about one in five is aimed so that after
-// a few bounces it lands exactly in one, which gets a flash, a spin and a menu sound. After ten
-// seconds out a face starts to turn as it flies. Leaving the character select sends them all away. A
-// hand that presses A on one takes hold: moving it stretches the face from that spot, and letting go
-// lets it swing back.
+// a few bounces it lands exactly in one, which gets a flash, a burst of spin and a menu sound. Each
+// face spins like a disc: freely in the air, and walls grip it toward rolling along them. Leaving the
+// character select sends them all away. A hand that presses A on one takes hold: moving it stretches
+// the face from that spot, and letting go slings it, spinning by where it was held. Tilting the
+// C-stick turns the character select's camera; the faces then turn with it, as cards at their own
+// depths in its 3D scene.
 //
 // Local drawing only: the detector reads the pads and changes nothing in them, nothing is sent to
 // an opponent, and nothing is drawn in a match or a replay. The pure parts (the code detector and the
@@ -28,6 +30,11 @@ uint8_t css_frame();
 // Game thread: a character select hand moved (the shim's hand command; any character select, any
 // port), in tenths of the game's own units. A hand on him with A held takes hold and pulls.
 void set_hand(int port, int16_t x10, int16_t y10);
+// Game thread, every character select frame: the menu camera the C-stick turns (shim mu_menu_camera):
+// the eye before the turn, the eye after, what it looks at, its up (three floats each) and its
+// vertical field of view in degrees; nullptr when the frame came without one. Turned, the faces turn
+// with the picture as cards in its 3D scene; untilted they are drawn flat, as always.
+void set_camera(const float* camera13);
 // He is out and a character select is on screen.
 bool active();
 struct Frame { float game_x0 = 0, game_y0 = 0, game_x1 = 0, game_y1 = 0; double time = 0; };

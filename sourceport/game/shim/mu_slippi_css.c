@@ -26,6 +26,7 @@
 #include <melee/lb/lbspdisplay.h>
 #include <melee/mn/types.h>
 #include <sysdolphin/baselib/archive.h>
+#include <sysdolphin/baselib/cobj.h>
 #include <sysdolphin/baselib/controller.h>
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/gobjproc.h>
@@ -185,14 +186,56 @@ static u32 arena_pairing(int* test_room)
 }
 
 #define CMD_CSS_FRAME 0xEC
+/* The menu camera (mn_8022BA1C, every menu frame): the eye before the C-stick turns it, then the
+ * camera it turned to. The character select frame hands both to the host, which turns the easter
+ * egg's faces with the picture. Reads only: the camera is not changed. */
+static struct {
+    int ok;                /* a camera after the turn this frame (and its eye before it) */
+    float cam[13];         /* eye before, eye, interest, up, vertical field of view (degrees) */
+} mu_menu_cam;
+
+void mu_menu_camera(HSD_CObj* cobj, int tilted)
+{
+    Vec3 v;
+    if (cobj == NULL) {
+        return;
+    }
+    if (!tilted) {
+        HSD_CObjGetEyePosition(cobj, &v);
+        mu_menu_cam.cam[0] = v.x;
+        mu_menu_cam.cam[1] = v.y;
+        mu_menu_cam.cam[2] = v.z;
+        mu_menu_cam.ok = 0;
+        return;
+    }
+    HSD_CObjGetEyePosition(cobj, &v);
+    mu_menu_cam.cam[3] = v.x;
+    mu_menu_cam.cam[4] = v.y;
+    mu_menu_cam.cam[5] = v.z;
+    HSD_CObjGetInterest(cobj, &v);
+    mu_menu_cam.cam[6] = v.x;
+    mu_menu_cam.cam[7] = v.y;
+    mu_menu_cam.cam[8] = v.z;
+    HSD_CObjGetUpVector(cobj, &v);   /* 0, 1, 0 when the camera has none */
+    mu_menu_cam.cam[9] = v.x;
+    mu_menu_cam.cam[10] = v.y;
+    mu_menu_cam.cam[11] = v.z;
+    mu_menu_cam.cam[12] = HSD_CObjGetFov(cobj);   /* 0: not a perspective camera */
+    mu_menu_cam.ok = mu_menu_cam.cam[12] > 0.0f;
+}
+
 /* mnCharSel_Scene_OnFrame, every mode's character select, offline and online: tells the host a
  * character select is on screen (its easter egg lives only there, drawn by the host, never in a
- * match), and plays the menu sound the host asks for. Local only: nothing in the match changes. */
+ * match), with the menu camera when there is one, and plays the menu sound the host asks for. Local
+ * only: nothing in the match changes. */
 void mu_css_frame(void)
 {
     static unsigned char reply[4096];   /* the host's minimum response capacity */
     unsigned int got = 0;
-    if (mu_online_abi_command(CMD_CSS_FRAME, NULL, 0, reply, sizeof reply, &got) == 0 && got >= 1 && reply[0] != 0) {
+    const int with_camera = mu_menu_cam.ok;
+    if (mu_online_abi_command(CMD_CSS_FRAME, with_camera ? (const unsigned char*) mu_menu_cam.cam : NULL,
+                              with_camera ? (unsigned int) sizeof mu_menu_cam.cam : 0, reply, sizeof reply, &got) == 0 &&
+        got >= 1 && reply[0] != 0) {
         lbAudioAx_80024030(reply[0]);
     }
 }

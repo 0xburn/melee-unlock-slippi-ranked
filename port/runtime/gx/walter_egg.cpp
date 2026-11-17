@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,16 @@ std::atomic<uint32_t> g_hand[4];            // each port's character select hand
 std::atomic<uint32_t> g_hand_at[4];         // the retrace it was last reported (0: not on this visit)
 std::atomic<bool> g_a_held[4];              // each port's A button
 uint32_t g_codes_this_visit = 0;
+
+// The character select's camera (the game's menu camera, mn_8022BA1C): the eye before the C-stick
+// turned it, the eye it turned to, what it looks at, its up and its vertical field of view.
+struct Camera {
+  bool ok = false;
+  float eye0[3] = {0, 0, 0}, eye[3] = {0, 0, 0}, interest[3] = {0, 0, 0}, up[3] = {0, 1, 0};
+  float fovy = 0;
+};
+std::mutex g_camera_mutex;
+Camera g_camera;
 
 bool css_visible_now() {
   const uint32_t last = g_css_retrace.load(std::memory_order_relaxed);
@@ -55,7 +66,17 @@ struct Grab {
 
 constexpr double kStepsPerSecond = 60.0;   // a face's own pace along a path
 
-// One face out. Each one flies, bounces, turns and can be held on its own.
+// Its spin: a disc of the face's radius. In the air the spin keeps going and fades only slowly; a
+// wall's friction pulls it toward rolling along that wall (the speed it slides along the wall over its
+// radius), the way a ball skimming a wall picks up spin and a fast spinner slows; a corner adds a
+// burst; a slingshot spins it by where it was held. Nothing ever turns it back upright.
+constexpr double kSpinFade = 30.0;    // seconds for a spin to fade to a third in the air
+constexpr double kWallGrip = 0.45;    // how much of the way to rolling one wall touch takes it
+constexpr double kMaxSpin = 25.0;     // radians a second, about four turns (faster reads as backwards at 60 fps)
+constexpr double kCornerSpin = 9.0;   // a corner's burst, radians a second
+constexpr double kSlingSpin = 12.0;   // a full slingshot held at the rim, radians a second
+
+// One face out. Each one flies, bounces, spins and can be held on its own.
 struct Face {
   int which = 0;              // 0 Bailey, 1 Walter
   Launch path;
@@ -64,22 +85,20 @@ struct Face {
   long long last_step = 0;
   int bounces = 0;            // wall meetings so far (the outline's colour)
   double squash_x_at = -1, squash_y_at = -1;
-  double corner_at = -1;      // the celebration's start
-  long long corner_step = 0;  // and the step it holds for it
-  double out_at = 0;          // when it came out (it starts to turn ten seconds later)
+  double pop_at = -1;         // a corner: when it popped
   double held = 0;            // seconds a hand has held it so far: its own clock stands still meanwhile
   double slung_at = -1;       // a slingshot: when and how hard (0..1)
   float slung_power = 0;
-  double turn = 0;            // how far it has turned from upright (radians) and how fast it is turning (a
-  double spin = 0;            // second): it starts upright and still; walls nudge it, a slingshot sets it going,
-                              // it winds down, and it settles upright again
+  double turn = 0;            // radians from upright, and radians a second (clockwise on screen)
+  double spin = 0;
   bool slung = false;         // tests: a pinned face flies once it has been slung
+  float depth = 0;            // the 3D view: 0 at the hands' depth .. 1 the nearest to the camera
+  float rock_phase = 0;       // and its own rocking there
   Grab grab;
   Rng rng;
-  // This frame: its own clock, size and where it is drawn.
+  // This frame: its own clock, size and where it is drawn (in the untilted picture).
   double now = 0;
   float size = 0, x = 0, y = 0, cx = 0, cy = 0, scale_x = 1, scale_y = 1, angle = 0;
-  bool celebrating = false;
 };
 
 // As many as the codes ask for, up to this many at once: then the oldest one leaves for each new one,
@@ -93,6 +112,7 @@ double g_last_frame = 0;
 double g_flash_at = -10, g_sound_at = -10;   // the last corner's flash and sound (frame time)
 uint64_t g_serial = 0;
 bool g_full_logged = false;
+bool g_tilt_logged = false;
 
 constexpr int kUpscale = 4;   // the texture is the 128 px picture enlarged smoothly, so it never shows its pixels
 constexpr int kGlowPad = 48;  // the outline's texture: the face's shape with this much room around it (texture pixels)
@@ -253,20 +273,34 @@ bool chatty() { return g_faces.size() <= 4; }
 // A face's pace along a path: about a sixth of the picture's height a second, the screensaver's.
 double step_length(float h) { return std::max(1.0, (double)h / 0.8 / 60.0 * 0.22); }
 
+// Its velocity along a path at step t (pixels a step, screen directions: x right, y down).
+double velocity_x(const Launch& l, double t) {
+  const long long k = wall_index(l.x0 + l.vx * t, l.w);
+  const double v = (k % 2 == 0) ? l.vx : -l.vx;
+  return l.mirror_x ? -v : v;
+}
+double velocity_y(const Launch& l, double t) {
+  const long long k = wall_index(l.y0 + l.vy * t, l.h);
+  const double v = (k % 2 == 0) ? l.vy : -l.vy;
+  return l.mirror_y ? -v : v;
+}
+
 void new_launch(Face& f, float w, float h, double from_x, double from_y) {
   const int force = aimed_override();
   const bool aimed = force >= 0 ? force == 1 : f.rng.next() % 5 == 0;
   f.path = launch(w, h, step_length(h), aimed, f.rng, from_x, from_y);
   f.box_w = w; f.box_h = h;
-  f.t = 0; f.last_step = 0; f.corner_at = -1;
+  f.t = 0; f.last_step = 0;
   if (chatty())
     host::log("walter egg: launch %s%s", f.path.corner_step >= 0 ? "aimed at a corner, step " : "unaimed",
               f.path.corner_step >= 0 ? std::to_string(f.path.corner_step).c_str() : "");
 }
 
 // Let go of a pull: the face flies off the other way, as from a slingshot, the faster the further it
-// was pulled (power 0..1), and eases back to its own pace as it bounces around.
-void sling(Face& f, float w, float h, double now, double from_x, double from_y, float dir_x, float dir_y, float power) {
+// was pulled (power 0..1), and eases back to its own pace as it bounces around; spin_add is the spin
+// the pull's off-centre hold gives it.
+void sling(Face& f, float w, float h, double now, double from_x, double from_y, float dir_x, float dir_y, float power,
+           double spin_add) {
   const double length = step_length(h);
   Launch l;
   l.w = w > 1 ? w : 1; l.h = h > 1 ? h : 1;
@@ -277,10 +311,10 @@ void sling(Face& f, float w, float h, double now, double from_x, double from_y, 
   l.y0 = l.mirror_y ? l.h - from_y : from_y;
   l.corner_step = -1;
   f.path = l; f.box_w = w; f.box_h = h;
-  f.t = 0; f.last_step = 0; f.corner_at = -1;
+  f.t = 0; f.last_step = 0;
   f.slung_at = now; f.slung_power = power; f.slung = true;
-  f.spin += (dir_x >= 0 ? 1.0 : -1.0) * (2.0 + 4.0 * power);   // and it sets it spinning
-  host::log("walter egg: slung %.2f %.2f, power %.2f", dir_x, dir_y, power);
+  f.spin = std::clamp(f.spin + spin_add, -kMaxSpin, kMaxSpin);
+  host::log("walter egg: slung %.2f %.2f, power %.2f, spin %.1f", dir_x, dir_y, power, f.spin);
 }
 
 // A corner: the character select's own select sound and a flash over the picture. With many faces
@@ -292,7 +326,7 @@ void corner_cheer(double time) {
 
 struct Hands {
   const Frame* fr = nullptr;
-  // Each hand's fingertip on screen.
+  // Each hand's fingertip on screen (the untilted picture).
   bool at(int port, ImVec2* out) const {
     if (!g_hand_at[port].load()) return false;
     const float unit = (fr->game_y1 - fr->game_y0) / kUnitsTall;
@@ -303,6 +337,67 @@ struct Hands {
     return true;
   }
 };
+
+// ---- the 3D view: the C-stick turns the character select's camera (up to 30 degrees around what it
+// looks at). The faces are flat cards in that scene, each at its own depth between the hands and the
+// camera: untilted they are exactly where the flat drawing puts them; turned, they turn with the
+// picture, in perspective, spread apart by their depths, and rock in 3D the further it is turned.
+struct V3 { double x = 0, y = 0, z = 0; };
+V3 operator+(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+V3 operator-(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+V3 operator*(V3 a, double k) { return {a.x * k, a.y * k, a.z * k}; }
+double dot(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+V3 cross(V3 a, V3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+V3 unit(V3 a) { const double l = std::sqrt(dot(a, a)); return l > 1e-12 ? a * (1.0 / l) : V3{}; }
+V3 rotate(V3 v, V3 axis, double angle) {   // Rodrigues, axis of length 1
+  const double c = std::cos(angle), s = std::sin(angle);
+  return v * c + cross(axis, v) * s + axis * (dot(axis, v) * (1.0 - c));
+}
+
+struct View3 {
+  bool tilted = false;
+  double turn = 0;                   // 0 untilted .. 1 a full 30 degree turn
+  V3 eye0, right0, up0, ahead0;      // the camera before the C-stick turned it
+  V3 eye1, right1, up1, ahead1;      // and after
+  double focal = 1;                  // pixels at depth 1
+  double hands_depth = 1;            // the hands' plane, from eye0 along ahead0
+  float cx = 0, cy = 0;              // the picture's middle
+};
+
+View3 view3(const Frame& fr) {
+  View3 v;
+  Camera c;
+  { std::lock_guard<std::mutex> lock(g_camera_mutex); c = g_camera; }
+  if (!c.ok) return v;
+  const V3 e0{c.eye0[0], c.eye0[1], c.eye0[2]}, e1{c.eye[0], c.eye[1], c.eye[2]};
+  const V3 at{c.interest[0], c.interest[1], c.interest[2]}, up{c.up[0], c.up[1], c.up[2]};
+  v.ahead0 = unit(at - e0); v.ahead1 = unit(at - e1);
+  v.right0 = unit(cross(v.ahead0, up)); v.right1 = unit(cross(v.ahead1, up));
+  v.up0 = cross(v.right0, v.ahead0); v.up1 = cross(v.right1, v.ahead1);
+  if (dot(v.right0, v.right0) < 0.5 || dot(v.right1, v.right1) < 0.5) return v;
+  const double angle = std::acos(std::clamp(dot(v.ahead0, v.ahead1), -1.0, 1.0));
+  if (angle < 0.2 * 3.14159265358979 / 180.0) return v;   // the C-stick is in its dead zone: flat, as always
+  const float gh = fr.game_y1 - fr.game_y0;
+  const double half = std::tan(std::clamp((double)c.fovy, 5.0, 150.0) * 3.14159265358979 / 360.0);
+  v.focal = gh * 0.5 / half;
+  v.hands_depth = kUnitsTall * 0.5 / half;
+  v.eye0 = e0; v.eye1 = e1;
+  v.cx = (fr.game_x0 + fr.game_x1) * 0.5f; v.cy = (fr.game_y0 + fr.game_y1) * 0.5f;
+  v.turn = std::min(1.0, angle / (30.0 * 3.14159265358979 / 180.0));
+  v.tilted = true;
+  return v;
+}
+
+// A point of the untilted picture at this depth along its own ray from the untilted eye.
+V3 to_world(const View3& v, float sx, float sy, double depth) {
+  return v.eye0 + (v.ahead0 + v.right0 * ((sx - v.cx) / v.focal) - v.up0 * ((sy - v.cy) / v.focal)) * depth;
+}
+ImVec2 to_screen(const View3& v, V3 w) {
+  const V3 d = w - v.eye1;
+  const double z = std::max(1e-3, dot(d, v.ahead1));
+  return ImVec2((float)(v.cx + v.focal * dot(d, v.right1) / z), (float)(v.cy - v.focal * dot(d, v.up1) / z));
+}
+double face_depth(const View3& v, const Face& f) { return v.hands_depth * (1.0 - 0.22 * f.depth); }
 
 // A new face of this kind; at the limit, the oldest one nobody holds leaves to make room.
 void add_face(int which, const Frame& fr, const Hands& hands) {
@@ -323,7 +418,10 @@ void add_face(int which, const Frame& fr, const Hands& hands) {
   seed = (seed ^ (seed >> 27)) * 0x94D049BB133111EBull;
   f.rng.s = (seed ^ (seed >> 31)) | 1;
   f.size = std::round(gh * kFaceSize[f.which]);
-  f.out_at = fr.time;
+  // It comes out already turning a little, either way.
+  f.spin = ((f.rng.next() & 1) ? 1.0 : -1.0) * (1.0 + 1.5 * f.rng.unit());
+  f.depth = (float)f.rng.unit();
+  f.rock_phase = (float)(f.rng.unit() * 6.283185307179586);
   const float w = gw - f.size, h = gh - f.size;
   ImVec2 hand;
   if (pinned() && hands.at(0, &hand))
@@ -333,7 +431,7 @@ void add_face(int which, const Frame& fr, const Hands& hands) {
   g_faces.push_back(f);
 }
 
-// One face's travel this frame (its clock, path, walls, corners and turn), then where it is drawn.
+// One face's travel this frame (its clock, path, walls, corners and spin), then where it is drawn.
 void move(Face& f, const Frame& fr, double frame_time) {
   const float gh = fr.game_y1 - fr.game_y0, gw = fr.game_x1 - fr.game_x0;
   f.size = std::round(gh * kFaceSize[f.which]);
@@ -347,14 +445,14 @@ void move(Face& f, const Frame& fr, double frame_time) {
     const double px = f.path.x(f.t) / std::max(1.0, f.path.w) * w, py = f.path.y(f.t) / std::max(1.0, f.path.h) * h;
     new_launch(f, w, h, std::clamp(px, 0.0, (double)w), std::clamp(py, 0.0, (double)h));
   }
-  // A celebration over: on from the corner, a new path.
-  if (f.corner_at >= 0 && now - f.corner_at >= 0.75)
-    new_launch(f, w, h, f.path.x((double)f.corner_step), f.path.y((double)f.corner_step));
-  // It moves unless a hand holds it or it is celebrating in a corner; faster just after a slingshot.
+  // It moves unless a hand holds it; faster just after a slingshot.
   double pace = 1.0;
   if (f.slung_at >= 0) pace += 9.0 * f.slung_power * std::exp(-(now - f.slung_at) / 1.1);
-  const bool still = (pinned() && !f.slung) || f.grab.port >= 0 || f.corner_at >= 0;
+  const bool still = (pinned() && !f.slung) || f.grab.port >= 0;
   if (!still) f.t += frame_time * kStepsPerSecond * pace;
+  const double radius = std::max(1.0, 0.5 * (double)size);
+  const double per_second = kStepsPerSecond * pace;
+  const auto grip = [&](double rolling) { f.spin += kWallGrip * (rolling - f.spin); };
   const long long step = (long long)std::floor(f.t);
   for (long long s = f.last_step + 1; s <= step; ++s) {
     f.last_step = s;
@@ -363,51 +461,46 @@ void move(Face& f, const Frame& fr, double frame_time) {
     ++f.bounces;
     if (hit & 1) f.squash_x_at = now;
     if (hit & 2) f.squash_y_at = now;
-    // A wall turns some of its travel into spin, as it does to a ball: which way depends on the wall
-    // and on which way it was sliding along it, how much on how fast it came in. Not in its first ten
-    // seconds out.
-    if (const double gain = std::clamp((now - f.out_at - 10.0) / 2.0, 0.0, 1.0); gain > 0) {
-      const double x0 = f.path.x((double)s - 1.0), y0 = f.path.y((double)s - 1.0), x1 = f.path.x((double)s), y1 = f.path.y((double)s);
-      double kick = 0;
-      if (hit & 1) kick -= (y1 >= y0 ? 1.0 : -1.0) * (x1 > f.path.w * 0.5 ? 1.0 : -1.0);
-      if (hit & 2) kick += (x1 >= x0 ? 1.0 : -1.0) * (y1 > f.path.h * 0.5 ? 1.0 : -1.0);
-      f.spin = f.spin * 0.5 + kick * 1.4 * std::min(pace, 2.0) * gain;
-    }
+    // How fast it came in along each wall it met (pixels a second), turned into spin by the wall's grip:
+    // rolling along a side wall is its speed down that wall over its radius, along the top or bottom its
+    // speed across.
+    const double vx = velocity_x(f.path, (double)s - 1.0) * per_second, vy = velocity_y(f.path, (double)s - 1.0) * per_second;
+    if (hit & 1) grip((f.path.x((double)s) > f.path.w * 0.5 ? -vy : vy) / radius);
+    if (hit & 2) grip((f.path.y((double)s) > f.path.h * 0.5 ? vx : -vx) / radius);
     if (hit == 3) {
-      // A corner: it holds it and spins.
-      f.corner_at = now; f.corner_step = s; f.t = (double)s;
+      // A corner: a burst of spin, a pop, the select sound and a flash, and straight on out of it.
+      f.spin += (f.spin >= 0 ? 1.0 : -1.0) * kCornerSpin;
+      f.pop_at = now;
       corner_cheer(fr.time);
       shot("corner", 8);
       if (chatty()) host::log("walter egg: corner at step %lld (%s)", s, f.path.corner_step == s ? "aimed" : "unaimed");
+      new_launch(f, w, h, f.path.x((double)s), f.path.y((double)s));
       break;
     }
   }
-  f.celebrating = f.corner_at >= 0;
-  if (!f.celebrating && f.path.corner_step < 0 && !f.slung && step > 12000)
+  if (f.path.corner_step < 0 && !f.slung && f.t > 12000.0)
     new_launch(f, w, h, f.path.x(f.t), f.path.y(f.t));   // past the checked stretch: a new path
-  const double ct = f.celebrating ? (double)f.corner_step : f.t;
-  f.x = fr.game_x0 + (float)f.path.x(ct);
-  f.y = fr.game_y0 + (float)f.path.y(ct);
+  f.x = fr.game_x0 + (float)f.path.x(f.t);
+  f.y = fr.game_y0 + (float)f.path.y(f.t);
 
-  // Squash on a wall (a short ease back), wobble while moving, a whole turn in a corner.
+  // Squash on a wall (a short ease back) and a pop in a corner.
   auto squash = [&](double at) { const double a = now - at; return a >= 0 && a < 0.18 ? (float)(1.0 - a / 0.18) : 0.0f; };
   const float sx_ = squash(f.squash_x_at), sy_ = squash(f.squash_y_at);
-  f.scale_x = 1.0f - 0.22f * sx_ + 0.12f * sy_;
-  f.scale_y = 1.0f - 0.22f * sy_ + 0.12f * sx_;
-  // Its spin coasts and winds down (never faster than a turn a second), and once it is slow it eases
-  // back upright.
+  float pop = 1.0f;
+  if (const double a = now - f.pop_at; f.pop_at >= 0 && a >= 0 && a < 0.35) pop += 0.22f * (float)std::sin(3.14159265358979 * a / 0.35);
+  f.scale_x = (1.0f - 0.22f * sx_ + 0.12f * sy_) * pop;
+  f.scale_y = (1.0f - 0.22f * sy_ + 0.12f * sx_) * pop;
+  // The spin coasts, fading slowly; a held face does not turn.
   if (f.grab.port < 0) {
-    f.spin = std::clamp(f.spin, -6.0, 6.0) * std::exp(-frame_time / 3.0);
-    f.turn = std::remainder(f.turn + f.spin * frame_time, 6.283185307179586);   // -pi..pi: upright is 0
-    if (std::abs(f.spin) < 1.2) f.turn *= std::exp(-frame_time / 0.8);
+    f.spin = std::clamp(f.spin, -kMaxSpin, kMaxSpin) * std::exp(-frame_time / kSpinFade);
+    f.turn = std::remainder(f.turn + f.spin * frame_time, 6.283185307179586);
   }
-  f.angle = (float)(0.09 * std::sin(now * 7.0) + f.turn);
-  if (f.celebrating) f.angle += (float)((now - f.corner_at) / 0.75 * 6.2831853);
+  f.angle = (float)f.turn;
   f.cx = f.x + size * 0.5f;
   f.cy = f.y + size * 0.5f;
 }
 
-// A held face follows its hand; let go, it is slung.
+// A held face follows its hand; let go, it is slung, spinning by where it was held.
 void follow_hand(Face& f, const Frame& fr, const Hands& hands) {
   Grab& g = f.grab;
   if (g.port < 0) return;
@@ -418,8 +511,16 @@ void follow_hand(Face& f, const Frame& fr, const Hands& hands) {
     g.port = -1;
     const float reach = std::sqrt(g.pull_x * g.pull_x + g.pull_y * g.pull_y);
     const float w = (fr.game_x1 - fr.game_x0) - f.size, h = (fr.game_y1 - fr.game_y0) - f.size;
-    if (reach > f.size * 0.2f)   // a real pull: the slingshot
-      sling(f, w, h, f.now, f.x - fr.game_x0, f.y - fr.game_y0, -g.pull_x / reach, -g.pull_y / reach, std::min(1.0f, reach / (f.size * 1.6f)));
+    if (reach > f.size * 0.2f) {   // a real pull: the slingshot
+      const float dir_x = -g.pull_x / reach, dir_y = -g.pull_y / reach, power = std::min(1.0f, reach / (f.size * 1.6f));
+      // The pull acts at the held spot: off the line through the middle it turns the face (clockwise
+      // when the held spot is pulled clockwise around the middle).
+      const float c = std::cos(f.angle), s = std::sin(f.angle);
+      const float lu = (g.u - 0.5f) * f.size, lv = (g.v - 0.5f) * f.size;
+      const float rx = lu * c - lv * s, ry = lu * s + lv * c;
+      const double lever = (rx * dir_y - ry * dir_x) / std::max(1.0f, 0.5f * f.size);
+      sling(f, w, h, f.now, f.x - fr.game_x0, f.y - fr.game_y0, dir_x, dir_y, power, kSlingSpin * power * lever);
+    }
   } else {
     float px = hand.x - g.hand_x0, py = hand.y - g.hand_y0;
     const float reach = std::sqrt(px * px + py * py), most = f.size * 1.6f;
@@ -428,7 +529,7 @@ void follow_hand(Face& f, const Frame& fr, const Hands& hands) {
   }
 }
 
-void draw_face(ImDrawList* dl, Face& f, const Frame& fr, const Pictures& pic) {
+void draw_face(ImDrawList* dl, Face& f, const Frame& fr, const Pictures& pic, const View3& v) {
   Grab& g = f.grab;
   const float size = f.size, scale_x = f.scale_x, scale_y = f.scale_y, cx = f.cx, cy = f.cy;
   const float c = std::cos(f.angle), s = std::sin(f.angle);
@@ -451,11 +552,11 @@ void draw_face(ImDrawList* dl, Face& f, const Frame& fr, const Pictures& pic) {
   // Its square as a grid, so a pull stretches it from the spot the hand holds. What is behind that
   // spot (against the pull) follows less the further back it is, so it stretches; what is ahead of it
   // is pushed along whole. Every point keeps its order along the pull, so it never folds over itself.
-  const auto place = [&](float u, float v) {
-    const float dx = (u - 0.5f) * size * scale_x, dy = (v - 0.5f) * size * scale_y;
+  const auto place = [&](float u, float vv) {
+    const float dx = (u - 0.5f) * size * scale_x, dy = (vv - 0.5f) * size * scale_y;
     ImVec2 p(cx + dx * c - dy * s, cy + dx * s + dy * c);
     if (pulled) {
-      const float ox = (u - g.u) * size * scale_x, oy = (v - g.v) * size * scale_y;   // from the held spot, on screen
+      const float ox = (u - g.u) * size * scale_x, oy = (vv - g.v) * size * scale_y;   // from the held spot, on screen
       const float px = ox * c - oy * s, py = ox * s + oy * c;
       const float along = px * toward_x + py * toward_y, across = -px * toward_y + py * toward_x;
       const float back = along < 0 ? along : 0.0f;
@@ -464,15 +565,29 @@ void draw_face(ImDrawList* dl, Face& f, const Frame& fr, const Pictures& pic) {
     }
     return p;
   };
-  // A texture over its square from lo to hi (the outline's reaches a little past it), as a grid when pulled.
+  // Turned by the C-stick: the card at its depth, rocking about its own across and up axes the
+  // further the camera is turned, seen by the turned camera.
+  const double depth = v.tilted ? face_depth(v, f) : 1.0;
+  const V3 middle = v.tilted ? to_world(v, cx, cy, depth) : V3{};
+  const double rock = v.tilted ? v.turn * 0.55 : 0.0;
+  const double rock_a = rock * std::sin(f.now * 1.7 + f.rock_phase), rock_b = rock * std::sin(f.now * 1.3 + 2.1 * f.rock_phase);
+  const auto point = [&](float u, float vv) {
+    const ImVec2 p = place(u, vv);
+    if (!v.tilted) return p;
+    V3 offset = to_world(v, p.x, p.y, depth) - middle;
+    offset = rotate(rotate(offset, v.up0, rock_a), v.right0, rock_b);
+    return to_screen(v, middle + offset);
+  };
+  // A texture over its square from lo to hi (the outline's reaches a little past it), as a grid when
+  // pulled or turned (so the picture keeps its shape in perspective).
   const auto mesh = [&](ImTextureData* tex, float lo, float hi, ImU32 colour) {
-    const int cells = pulled ? 16 : 1;
+    const int cells = pulled ? 16 : v.tilted ? 4 : 1;
     for (int j = 0; j < cells; ++j)
       for (int i = 0; i < cells; ++i) {
         const float a0 = (float)i / (float)cells, a1 = (float)(i + 1) / (float)cells;
         const float b0 = (float)j / (float)cells, b1 = (float)(j + 1) / (float)cells;
         const float u0 = lo + (hi - lo) * a0, u1 = lo + (hi - lo) * a1, v0 = lo + (hi - lo) * b0, v1 = lo + (hi - lo) * b1;
-        dl->AddImageQuad(tex->GetTexRef(), place(u0, v0), place(u1, v0), place(u1, v1), place(u0, v1),
+        dl->AddImageQuad(tex->GetTexRef(), point(u0, v0), point(u1, v0), point(u1, v1), point(u0, v1),
                          ImVec2(a0, b0), ImVec2(a1, b0), ImVec2(a1, b1), ImVec2(a0, b1), colour);
       }
   };
@@ -518,6 +633,21 @@ void set_hand(int port, int16_t x10, int16_t y10) {
   g_hand_at[port].store(std::max<uint32_t>(1, host::retrace_count()));
 }
 
+void set_camera(const float* camera) {
+  std::lock_guard<std::mutex> lock(g_camera_mutex);
+  if (!camera) { g_camera.ok = false; return; }
+  for (int i = 0; i < 3; ++i) {
+    g_camera.eye0[i] = camera[i];
+    g_camera.eye[i] = camera[3 + i];
+    g_camera.interest[i] = camera[6 + i];
+    g_camera.up[i] = camera[9 + i];
+  }
+  g_camera.fovy = camera[12];
+  bool finite = true;
+  for (int i = 0; i < 13; ++i) finite = finite && std::isfinite(camera[i]);
+  g_camera.ok = finite && camera[12] > 1.0f && camera[12] < 170.0f;
+}
+
 uint8_t css_frame() {
   g_css_retrace.store(std::max<uint32_t>(1, host::retrace_count()), std::memory_order_relaxed);
   return g_sound.exchange(0);
@@ -553,17 +683,23 @@ void draw(const Frame& fr) {
   g_last_frame = fr.time;
   if (g_faces.empty()) return;
 
-  bool celebrating = false;
-  for (Face& f : g_faces) {
-    move(f, fr, frame_time);
-    celebrating = celebrating || f.celebrating;
-  }
+  for (Face& f : g_faces) move(f, fr, frame_time);
   {
     static double last_shot = -10;
-    if (fr.time - last_shot > 2.0 && !celebrating) { last_shot = fr.time; shot("flying", 1); }
+    if (fr.time - last_shot > 2.0) { last_shot = fr.time; shot("flying", 1); }
   }
+  // The C-stick's turn of the character select's camera, and the order the cards are drawn in: the
+  // furthest first (the same order turned or not, so nothing jumps when the stick moves).
+  const View3 view = view3(fr);
+  if (view.tilted != g_tilt_logged) {
+    g_tilt_logged = view.tilted;
+    host::log("walter egg: %s", view.tilted ? "turned with the camera (C-stick)" : "flat again");
+  }
+  std::vector<size_t> order(g_faces.size());
+  std::iota(order.begin(), order.end(), size_t{0});
+  std::stable_sort(order.begin(), order.end(), [](size_t a, size_t b) { return g_faces[a].depth < g_faces[b].depth; });
 
-  // A hand takes hold with A while its fingertip is on a face (the one on top), pulls as it moves,
+  // A hand takes hold with A while its fingertip is on a face (the one in front), pulls as it moves,
   // and lets go with A.
   for (int p = 0; p < 4; ++p) {
     const bool a = g_a_held[p].load();
@@ -572,9 +708,9 @@ void draw(const Frame& fr) {
     ImVec2 hand;
     if (!pressed || !hands.at(p, &hand)) continue;
     if (std::any_of(g_faces.begin(), g_faces.end(), [p](const Face& f) { return f.grab.port == p; })) continue;
-    for (size_t i = g_faces.size(); i-- > 0;) {
-      Face& f = g_faces[i];
-      if (f.grab.port >= 0 || f.celebrating) continue;
+    for (size_t k = order.size(); k-- > 0;) {
+      Face& f = g_faces[order[k]];
+      if (f.grab.port >= 0) continue;
       const float c = std::cos(f.angle), s = std::sin(f.angle);
       const float dx = hand.x - f.cx, dy = hand.y - f.cy;
       const float lx = (dx * c + dy * s) / (f.size * f.scale_x), ly = (-dx * s + dy * c) / (f.size * f.scale_y);   // its own square, -0.5..0.5
@@ -582,6 +718,7 @@ void draw(const Frame& fr) {
       Grab& g = f.grab;
       g.port = p; g.u = lx + 0.5f; g.v = ly + 0.5f;
       g.hand_x0 = hand.x; g.hand_y0 = hand.y; g.pull_x = g.pull_y = 0; g.released_at = -1;
+      f.spin = 0;   // a hand on it stops its spin
       host::log("walter egg: port %d took hold at %.2f %.2f", p + 1, g.u, g.v);
       break;
     }
@@ -595,9 +732,10 @@ void draw(const Frame& fr) {
     dl->AddRectFilled(ImVec2(fr.game_x0, fr.game_y0), ImVec2(fr.game_x1, fr.game_y1), IM_COL32(255, 255, 255, (int)(150 * a * a)));
   }
   const Pictures* pics[2] = {nullptr, nullptr};
-  for (Face& f : g_faces) {
+  for (const size_t i : order) {
+    Face& f = g_faces[i];
     if (!pics[f.which]) pics[f.which] = &pictures(f.which);
-    draw_face(dl, f, fr, *pics[f.which]);
+    draw_face(dl, f, fr, *pics[f.which], view);
   }
   if (hand_marks()) {
     for (int p = 0; p < 4; ++p) {
