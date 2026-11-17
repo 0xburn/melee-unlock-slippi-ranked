@@ -1,5 +1,6 @@
 ﻿// SPDX-License-Identifier: GPL-2.0-or-later
 #include "walter_egg.h"
+#include "settings_search.h"
 #include "test_env.h"
 #include "pc_settings.h"
 #include "settings_imgui_input.h"

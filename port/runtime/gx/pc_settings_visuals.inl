@@ -48,21 +48,12 @@ static std::string settings_lower(const char* s) {
   }
   return out;
 }
-// Every word of the query appears in the name (or the page's name).
+// Every word of the query matches the name or the page's name, forgivingly (settings_search.h:
+// parts of words, typos, abbreviations, other words for the same thing).
 static bool settings_search_matches(const char* label) {
   if (!label || label[0] == '#') return false;
-  const std::string name = settings_lower(label) + " " + settings_lower(g_search_page >= 0 && g_search_page < 8 ? kSearchPages[g_search_page] : "");
-  std::string query = settings_lower(g_search_text), word;
-  query += ' ';
-  bool any = false;
-  for (char c : query) {
-    if (c != ' ') { word += c; continue; }
-    if (word.empty()) continue;
-    if (name.find(word) == std::string::npos) return false;
-    any = true;
-    word.clear();
-  }
-  return any;
+  const std::string name = std::string(label) + " " + (g_search_page >= 0 && g_search_page < 8 ? kSearchPages[g_search_page] : "");
+  return settings_search::matches(g_search_text, name);
 }
 
 // A setting row is about to draw. Returns whether it shows: always outside a search and a closed
