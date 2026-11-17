@@ -5451,6 +5451,25 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
     lab::set_bottom_reserve(reserve);
   }
+  {   // The Lab view's fighter packs are a download of their own (host/updater.cpp lab_packs_download):
+      // fetched the first time the silhouette look finds none (the stick figure and capsule looks need
+      // none), with its progress under the timer, and used as soon as they are in place.
+    static std::atomic<bool> missing{false};
+    static bool fetching = false, tried = false;
+    static const bool wired = (lab::set_missing_packs_handler([](const std::string&) { missing = true; }), true);
+    (void)wired;
+    if (missing.load() && !tried && options.lab_view && options.look_lab_fighters == 0 &&
+        !std::getenv("MELEE_LAB_NO_DOWNLOAD")) {
+      tried = fetching = true;   // once per run: a failure says why and waits for the next start
+      host::updater::lab_packs_download(host::options.lab_dir);
+    }
+    if (fetching) {
+      const auto fetch_state = host::updater::lab_packs_state(host::options.lab_dir);
+      if (fetch_state == host::updater::ModelState::Present) { fetching = false; lab::set_notice(""); lab::packs_changed(); }
+      else if (fetch_state == host::updater::ModelState::Failed) { fetching = false; lab::set_notice(host::updater::lab_packs_message()); }
+      else lab::set_notice(host::updater::lab_packs_message());
+    }
+  }
   lab::draw(lab_on && !state.fill_window, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
   // 20XX TE's Input display is the same switch as the Controller overlay (te_pairs_linked), and the
   // overlay already shows the controllers: with it on, TE's own display is not drawn as well.
@@ -7233,7 +7252,28 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         if (settings_toggle("NVIDIA Ray Reconstruction", &options.ray_reconstruction)) changed = true;
         ImGui::EndDisabled();
         if (!rr_available)
-          settings_hint("Needs the DLSS Ray Reconstruction runtime (sl.dlss_d.dll and nvngx_dlssd.dll).");
+        {   // NVIDIA's runtime for it is a download of its own (host/updater.cpp rr_download)
+          std::string rr_dir;
+          char module[MAX_PATH]{};
+          const DWORD length = GetModuleFileNameA(nullptr, module, MAX_PATH);
+          if (length > 0 && length < MAX_PATH) rr_dir = std::filesystem::path(module).parent_path().u8string();
+          using host::updater::ModelState;
+          const ModelState rs = rr_dir.empty() ? ModelState::Present : host::updater::rr_state(rr_dir);
+          if (rs == ModelState::Downloading) {
+            settings_hint("%s", host::updater::rr_message().c_str());
+          } else if (rs == ModelState::Present && !host::updater::rr_message().empty()) {
+            settings_hint("Ray Reconstruction is installed. Restart the game to use it.");
+            restart_now_button("rr");
+          } else if (rs != ModelState::Present) {
+            char label[80];
+            std::snprintf(label, sizeof label, "Download Ray Reconstruction (%s)", host::updater::kRrSize);
+            if (ImGui::Button(label, ImVec2(0, 32))) host::updater::rr_download(rr_dir);
+            settings_hint("%s", rs == ModelState::Failed ? host::updater::rr_message().c_str()
+                                                         : "NVIDIA's denoiser for path tracing is a separate download. It goes beside the game and stays there through updates.");
+          } else {
+            settings_hint("Needs an NVIDIA RTX card and a driver with DLSS Ray Reconstruction.");
+          }
+        }
       }
     }
 #ifdef GX_DLSS5

@@ -137,11 +137,20 @@ constexpr int kCharacters = 27;
 std::mutex g_pack_mutex;
 std::shared_ptr<Pack> g_packs[kCharacters];
 std::atomic<int> g_pack_state[kCharacters];   // 0 not requested, 1 loading, 2 ready, 3 unavailable
+std::atomic<void (*)(const std::string&)> g_missing_handler{nullptr};
+std::atomic<bool> g_missing_reported{false};
+std::mutex g_notice_mutex;
+std::string g_notice;
 
 std::shared_ptr<Pack> load_pack(int id) {
   const std::string path = host::options.lab_dir + "/" + std::to_string(id) + ".lab";
   FILE* f = std::fopen(path.c_str(), "rb");
-  if (!f) { host::log("lab: no silhouettes for character %d (%s); run tools/build_lab_assets.py", id, path.c_str()); return nullptr; }
+  if (!f) {
+    host::log("lab: no silhouettes for character %d (%s)", id, path.c_str());
+    // The packs are a download of their own: ask the host for them once.
+    if (auto handler = g_missing_handler.load()) if (!g_missing_reported.exchange(true)) handler(host::options.lab_dir);
+    return nullptr;
+  }
   std::vector<uint8_t> b;
   std::fseek(f, 0, SEEK_END); long n = std::ftell(f); std::fseek(f, 0, SEEK_SET);
   b.resize(n > 0 ? (size_t)n : 0);
@@ -1387,6 +1396,16 @@ void draw(bool enabled, float width, float height) {
     }
   draw_items(dl, v, f);
   draw_hud(dl, info, f, width, area_h);
+  {
+    std::string notice;
+    { std::lock_guard<std::mutex> lock(g_notice_mutex); notice = g_notice; }
+    if (!notice.empty()) {
+      ImFont* font = ImGui::GetFont();
+      const float size = std::max(13.0f, 13.0f * area_h / 600.0f);
+      const ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, notice.c_str());
+      dl->AddText(font, size, ImVec2((width - ts.x) / 2, area_h * 0.14f), rgb(stage_color()), notice.c_str());
+    }
+  }
 }
 
 void set_style(int fighters, int stage) {
@@ -1401,6 +1420,13 @@ void set_colors(const uint32_t players[4], uint32_t background, uint32_t stage) 
 }
 
 void set_hud_font(ImFont* font) { g_hud_font = font; }
+
+void set_missing_packs_handler(void (*handler)(const std::string& lab_dir)) { g_missing_handler.store(handler); }
+void packs_changed() {
+  for (auto& state : g_pack_state) { int unavailable = 3; state.compare_exchange_strong(unavailable, 0); }
+  g_missing_reported.store(false);
+}
+void set_notice(const std::string& text) { std::lock_guard<std::mutex> lock(g_notice_mutex); g_notice = text; }
 
 void set_bottom_reserve(float pixels) { g_bottom_reserve.store(pixels, std::memory_order_relaxed); }
 

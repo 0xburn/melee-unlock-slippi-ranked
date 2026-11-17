@@ -65,6 +65,14 @@ std::string name_from_sjis(const uint8_t* bytes, size_t max);
 // display name, else the connect code), shown in place of online names. Empty strings: none.
 void set_replay_names(const std::string names[4]);
 
+// The silhouette packs are their own download: the first time a pack file is not there, `handler`
+// is called once (from a loader thread) with the pack folder, so the host can fetch them. The view
+// draws plain markers meanwhile. packs_changed() makes the view look for the files again.
+void set_missing_packs_handler(void (*handler)(const std::string& lab_dir));
+void packs_changed();
+// One small line under the timer (a download's progress); empty for none.
+void set_notice(const std::string& text);
+
 // True while a match is running and the view has a frame to show.
 bool match_in_progress();
 
