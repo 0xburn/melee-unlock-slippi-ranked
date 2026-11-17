@@ -4922,7 +4922,7 @@ static void game_mods_panel(const RenderOptions& options) {
   namespace mods = source_port::mods;
   auto view = mods::panel_view();
   if (!view.scanned && !view.scanning && !view.importing && mods::auto_detect()) mods::rescan_async();
-  ImGui::TextUnformatted("Game mods");
+  settings_section("Game mods");
   ImGui::TextWrapped("Put your mod files in the Mods folder. Recognized packs turn on once; your On/Off choices are saved. "
                      "To get, update or remove a pack, use Mods in the launcher.");
   if (ImGui::Button("Open Mods folder")) mods::open_mods_folder();
@@ -8775,7 +8775,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           ImGui::Spacing();
           ImGui::Separator();
         }
-        ImGui::TextUnformatted("Cosmetic mods");
+        settings_section("Cosmetic mods");
         bool random_stage_skins = host::cosmetics::random_stage_skins();
         if (settings_checkbox("Random installed stage skin each match", &random_stage_skins)) {
           std::string error;
