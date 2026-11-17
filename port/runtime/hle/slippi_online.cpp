@@ -1042,13 +1042,21 @@ int build_verdict(uint8_t remote_count, std::string* why) {
     }
     if (g_local_build.mod_view) {
       if (!native_direct_builds_match(true, g_local_build.fingerprint, rb.mod_view, rb.fingerprint)) {
-          const int port = i < g_netplay->LocalPlayerPort() ? i + 1 : i + 2;
+        const int port = i < g_netplay->LocalPlayerPort() ? i + 1 : i + 2;
+        // An opponent on the standard game: say it is this player's own mod disc that differs, and
+        // where it is switched off. A copy of Melee with one changed file left in Mods\Discs read as
+        // "a different mod build" to a player whose ISOs were the same (0.9.203 report).
+        if (!rb.mod_view)
+          *why = "Your mod disc " + (g_local_build.name.empty() ? std::string("") : g_local_build.name + " ") +
+                 "is on and Player " + std::to_string(port) +
+                 " plays the standard game. Turn it off in the launcher's Mods, or both use the same disc";
+        else
           *why = "Player " + std::to_string(port) + " has a different mod build. Everyone needs the same ISO and game version";
         return -1;
       }
     } else if (rb.mod_view) {
-      *why = "Your opponent is using " + (rb.name.empty() ? std::string("a mod build") : rb.name) +
-             ". Use the same build, or ask them to play Direct without it";
+      *why = "Your opponent has the mod disc " + (rb.name.empty() ? std::string("a mod build") : rb.name) +
+             " on. They can turn it off in the launcher's Mods, or you both use the same disc";
       return -1;
     }
   }
