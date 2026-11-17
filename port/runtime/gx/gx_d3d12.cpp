@@ -6137,7 +6137,9 @@ bool d3d12_usable() {
       host::log("d3d12: this Intel GPU's highest level is Direct3D 11; starting on Direct3D 11 (test)");
       return false;
     }
-    if (desc.VendorId == 0x10DE && dxgi_test_fault() < 2) return true;
+    // NVIDIA too: a GeForce from before Direct3D 12 (a GT 330M, a DirectX 10.1 part, 0.9.117 report)
+    // was taken as able, so the game stopped on "D3D12: no adapter" where Direct3D 11, or the message
+    // that the card is older than DirectX 11, was due. The check creates nothing.
     const HRESULT device = guarded_device_check(adapter.Get());
     if (SUCCEEDED(device) && desc.VendorId == 0x8086 &&
         FAILED(guarded_device_check(adapter.Get(), D3D_FEATURE_LEVEL_12_0))) {
