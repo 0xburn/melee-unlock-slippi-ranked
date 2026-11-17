@@ -35,7 +35,7 @@ inline uint32_t be32(const uint8_t* p) { return ((uint32_t)p[0] << 24) | ((uint3
 inline bool command_payload_valid(uint8_t cmd, const uint8_t* payload, uint32_t payload_len) {
   uint32_t expected = 0;
   switch (cmd) {
-    case CMD_ONLINE_INPUTS: expected = 25; break;
+    case CMD_ONLINE_INPUTS: expected = 27; break;   // Slippi 3.7.0: + the input source port and the leaving flag
     case CMD_CAPTURE_SAVESTATE: case CMD_LOAD_SAVESTATE: expected = 32; break;
     case CMD_FIND_OPPONENT: expected = 19; break;
     case CMD_SET_MATCH_SELECTIONS: expected = 9; break;

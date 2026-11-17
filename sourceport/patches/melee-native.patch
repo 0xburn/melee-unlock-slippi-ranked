@@ -119338,7 +119338,7 @@ index 2adba8159..1d2b33edb 100644
  
      gm_InitVsMode(temp_r31);
 diff --git a/src/melee/gm/gmvs.c b/src/melee/gm/gmvs.c
-index b2fc84a75..5b5454985 100644
+index b2fc84a75..fb6e6a5b3 100644
 --- a/src/melee/gm/gmvs.c
 +++ b/src/melee/gm/gmvs.c
 @@ -1,4 +1,9 @@
@@ -119370,7 +119370,7 @@ index b2fc84a75..5b5454985 100644
  
  static u32 lbl_803D5620[] = {
      0x7C859,
-@@ -59,17 +71,86 @@ static u32 lbl_803D5630[] = {
+@@ -59,17 +71,119 @@ static u32 lbl_803D5630[] = {
  };
  
  /* 46B6A0 */ static VsSceneController controller;
@@ -119383,30 +119383,62 @@ index b2fc84a75..5b5454985 100644
 +    controller.state.match_result = 7;
 +    controller.start.xD = 90;
 +}
-+
-+/* InitPause (Unranked, Teams): Start does not pause. A human port with stocks holding
-+ * L+R+A+Start ends the match as LRAS; a local Start tap only toggles the pause display. */
-+static bool mu_lras_display;
  
 -VsSceneController* gmVs_GetController_0(void)
-+static int mu_online_lras_check(void)
++/* StartEngineLoop (Slippi 3.7.0): the GAME! screen's length after the match was ended above, shorter
++ * for someone who chose to leave. */
++void mu_gmvs_online_end_time(int frames)
  {
 -    return &controller;
++    controller.start.xD = (u8) frames;
++}
++
++/* InitPause (every mode but Ranked): Start does not pause. A human port with stocks holding
++ * L+R+A+Start ends the match as LRAS; a local Start tap only toggles the pause display. In Party
++ * (Slippi 3.7.0) an L+R+A+Start only takes the local player out (mu_online_leave: the host then
++ * disconnects and the game ends for this player like any disconnect) while the others keep
++ * playing, and it works without stocks too, as does the pause display. */
++static bool mu_lras_display;
++
++static int mu_online_lras_check(void)
++{
 +    const u32 lras = HSD_PAD_L | HSD_PAD_R | HSD_PAD_A | HSD_PAD_START;
++    const int party = mu_online_rules_mode() == 4;
 +    int i, local;
-+    for (i = 0; i < 4; i++) {
-+        if (Player_GetPlayerSlotType(i) != Gm_PKind_Human ||
-+            Player_GetStocks(i) == 0)
-+        {
-+            continue;
-+        }
-+        if ((HSD_PadMasterStatus[i].button & lras) == lras) {
-+            controller.state.pauser = (s8) i;
-+            controller.state.match_result = 7;
-+            controller.start.xD = 30;
-+            ifAll_802F3394();
-+            gm_801A10FC(i);
++    if (party) {
++        if (mu_online_is_leaving()) {
 +            return -1;
++        }
++        local = mu_online_rules_local_port();
++        if (local < 0) {
++            return -1;
++        }
++        if ((HSD_PadMasterStatus[local].button & lras) == lras) {
++            /* Sent with the next pad. The match then ends like any other disconnect and cannot
++             * be rolled back past; the flag is kept through rollbacks, so this happens once. */
++            mu_online_leave();
++            /* Hide HUD and pause textures for the time left until the game ends. */
++            ifAll_802F3394();
++            gm_801A10FC(local);
++            return -1;
++        }
++    } else {
++        for (i = 0; i < 4; i++) {
++            if (Player_GetPlayerSlotType(i) != Gm_PKind_Human) {
++                continue;
++            }
++            /* Once disconnected, the stock check is skipped. */
++            if (!mu_online_disconnected() && Player_GetStocks(i) == 0) {
++                continue;
++            }
++            if ((HSD_PadMasterStatus[i].button & lras) == lras) {
++                controller.state.pauser = (s8) i;
++                controller.state.match_result = 7;
++                controller.start.xD = 30;
++                ifAll_802F3394();
++                gm_801A10FC(i);
++                return -1;
++            }
 +        }
 +    }
 +    local = mu_online_rules_local_port();
@@ -119414,14 +119446,14 @@ index b2fc84a75..5b5454985 100644
 +        return -1;
 +    }
 +    if (mu_lras_display) {
-+        if (Player_GetStocks(local) == 0 ||
++        if ((!mu_online_disconnected() && !party && Player_GetStocks(local) == 0) ||
 +            (HSD_PadMasterStatus[local].trigger & HSD_PAD_START))
 +        {
 +            mu_lras_display = false;
 +            ifAll_802F33CC();
 +            gm_801A10FC(local);
 +        }
-+    } else if (Player_GetStocks(local) != 0 &&
++    } else if ((mu_online_disconnected() || party || Player_GetStocks(local) != 0) &&
 +               (HSD_PadMasterStatus[local].trigger & HSD_PAD_START))
 +    {
 +        mu_lras_display = true;
@@ -119435,7 +119467,8 @@ index b2fc84a75..5b5454985 100644
 +static void mu_online_init_pause(void)
 +{
 +    int mode = mu_online_rules_mode();
-+    if (!mu_online_active() || mode < 0 || mode == 0 || mode == 4 ||
++    /* Client pause in every mode but Ranked (Slippi 3.7.0 enables it in Party too). */
++    if (!mu_online_active() || mode < 0 || mode == 0 ||
 +        !controller.start.disable_pausing)
 +    {
 +        return;
@@ -119460,7 +119493,7 @@ index b2fc84a75..5b5454985 100644
  struct StartMeleeRules* gm_GetStartMeleeRules(void)
  {
      return &controller.start;
-@@ -80,14 +161,14 @@ struct lbl_8046B488_t* fn_8016AE60(void)
+@@ -80,14 +194,14 @@ struct lbl_8046B488_t* fn_8016AE60(void)
      return gm_1601_GetUnkData();
  }
  
@@ -119477,7 +119510,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  u64 gm_8016AEA4(void)
-@@ -107,22 +188,22 @@ bool gm_8016AEC8(void)
+@@ -107,22 +221,22 @@ bool gm_8016AEC8(void)
  
  u32 gm_GetFrameCount(void)
  {
@@ -119504,7 +119537,7 @@ index b2fc84a75..5b5454985 100644
      u16 var_r31 = tmp;
      if (!gm_8016B110()) {
          var_r31 = 0x63 - var_r31;
-@@ -132,12 +213,12 @@ u16 gm_8016AF0C(void)
+@@ -132,12 +246,12 @@ u16 gm_8016AF0C(void)
  
  bool GetMatchTimer(int* arg0)
  {
@@ -119520,7 +119553,7 @@ index b2fc84a75..5b5454985 100644
          }
          return true;
      }
-@@ -220,7 +301,7 @@ bool gm_8016B168(void)
+@@ -220,7 +334,7 @@ bool gm_8016B168(void)
  
  bool gm_8016B184(void)
  {
@@ -119529,7 +119562,7 @@ index b2fc84a75..5b5454985 100644
          return true;
      }
      return false;
-@@ -243,7 +324,7 @@ bool gm_8016B1D8(void)
+@@ -243,7 +357,7 @@ bool gm_8016B1D8(void)
  
  bool gm_8016B1EC(void)
  {
@@ -119538,7 +119571,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  bool gm_8016B204(void)
-@@ -267,7 +348,7 @@ f32 gm_8016B248(void)
+@@ -267,7 +381,7 @@ f32 gm_8016B248(void)
  
  bool gm_8016B258(int arg0)
  {
@@ -119547,7 +119580,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  void gm_SetGameSpeed(float speed)
-@@ -282,32 +363,32 @@ void gm_ResetGameSpeed(void)
+@@ -282,32 +396,32 @@ void gm_ResetGameSpeed(void)
  
  void gm_8016B328(void)
  {
@@ -119586,7 +119619,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  bool gm_8016B3A0(void)
-@@ -330,8 +411,41 @@ bool gm_8016B3D8(void)
+@@ -330,8 +444,41 @@ bool gm_8016B3D8(void)
      }
  }
  
@@ -119628,7 +119661,7 @@ index b2fc84a75..5b5454985 100644
      switch (gm_GetCurrentGameMode()) {
      case GM_CLASSIC:
      case GM_ADVENTURE:
-@@ -400,10 +514,6 @@ bool fn_8016B510(void)
+@@ -400,10 +547,6 @@ bool fn_8016B510(void)
      return false;
  }
  
@@ -119639,7 +119672,7 @@ index b2fc84a75..5b5454985 100644
  int gm_8016B558(void)
  {
      int i;
-@@ -416,22 +526,23 @@ int gm_8016B558(void)
+@@ -416,22 +559,23 @@ int gm_8016B558(void)
      }
      return count;
  }
@@ -119670,7 +119703,7 @@ index b2fc84a75..5b5454985 100644
              {
                  var_f1 *= 1.1F;
              }
-@@ -460,31 +571,31 @@ float fn_8016B5B0(void)
+@@ -460,31 +604,31 @@ float fn_8016B5B0(void)
  
  void gm_8016B6E8(int arg0, int arg1)
  {
@@ -119710,7 +119743,7 @@ index b2fc84a75..5b5454985 100644
      grStadium_801D4150();
  }
  
-@@ -501,10 +612,10 @@ void fn_8016B7B4(int arg0)
+@@ -501,10 +645,10 @@ void fn_8016B7B4(int arg0)
  
  void fn_8016B7F8(void)
  {
@@ -119723,7 +119756,7 @@ index b2fc84a75..5b5454985 100644
      Stage_802252E4(tmp->start.stkind, NULL);
      grStadium_801D4040();
      if (!tmp->start.x1_3) {
-@@ -521,13 +632,13 @@ void fn_8016B88C(int arg0)
+@@ -521,13 +665,13 @@ void fn_8016B88C(int arg0)
      if (arg0 == 0) {
          grStadium_801D40C8();
      }
@@ -119740,7 +119773,7 @@ index b2fc84a75..5b5454985 100644
      grStadium_801D3B4C(arg0, slot_type);
  }
  
-@@ -578,7 +689,13 @@ void fn_8016B918(void)
+@@ -578,7 +722,13 @@ void fn_8016B918(void)
          if (!var_r0) {
              continue;
          }
@@ -119755,7 +119788,7 @@ index b2fc84a75..5b5454985 100644
          if (DbLevel >= DbLKind_DebugRom) {
              temp_r3_3 = &HSD_PadCopyStatus[(u8) temp_r3_2];
              if ((temp_r3_3->trigger & HSD_PAD_DPADUP) &&
-@@ -597,7 +714,7 @@ void fn_8016B918(void)
+@@ -597,7 +747,7 @@ void fn_8016B918(void)
              if (var_r28 != 6 && ifStock_802F7EFC(i, var_r28) == 0) {
                  Player_LoseStock(var_r28);
                  Player_SetStocks(i, Player_GetStocks(i) + 1);
@@ -119764,7 +119797,7 @@ index b2fc84a75..5b5454985 100644
                  fn_8016719C(i, 0);
              }
          }
-@@ -619,6 +736,12 @@ bool gm_AnyControllerPressedStart(void)
+@@ -619,6 +769,12 @@ bool gm_AnyControllerPressedStart(void)
  bool gm_AnyControllerPressedZ(void)
  {
      int i;
@@ -119777,7 +119810,7 @@ index b2fc84a75..5b5454985 100644
      for (i = 0; i < PAD_MAX_CONTROLLERS; i++) {
          HSD_PadStatus* pad = &HSD_PadMasterStatus[(u8) i];
          if (pad->err == 0 && (pad->trigger & HSD_PAD_Z)) {
-@@ -628,6 +751,11 @@ bool gm_AnyControllerPressedZ(void)
+@@ -628,6 +784,11 @@ bool gm_AnyControllerPressedZ(void)
      return false;
  }
  
@@ -119789,7 +119822,7 @@ index b2fc84a75..5b5454985 100644
  int gm_DefaultVSGetPauser(void)
  {
      HSD_PadStatus* mpPadStatus;
-@@ -639,12 +767,16 @@ int gm_DefaultVSGetPauser(void)
+@@ -639,12 +800,16 @@ int gm_DefaultVSGetPauser(void)
      int spPlayerId;
      PAD_STACK(0x18);
  
@@ -119807,7 +119840,7 @@ index b2fc84a75..5b5454985 100644
          spPadStatus = &HSD_PadCopyStatus[(u8) spPlayerId];
          if (spPadStatus->err == 0) {
              if (DbLevel >= DbLKind_DebugRom) {
-@@ -677,13 +809,24 @@ int gm_DefaultVSGetPauser(void)
+@@ -677,13 +842,24 @@ int gm_DefaultVSGetPauser(void)
                  } else {
                      mpPausePressed = mpPadStatus->trigger & HSD_PAD_START;
                  }
@@ -119833,7 +119866,7 @@ index b2fc84a75..5b5454985 100644
                          {
                              return mpPlayerId;
                          }
-@@ -722,7 +865,7 @@ int gm_CameraModeVSGetPauser(void)
+@@ -722,7 +898,7 @@ int gm_CameraModeVSGetPauser(void)
                      return var_r30;
                  }
                  for (var_r29 = 0; var_r29 < 6; var_r29++) {
@@ -119842,7 +119875,7 @@ index b2fc84a75..5b5454985 100644
                          Player_GetPlayerSlotType(var_r29) != Gm_PKind_NA)
                      {
                          return var_r30;
-@@ -745,7 +888,7 @@ MatchOutcome gm_GetFFAOutcome(void)
+@@ -745,7 +921,7 @@ MatchOutcome gm_GetFFAOutcome(void)
      if (controller.start.x4_2 && Player_GetP1Stock() == 0) {
          return OUTCOME_1P_GAME_OVER;
      }
@@ -119851,7 +119884,7 @@ index b2fc84a75..5b5454985 100644
          isSingleplayer = true;
      } else {
          isSingleplayer = false;
-@@ -758,7 +901,7 @@ MatchOutcome gm_GetFFAOutcome(void)
+@@ -758,7 +934,7 @@ MatchOutcome gm_GetFFAOutcome(void)
      if (var_r0_2 != 0) {
          return OUTCOME_UNK_1P_HORDE_BATTLE_VICTORY;
      }
@@ -119860,7 +119893,7 @@ index b2fc84a75..5b5454985 100644
          notSingleplayer = 1;
      } else {
          notSingleplayer = 0;
-@@ -808,7 +951,7 @@ MatchOutcome gm_GetTeamBattleOutcome(void)
+@@ -808,7 +984,7 @@ MatchOutcome gm_GetTeamBattleOutcome(void)
          if (Player_GetP1Stock() == 0) {
              return OUTCOME_1P_GAME_OVER;
          }
@@ -119869,7 +119902,7 @@ index b2fc84a75..5b5454985 100644
              isSingleplayer = true;
          } else {
              isSingleplayer = false;
-@@ -821,7 +964,7 @@ MatchOutcome gm_GetTeamBattleOutcome(void)
+@@ -821,7 +997,7 @@ MatchOutcome gm_GetTeamBattleOutcome(void)
          if (var_r0_2 != 0) {
              return OUTCOME_UNK_1P_HORDE_BATTLE_VICTORY;
          }
@@ -119878,7 +119911,7 @@ index b2fc84a75..5b5454985 100644
              notSinglePlayer = true;
          } else {
              notSinglePlayer = false;
-@@ -843,7 +986,7 @@ MatchOutcome gm_GetTeamBattleOutcome(void)
+@@ -843,7 +1019,7 @@ MatchOutcome gm_GetTeamBattleOutcome(void)
              }
          }
      }
@@ -119887,7 +119920,7 @@ index b2fc84a75..5b5454985 100644
          notSinglePlayer_2 = true;
      } else {
          notSinglePlayer_2 = false;
-@@ -885,24 +1028,30 @@ MatchOutcome gm_GetMatchOutcome(void)
+@@ -885,24 +1061,30 @@ MatchOutcome gm_GetMatchOutcome(void)
      VsSceneController* tmp = &controller;
      PAD_STACK(0x8);
  
@@ -119924,7 +119957,7 @@ index b2fc84a75..5b5454985 100644
                  return OUTCOME_TIMEOUT;
              }
          }
-@@ -927,7 +1076,7 @@ MatchOutcome gm_GetMatchOutcome(void)
+@@ -927,7 +1109,7 @@ MatchOutcome gm_GetMatchOutcome(void)
  
  void fn_8016C46C(int arg0)
  {
@@ -119933,7 +119966,7 @@ index b2fc84a75..5b5454985 100644
          switch (gm_GetCurrentGameMode()) {
          case GM_CLASSIC:
              fn_8017EE40(arg0);
-@@ -947,14 +1096,14 @@ static inline void fn_8016C46C_dontinline(int arg0)
+@@ -947,14 +1129,14 @@ static inline void fn_8016C46C_dontinline(int arg0)
      fn_8016C46C(arg0);
  }
  
@@ -119951,7 +119984,7 @@ index b2fc84a75..5b5454985 100644
              pl_80039450(i);
              for (j = 0; j < 0x101; j++) {
                  x44C[i].x0[j] = fn_80170110(arg0, j, 2, i);
-@@ -970,30 +1119,31 @@ void fn_8016C4F4(struct lbl_8046B6A0_24C_t* arg0)
+@@ -970,30 +1152,31 @@ void fn_8016C4F4(struct lbl_8046B6A0_24C_t* arg0)
  
  int gm_8016C5C0(int pl_slot)
  {
@@ -119995,7 +120028,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  s32 gm_8016C6C0(HSD_GObj* arg0)
-@@ -1002,17 +1152,17 @@ s32 gm_8016C6C0(HSD_GObj* arg0)
+@@ -1002,17 +1185,17 @@ s32 gm_8016C6C0(HSD_GObj* arg0)
      return gm_8016C5C0(ftLib_80086BE0(arg0));
  }
  
@@ -120020,7 +120053,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  void fn_8016C7D0(HSD_GObj* gobj)
-@@ -1034,7 +1184,8 @@ void fn_8016C7F0(void)
+@@ -1034,7 +1217,8 @@ void fn_8016C7F0(void)
      UnkAllstarData* temp_r30;
  
      if (controller.start.on_match_end != NULL) {
@@ -120030,7 +120063,7 @@ index b2fc84a75..5b5454985 100644
      }
      HSD_PadRumbleRemoveAll();
      for (var_r29 = 0; var_r29 < PAD_MAX_CONTROLLERS; var_r29++) {
-@@ -1046,10 +1197,10 @@ void fn_8016C7F0(void)
+@@ -1046,10 +1230,10 @@ void fn_8016C7F0(void)
      lbAudioAx_80023694();
      lbAudioAx_80024C84();
      ifTime_FreeCountdown();
@@ -120043,7 +120076,7 @@ index b2fc84a75..5b5454985 100644
          Camera_RequestQuake(QuakeKind_Large, NULL);
      }
      if (gm_GetCurrentGameMode() == GM_TARGET_TEST ||
-@@ -1058,6 +1209,13 @@ void fn_8016C7F0(void)
+@@ -1058,6 +1242,13 @@ void fn_8016C7F0(void)
      {
          temp_r29_2 = (u8*) gm_801B6320();
          temp_r30 = gm_GetAllStarData();
@@ -120057,7 +120090,7 @@ index b2fc84a75..5b5454985 100644
          var_r28 = 0;
          if (gm_GetCurrentGameMode() == GM_TARGET_TEST) {
              var_r29_2 = gm_CKindToSelKind(*temp_r29_2);
-@@ -1071,21 +1229,23 @@ void fn_8016C7F0(void)
+@@ -1071,21 +1262,23 @@ void fn_8016C7F0(void)
              if (sp24 == 0) {
                  var_r28 = 1;
              }
@@ -120089,7 +120122,7 @@ index b2fc84a75..5b5454985 100644
                      0x5A);
      }
      switch (gm_GetCurrentGameMode()) {
-@@ -1103,7 +1263,7 @@ static inline s8 gm_GetSlotByPlayerId(int pauserId)
+@@ -1103,7 +1296,7 @@ static inline s8 gm_GetSlotByPlayerId(int pauserId)
  {
      int slot;
      for (slot = 0; slot < 6; slot++) {
@@ -120098,7 +120131,7 @@ index b2fc84a75..5b5454985 100644
              Player_GetPlayerSlotType(slot) == Gm_PKind_Human)
          {
              return slot;
-@@ -1118,8 +1278,14 @@ void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
+@@ -1118,8 +1311,14 @@ void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
      s8 pauserSlot;
      u8 var_r4;
  
@@ -120106,15 +120139,15 @@ index b2fc84a75..5b5454985 100644
 +#ifdef MU_NATIVE
 +    /* Instant Melee, "Pause During Game Start" (offline): pausing does not wait for the HUD. */
 +    if (arg0->state.unpause_timer == 0 && (arg0->state.hud_enabled != 0 || mu_instant_melee()) &&
-         !arg0->start.disable_pausing)
++        !arg0->start.disable_pausing)
 +#else
 +    if (arg0->state.unpause_timer == 0 && arg0->state.hud_enabled != 0 &&
-+        !arg0->start.disable_pausing)
+         !arg0->start.disable_pausing)
 +#endif
      {
          if (arg0->start.check_for_pauser_override != NULL) {
              pauser = arg0->start.check_for_pauser_override();
-@@ -1147,6 +1313,9 @@ void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
+@@ -1147,6 +1346,9 @@ void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
                  gm_801A0FEC(pauser, var_r4);
              }
              gm_SetDbPauseFlag((s64) arg1);
@@ -120124,7 +120157,7 @@ index b2fc84a75..5b5454985 100644
              if (arg0->start.x4_0) {
                  pauserSlot = gm_GetSlotByPlayerId(pauser);
                  if (arg0->start.on_pause_override != NULL) {
-@@ -1156,8 +1325,8 @@ void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
+@@ -1156,8 +1358,8 @@ void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
                  }
              }
              HSD_PadRumblePauseAll();
@@ -120135,7 +120168,7 @@ index b2fc84a75..5b5454985 100644
          }
      }
  }
-@@ -1201,10 +1370,14 @@ void gm_DoUnpauseChecksAndRoutine(VsSceneController* arg0, int arg1)
+@@ -1201,10 +1403,14 @@ void gm_DoUnpauseChecksAndRoutine(VsSceneController* arg0, int arg1)
      int i;
      PAD_STACK(0x14);
  
@@ -120152,7 +120185,7 @@ index b2fc84a75..5b5454985 100644
          return;
      }
      if (arg0->start.disable_pausing) {
-@@ -1213,9 +1386,12 @@ void gm_DoUnpauseChecksAndRoutine(VsSceneController* arg0, int arg1)
+@@ -1213,9 +1419,12 @@ void gm_DoUnpauseChecksAndRoutine(VsSceneController* arg0, int arg1)
  
      i = gm_GetPlayerPressingUnpause();
  
@@ -120166,7 +120199,7 @@ index b2fc84a75..5b5454985 100644
          ifAll_802F33CC();
          gm_801A10FC(i);
          HSD_PadRumbleUnpauseAll();
-@@ -1226,11 +1402,11 @@ void gm_DoUnpauseChecksAndRoutine(VsSceneController* arg0, int arg1)
+@@ -1226,11 +1435,11 @@ void gm_DoUnpauseChecksAndRoutine(VsSceneController* arg0, int arg1)
                  Ground_EnableMatchCamera();
              }
          }
@@ -120180,7 +120213,7 @@ index b2fc84a75..5b5454985 100644
  {
      s32 temp_r3_4;
      s32 var_r3;
-@@ -1239,43 +1415,45 @@ void fn_8016CD98(VsSceneController* arg0)
+@@ -1239,43 +1448,45 @@ void fn_8016CD98(VsSceneController* arg0)
      int i;
      PAD_STACK(4);
  
@@ -120245,7 +120278,7 @@ index b2fc84a75..5b5454985 100644
                      } else {
                          var_r3 = 0x7C865;
                      }
-@@ -1291,16 +1469,16 @@ void fn_8016CD98(VsSceneController* arg0)
+@@ -1291,16 +1502,16 @@ void fn_8016CD98(VsSceneController* arg0)
  void fn_8016CF4C(int slot, MatchOutcome matchResult)
  {
      gm_801A10FC(slot);
@@ -120265,7 +120298,7 @@ index b2fc84a75..5b5454985 100644
          return;
      }
      fn_8016C7F0();
-@@ -1328,9 +1506,9 @@ static inline void fn_8016CFE0_inline(void)
+@@ -1328,9 +1539,9 @@ static inline void fn_8016CFE0_inline(void)
  
      tmp = &controller;
      for (i = 0; i < 6; i++) {
@@ -120278,7 +120311,7 @@ index b2fc84a75..5b5454985 100644
              }
          }
      }
-@@ -1344,6 +1522,12 @@ void fn_8016CFE0(void)
+@@ -1344,6 +1555,12 @@ void fn_8016CFE0(void)
      int unpauser_slot;
      PAD_STACK(0x10);
  
@@ -120291,7 +120324,7 @@ index b2fc84a75..5b5454985 100644
      fn_8016CFE0_inline();
  
      fn_8016A4C8();
-@@ -1357,13 +1541,21 @@ void fn_8016CFE0(void)
+@@ -1357,13 +1574,21 @@ void fn_8016CFE0(void)
                         PAD_BUTTON_START;
          }
          no_contest_buttons = tmp_btns;
@@ -120316,7 +120349,7 @@ index b2fc84a75..5b5454985 100644
                          fn_8016CF4C_dontinline(unpauser_slot,
                                                 OUTCOME_NO_CONTEST);
                          return;
-@@ -1371,39 +1563,58 @@ void fn_8016CFE0(void)
+@@ -1371,39 +1596,58 @@ void fn_8016CFE0(void)
                  }
              }
          }
@@ -120386,7 +120419,7 @@ index b2fc84a75..5b5454985 100644
          fn_8016CD98(tmp);
      }
  }
-@@ -1447,18 +1658,18 @@ void gm_Scene_Training_OnFrame(void)
+@@ -1447,18 +1691,18 @@ void gm_Scene_Training_OnFrame(void)
      if (gm_GetDbPauseFlag(2) != 0) {
          fn_8016CBE8_inline();
          gm_DoUnpauseChecksAndRoutine(tmp, 2);
@@ -120411,7 +120444,7 @@ index b2fc84a75..5b5454985 100644
          fn_8016C7F0();
          gm_801A4B60();
      }
-@@ -1489,58 +1700,71 @@ bool fn_8016D538(void)
+@@ -1489,58 +1733,71 @@ bool fn_8016D538(void)
  void fn_8016D634(void)
  {
      VsSceneController* tmp = &controller;
@@ -120500,7 +120533,7 @@ index b2fc84a75..5b5454985 100644
      case 0:
          fn_8016CFE0();
          break;
-@@ -1549,10 +1773,15 @@ void gm_Scene_Vs_OnFrame(void)
+@@ -1549,10 +1806,15 @@ void gm_Scene_Vs_OnFrame(void)
          break;
      case 2:
          if (fn_80180AC0() != 0) {
@@ -120517,7 +120550,7 @@ index b2fc84a75..5b5454985 100644
          gm_801A4B60();
          break;
      }
-@@ -1563,25 +1792,28 @@ void gm_Scene_Vs_OnFrame(void)
+@@ -1563,25 +1825,28 @@ void gm_Scene_Vs_OnFrame(void)
  
  void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
  {
@@ -120553,7 +120586,7 @@ index b2fc84a75..5b5454985 100644
          (Player_GetPlayerCharacter(arg0) == CKind_Zelda ||
           Player_GetPlayerCharacter(arg0) == CKind_Seak))
      {
-@@ -1590,19 +1822,28 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
+@@ -1590,19 +1855,28 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
          } else {
              Player_SetPlayerCharacter(arg0, CKind_Zelda);
          }
@@ -120586,7 +120619,7 @@ index b2fc84a75..5b5454985 100644
      }
      Player_SetPlayerAndEntityCpuType(arg0, arg1->cpu_kind);
      Player_SetPlayerAndEntityCpuLevel(arg0, arg1->cpu_level);
-@@ -1612,7 +1853,7 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
+@@ -1612,7 +1886,7 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
          Player_SetHUDDamage(arg0, arg1->damage1);
      }
  
@@ -120595,7 +120628,7 @@ index b2fc84a75..5b5454985 100644
  
      if (arg1->xC_b7) {
          Player_SetMoreFlagsBit2(arg0, 1);
-@@ -1629,14 +1870,14 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
+@@ -1629,14 +1903,14 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
          Player_SetMoreFlagsBit1(arg0, 0);
      }
  
@@ -120613,7 +120646,7 @@ index b2fc84a75..5b5454985 100644
      if (arg1->vs_invisible) {
          Player_SetFlagsBit6(arg0, 1);
          Player_SetFlagsBit7(arg0, 0);
-@@ -1660,10 +1901,10 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
+@@ -1660,10 +1934,10 @@ void fn_8016D8AC(int arg0, struct PlayerInitData* arg1)
      } else {
          Player_SetMoreFlagsBit5(arg0, 0);
      }
@@ -120626,7 +120659,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  void fn_8016DCC0(StartMeleeData* arg0)
-@@ -1671,59 +1912,59 @@ void fn_8016DCC0(StartMeleeData* arg0)
+@@ -1671,59 +1945,59 @@ void fn_8016DCC0(StartMeleeData* arg0)
      VsSceneController* tmp = &controller;
      int i;
  
@@ -120708,7 +120741,7 @@ index b2fc84a75..5b5454985 100644
      case 0:
      case 2:
      case 3:
-@@ -1740,6 +1981,11 @@ void fn_8016DCC0(StartMeleeData* arg0)
+@@ -1740,6 +2014,11 @@ void fn_8016DCC0(StartMeleeData* arg0)
              fn_8016A09C();
          }
      }
@@ -120720,7 +120753,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  static float direction(float x)
-@@ -1754,10 +2000,10 @@ static float direction(float x)
+@@ -1754,10 +2033,10 @@ static float direction(float x)
  static inline void getSpawnPoint(int i, Vec3* v)
  {
      VsSceneController* tmp = &controller;
@@ -120733,7 +120766,7 @@ index b2fc84a75..5b5454985 100644
      }
  }
  
-@@ -1765,7 +2011,7 @@ static inline void setPlayerUnk45(int i)
+@@ -1765,7 +2044,7 @@ static inline void setPlayerUnk45(int i)
  {
      bool is_teams = controller.start.is_teams == true;
      Player_SetUnk45(
@@ -120742,7 +120775,7 @@ index b2fc84a75..5b5454985 100644
                                     is_teams, Player_GetPlayerSlotType(i))));
  }
  
-@@ -1882,6 +2128,162 @@ void fn_8016E124(void)
+@@ -1882,6 +2161,162 @@ void fn_8016E124(void)
  }
  
  /// @todo The loop's SFX flag load uses a different equivalent address form.
@@ -120905,7 +120938,7 @@ index b2fc84a75..5b5454985 100644
  void fn_8016E2BC(void)
  {
      UNUSED u8 pad[8];
-@@ -1896,7 +2298,7 @@ void fn_8016E2BC(void)
+@@ -1896,7 +2331,7 @@ void fn_8016E2BC(void)
      PAD_STACK(0xC);
  
      Player_80036DA4();
@@ -120914,7 +120947,7 @@ index b2fc84a75..5b5454985 100644
          var_r0 = true;
      } else {
          var_r0 = false;
-@@ -1913,10 +2315,10 @@ void fn_8016E2BC(void)
+@@ -1913,10 +2348,10 @@ void fn_8016E2BC(void)
          Player_80032768(0, &sp24);
          single_is_teams = controller.start.is_teams == true;
          Player_SetUnk45(0, fn_80160840(gm_80160854(
@@ -120927,7 +120960,7 @@ index b2fc84a75..5b5454985 100644
              lbAudioAx_800237A8(0x41F4E, 0x7F, 0x40);
          }
          fn_80169C54(Player_GetPlayerCharacter(0), Player_GetCostumeId(0));
-@@ -1940,13 +2342,18 @@ void fn_8016E2BC(void)
+@@ -1940,13 +2375,18 @@ void fn_8016E2BC(void)
                      }
                  }
                  Player_80032768(i, &sp18);
@@ -120948,7 +120981,7 @@ index b2fc84a75..5b5454985 100644
                      lbAudioAx_800237A8(0x41F4E, 0x7F, 0x40);
                  }
              }
-@@ -1989,6 +2396,19 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -1989,6 +2429,19 @@ void fn_8016E730(StartMeleeData* arg0)
      VsSceneController* r30;
  
      db_Setup();
@@ -120968,7 +121001,7 @@ index b2fc84a75..5b5454985 100644
      gm_SetDbPauseInputHandlers(gm_AnyControllerPressedStart,
                                 gm_AnyControllerPressedZ);
      gm_SetPreGObjProcCallback(db_RunEveryFrame);
-@@ -1997,6 +2417,9 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -1997,6 +2450,9 @@ void fn_8016E730(StartMeleeData* arg0)
      Camera_Init(70);
      Camera_Create();
      fn_8016DCC0(arg0);
@@ -120978,7 +121011,7 @@ index b2fc84a75..5b5454985 100644
      lbRefract_800222A4();
      lb_8000FCDC();
      efLib_Init();
-@@ -2010,7 +2433,7 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -2010,7 +2466,7 @@ void fn_8016E730(StartMeleeData* arg0)
  
      r30 = &controller;
  
@@ -120987,7 +121020,7 @@ index b2fc84a75..5b5454985 100644
      Item_80266F70();
      Item_80266FCC();
      it_8026D018();
-@@ -2022,13 +2445,20 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -2022,13 +2478,20 @@ void fn_8016E730(StartMeleeData* arg0)
      Ground_EnableMatchCamera();
      Camera_8002F3AC();
      fn_801A1134();
@@ -121010,7 +121043,7 @@ index b2fc84a75..5b5454985 100644
      if (arg0->rules.on_match_start != NULL) {
          arg0->rules.on_match_start();
      }
-@@ -2052,6 +2482,17 @@ void gm_Scene_Vs_OnEnter(void* arg0)
+@@ -2052,6 +2515,17 @@ void gm_Scene_Vs_OnEnter(void* arg0)
          ifStatus_802F6EA4(3, -1, -1, 0, (void*) fn_8016B7B4, fn_8016B7F8);
      }
      ifTime_CreateTimers();
@@ -121028,7 +121061,7 @@ index b2fc84a75..5b5454985 100644
      ifStatus_802F665C(tmp->rules.x0_3);
  }
  
-@@ -2059,7 +2500,7 @@ struct EndMeleeData {
+@@ -2059,7 +2533,7 @@ struct EndMeleeData {
      /* 00 */ u32 x0;
      /* 04 */ u32 x4;
      /* 08 */ u32 x8;
@@ -121037,7 +121070,7 @@ index b2fc84a75..5b5454985 100644
  };
  
  static inline bool gm_8016E9C8_inline(void)
-@@ -2086,43 +2527,69 @@ void gm_Scene_Vs_OnExit(void* user_data)
+@@ -2086,43 +2560,69 @@ void gm_Scene_Vs_OnExit(void* user_data)
      VsSceneController* tmp = &controller;
      int i;
  
@@ -121117,7 +121150,7 @@ index b2fc84a75..5b5454985 100644
  }
  
  void gm_Scene_SuddenDeath_OnEnter(void* user_data)
-@@ -2145,7 +2612,7 @@ void gm_Scene_Training_OnEnter(void* user_data)
+@@ -2145,7 +2645,7 @@ void gm_Scene_Training_OnEnter(void* user_data)
      grStadium_801D410C();
      un_802FD404();
      tmp2 = &controller;
@@ -121126,7 +121159,7 @@ index b2fc84a75..5b5454985 100644
      Stage_802252E4(tmp2->start.stkind, NULL);
      grStadium_801D4040();
      if (!controller.start.x1_3) {
-@@ -2187,7 +2654,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
+@@ -2187,7 +2687,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
      float var_f1;
      PAD_STACK(8);
  
@@ -121135,7 +121168,7 @@ index b2fc84a75..5b5454985 100644
          Player_GetPlayerSlotType(arg0) == Gm_PKind_NA &&
          Player_GetEntity(arg0) == NULL)
      {
-@@ -2211,7 +2678,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
+@@ -2211,7 +2711,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
          Player_80032768(arg0, &sp18);
          setPlayerUnk45(arg0);
          Player_80031AD0(arg0);
@@ -121144,7 +121177,7 @@ index b2fc84a75..5b5454985 100644
              lbAudioAx_800237A8(0x41F4E, 0x7F, 0x40);
          }
          fn_8016E124();
-@@ -2225,7 +2692,9 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
+@@ -2225,7 +2725,9 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
  
  bool fn_8016EF98(int arg0)
  {
@@ -121155,7 +121188,7 @@ index b2fc84a75..5b5454985 100644
          ifStatus_802F6788(arg0);
          Player_80031EBC(arg0);
          Player_SetSlottype(arg0, Gm_PKind_NA);
-@@ -2281,10 +2750,20 @@ int gm_8016F120(int arg0)
+@@ -2281,10 +2783,20 @@ int gm_8016F120(int arg0)
  
  void fn_8016F140(int arg0)
  {
@@ -124090,7 +124123,7 @@ index 7dc0a0d93..5598f1dfd 100644
  /* 20DF78 */ DynamicsDesc* grBigBlueRoute_8020DF78(enum_t);
  /* 20DF80 */ bool grBigBlueRoute_8020DF80(Vec3*, int arg, HSD_JObj* jobj);
 diff --git a/src/melee/gr/grcastle.c b/src/melee/gr/grcastle.c
-index 13bfb555b..6efff6f3c 100644
+index 13bfb555b..6699b0e36 100644
 --- a/src/melee/gr/grcastle.c
 +++ b/src/melee/gr/grcastle.c
 @@ -1,5 +1,9 @@
@@ -124132,7 +124165,24 @@ index 13bfb555b..6efff6f3c 100644
  
  typedef struct grCastle_PlatSubObj {
      /* 0x00 */ HSD_JObj* jobj;
-@@ -400,9 +404,9 @@ void grCastle_801CD658(Ground_GObj* gobj)
+@@ -228,9 +232,16 @@ void grCastle_801CD338(bool arg0)
+     }
+ }
+ 
++#ifdef MU_NATIVE
++static void mu_castle_wind_reset(void);
++#endif
++
+ void grCastle_801CD37C(void)
+ {
+     PAD_STACK(4);
++#ifdef MU_NATIVE
++    mu_castle_wind_reset();   /* Slippi 3.7.0 Reset Castle Wind (801CD37C, start of the stage init) */
++#endif
+     yakumono_param = Ground_GetYakumonoParam();
+ 
+     stage_info.unk8C.b4 = 0;
+@@ -400,9 +411,9 @@ void grCastle_801CD658(Ground_GObj* gobj)
  {
      Ground* gp = GET_GROUND(gobj);
      UnkArchiveStruct* archive;
@@ -124145,7 +124195,7 @@ index 13bfb555b..6efff6f3c 100644
      Vec3 pos;
      grCastle_DynEntries entries_s;
      s32 i;
-@@ -419,7 +423,7 @@ void grCastle_801CD658(Ground_GObj* gobj)
+@@ -419,7 +430,7 @@ void grCastle_801CD658(Ground_GObj* gobj)
      grLib_801C96F8(0x7536, 0x1E, &pos);
  
      for (i = 0; 12 > i; i++) {
@@ -124154,7 +124204,7 @@ index 13bfb555b..6efff6f3c 100644
      }
  
      archive = grDatFiles_GetArchive();
-@@ -441,18 +445,18 @@ void grCastle_801CD658(Ground_GObj* gobj)
+@@ -441,18 +452,18 @@ void grCastle_801CD658(Ground_GObj* gobj)
                          if (jobj != NULL) {
                              if (entries_s.e[i].type == 3) {
                                  grLib_801C9B20(jobj, flag3,
@@ -124178,7 +124228,7 @@ index 13bfb555b..6efff6f3c 100644
                          }
                      }
                  }
-@@ -462,10 +466,10 @@ void grCastle_801CD658(Ground_GObj* gobj)
+@@ -462,10 +473,10 @@ void grCastle_801CD658(Ground_GObj* gobj)
  
      gobj->render_cb = fn_801D0924;
      Ground_801C10B8(gobj, grCastle_801CD610);
@@ -124193,7 +124243,7 @@ index 13bfb555b..6efff6f3c 100644
      gp->x10_flags.b5 = 1;
  }
  
-@@ -479,20 +483,27 @@ void grCastle_801CD8A8(Ground_GObj* gobj)
+@@ -479,20 +490,27 @@ void grCastle_801CD8A8(Ground_GObj* gobj)
      Ground* gp = GET_GROUND(gobj);
      int i;
  
@@ -124226,7 +124276,7 @@ index 13bfb555b..6efff6f3c 100644
              grCastle_801D0D24();
          }
      }
-@@ -504,7 +515,7 @@ void grCastle_801CD960(Ground_GObj* gobj)
+@@ -504,7 +522,7 @@ void grCastle_801CD960(Ground_GObj* gobj)
      s32 i;
  
      for (i = 0; i < 12; i++) {
@@ -124235,7 +124285,7 @@ index 13bfb555b..6efff6f3c 100644
      }
  }
  
-@@ -521,7 +532,7 @@ void grCastle_801CDA0C(Ground_GObj* gobj)
+@@ -521,7 +539,7 @@ void grCastle_801CDA0C(Ground_GObj* gobj)
      HSD_JObj* jobj = GET_JOBJ(gobj);
      f32 val;
  
@@ -124244,7 +124294,7 @@ index 13bfb555b..6efff6f3c 100644
      gp->x10_flags.b5 = 1;
  
      gp->u.castle8.plat[0].jobj = Ground_801C3FA4(gobj, 1);
-@@ -559,7 +570,7 @@ void grCastle_801CDA0C(Ground_GObj* gobj)
+@@ -559,7 +577,7 @@ void grCastle_801CDA0C(Ground_GObj* gobj)
      gp->u.castle8.plat[1].wind = 0.0f;
  
      Ground_801C10B8(gobj, grCastle_801CD9B4);
@@ -124253,7 +124303,7 @@ index 13bfb555b..6efff6f3c 100644
  }
  
  bool grCastle_801CDC3C(Ground_GObj* gobj)
-@@ -652,15 +663,11 @@ void grCastle_801CDC44(Ground_GObj* gobj)
+@@ -652,15 +670,11 @@ void grCastle_801CDC44(Ground_GObj* gobj)
          gp->u.castle8.plat[0].wind = 0.0f;
          gp = (Ground*) ((struct grCastle_Platform*) gp + 1);
      } while (i < 2);
@@ -124270,7 +124320,7 @@ index 13bfb555b..6efff6f3c 100644
  bool grCastle_801CDF54(Vec3* vec)
  {
      HSD_GObj* gobj;
-@@ -680,9 +687,6 @@ bool grCastle_801CDF54(Vec3* vec)
+@@ -680,9 +694,6 @@ bool grCastle_801CDF54(Vec3* vec)
      }
      return false;
  }
@@ -124280,7 +124330,7 @@ index 13bfb555b..6efff6f3c 100644
  
  void grCastle_801CDFD8(Ground_GObj* gobj)
  {
-@@ -691,7 +695,7 @@ void grCastle_801CDFD8(Ground_GObj* gobj)
+@@ -691,7 +702,7 @@ void grCastle_801CDFD8(Ground_GObj* gobj)
      s32 rand_result;
  
      // Set bit 7 at offset 0xDE
@@ -124289,7 +124339,7 @@ index 13bfb555b..6efff6f3c 100644
  
      // Get random range from params
      range = yakumono_param->xA;
-@@ -702,11 +706,11 @@ void grCastle_801CDFD8(Ground_GObj* gobj)
+@@ -702,11 +713,11 @@ void grCastle_801CDFD8(Ground_GObj* gobj)
      }
  
      // Add base value and set various shorts
@@ -124306,7 +124356,7 @@ index 13bfb555b..6efff6f3c 100644
  }
  
  s32 grCastle_801CE054(Ground_GObj* gobj)
-@@ -730,8 +734,8 @@ s32 grCastle_801CE054(Ground_GObj* gobj)
+@@ -730,8 +741,8 @@ s32 grCastle_801CE054(Ground_GObj* gobj)
      for (ctr = 3; ctr != 0; ctr--) {
          gp = (Ground*) new_var2;
          for (i = 0; i < 3; i++) {
@@ -124317,7 +124367,7 @@ index 13bfb555b..6efff6f3c 100644
              {
                  new_var3 = ptr++;
                  *new_var3 = (s16) val;
-@@ -748,16 +752,16 @@ s32 grCastle_801CE054(Ground_GObj* gobj)
+@@ -748,16 +759,16 @@ s32 grCastle_801CE054(Ground_GObj* gobj)
      }
  
      picked = arr[idx];
@@ -124337,7 +124387,7 @@ index 13bfb555b..6efff6f3c 100644
      }
  
      return (s32) picked;
-@@ -767,13 +771,13 @@ void grCastle_801CE19C(Ground_GObj* gobj)
+@@ -767,13 +778,13 @@ void grCastle_801CE19C(Ground_GObj* gobj)
  {
      Ground* gp = GET_GROUND(gobj);
      PAD_STACK(4);
@@ -124355,7 +124405,7 @@ index 13bfb555b..6efff6f3c 100644
              if (new_gobj != NULL) {
                  Ground* new_gp = new_gobj->user_data;
                  Ground_801C5440(gp, 0, 0x53021U);
-@@ -793,7 +797,7 @@ void grCastle_801CE260(Ground_GObj* gobj)
+@@ -793,7 +804,7 @@ void grCastle_801CE260(Ground_GObj* gobj)
      CmSubject* subject;
      PAD_STACK(8);
  
@@ -124364,7 +124414,7 @@ index 13bfb555b..6efff6f3c 100644
      grAnime_801C8138((HSD_GObj*) gobj, gp->map_id, 0);
  
      gp->u.castle11.xC4.b0 = 0;
-@@ -803,7 +807,7 @@ void grCastle_801CE260(Ground_GObj* gobj)
+@@ -803,7 +814,7 @@ void grCastle_801CE260(Ground_GObj* gobj)
  
      gp2 = GET_GROUND(gobj);
      *(u32*) &gp2->u.arwing.xD8 = (u32) Camera_80029044(2);
@@ -124373,7 +124423,7 @@ index 13bfb555b..6efff6f3c 100644
      if (subject != NULL) {
          subject->target_ext.h.x = yakumono_param->x118;
          subject->target_ext.h.y = yakumono_param->x11C;
-@@ -815,7 +819,7 @@ void grCastle_801CE260(Ground_GObj* gobj)
+@@ -815,7 +826,7 @@ void grCastle_801CE260(Ground_GObj* gobj)
      gp->u.arwing.xD0 = (u32) grMaterial_801C8CFC(
          0, 3, gp, Ground_801C3FA4((HSD_GObj*) gobj, 0),
          (void (*)(Item_GObj*, Ground*)) fn_801CE3A0, NULL, NULL);
@@ -124382,7 +124432,7 @@ index 13bfb555b..6efff6f3c 100644
      Ground_801C5440(gp, 0, 0x53025U);
  }
  
-@@ -837,12 +841,12 @@ void grCastle_801CE3AC(Ground_GObj* gobj)
+@@ -837,12 +848,12 @@ void grCastle_801CE3AC(Ground_GObj* gobj)
      HSD_JObj* jobj;
      Ground* gp = GET_GROUND(gobj);
  
@@ -124397,7 +124447,7 @@ index 13bfb555b..6efff6f3c 100644
          rot = grCs_803B7EB8;
  
          offset.z = 0.0f;
-@@ -878,7 +882,7 @@ void grCastle_801CE578(Ground_GObj* gobj)
+@@ -878,7 +889,7 @@ void grCastle_801CE578(Ground_GObj* gobj)
      } while (new_var4);
  
      {
@@ -124406,7 +124456,7 @@ index 13bfb555b..6efff6f3c 100644
          if (cam != NULL) {
              lb_8000B1CC(Ground_801C3FA4(gobj, 0), NULL, &pos);
              cam->pos = pos;
-@@ -904,9 +908,9 @@ void grCastle_801CE578(Ground_GObj* gobj)
+@@ -904,9 +915,9 @@ void grCastle_801CE578(Ground_GObj* gobj)
          if (grAnime_801C83D0(gobj, 0, 1)) {
              gp->u.castle11.xC8 = yakumono_param->x58;
              gp->u.castle11.xC4.b0 = 1;
@@ -124418,7 +124468,7 @@ index 13bfb555b..6efff6f3c 100644
              }
              Ground_801C5544(gp, 0);
          }
-@@ -918,7 +922,7 @@ void grCastle_801CE578(Ground_GObj* gobj)
+@@ -918,7 +929,7 @@ void grCastle_801CE578(Ground_GObj* gobj)
              gp->u.castle11.xC8 = timer - 1;
              if (timer < 0) {
                  if (gp->u.castle11.xD0 != 0) {
@@ -124427,7 +124477,7 @@ index 13bfb555b..6efff6f3c 100644
                  }
                  gp->u.castle11.xD0 = 0;
  
-@@ -934,12 +938,12 @@ void grCastle_801CE578(Ground_GObj* gobj)
+@@ -934,12 +945,12 @@ void grCastle_801CE578(Ground_GObj* gobj)
  
                  {
                      Ground* sat =
@@ -124442,7 +124492,7 @@ index 13bfb555b..6efff6f3c 100644
  
                      range = yakumono_param->xE;
                      if (range != 0) {
-@@ -947,12 +951,12 @@ void grCastle_801CE578(Ground_GObj* gobj)
+@@ -947,12 +958,12 @@ void grCastle_801CE578(Ground_GObj* gobj)
                      } else {
                          rand = 0;
                      }
@@ -124457,7 +124507,7 @@ index 13bfb555b..6efff6f3c 100644
                      gp->u.castle11.xD8 = 0;
                  }
                  Ground_801C4A08(gobj);
-@@ -967,7 +971,7 @@ void grCastle_801CE7E8(Ground_GObj* gobj)
+@@ -967,7 +978,7 @@ void grCastle_801CE7E8(Ground_GObj* gobj)
  {
      Ground* gp = GET_GROUND(gobj);
      PAD_STACK(8);
@@ -124466,7 +124516,7 @@ index 13bfb555b..6efff6f3c 100644
      gp->u.castle.xC4 = 0;
      gp->u.castle.xC8 = yakumono_param->x12C[gp->u.castle.xC4];
      grAnime_801C8138(gobj, gp->map_id, gp->u.castle.xC4);
-@@ -1003,12 +1007,12 @@ void grCastle_801CE8E8(Ground_GObj* gobj)
+@@ -1003,12 +1014,12 @@ void grCastle_801CE8E8(Ground_GObj* gobj)
      CmSubject* subject;
      PAD_STACK(8);
  
@@ -124481,7 +124531,7 @@ index 13bfb555b..6efff6f3c 100644
      if (subject != NULL) {
          subject->target_ext.h.x = yakumono_param->x134;
          subject->target_ext.h.y = yakumono_param->x138;
-@@ -1018,7 +1022,7 @@ void grCastle_801CE8E8(Ground_GObj* gobj)
+@@ -1018,7 +1029,7 @@ void grCastle_801CE8E8(Ground_GObj* gobj)
      gp->u.arwing.xC4 = (u32) grMaterial_801C8CFC(
          0, 4, gp, Ground_801C3FA4((HSD_GObj*) gobj, 0),
          (void (*)(Item_GObj*, Ground*)) fn_801CE9DC, NULL, NULL);
@@ -124490,7 +124540,7 @@ index 13bfb555b..6efff6f3c 100644
      Ground_801C5440(gp, 0, 0x53024U);
  }
  
-@@ -1034,7 +1038,7 @@ void grCastle_801CE9E8(Ground_GObj* gobj)
+@@ -1034,7 +1045,7 @@ void grCastle_801CE9E8(Ground_GObj* gobj)
      Vec3 pos;
      Ground* tmp;
      Ground* gp = GET_GROUND(gobj);
@@ -124499,7 +124549,7 @@ index 13bfb555b..6efff6f3c 100644
      PAD_STACK(8);
      if (subject != NULL) {
          lb_8000B1CC(Ground_801C3FA4(gobj, 0), NULL, &pos);
-@@ -1042,14 +1046,14 @@ void grCastle_801CE9E8(Ground_GObj* gobj)
+@@ -1042,14 +1053,14 @@ void grCastle_801CE9E8(Ground_GObj* gobj)
          subject->bone_pos = pos;
      }
      if (grAnime_801C83D0(gobj, 0, 1)) {
@@ -124516,7 +124566,7 @@ index 13bfb555b..6efff6f3c 100644
              if (subj2 != NULL) {
                  Camera_800290D4(subj2);
                  gp2->u.arwing.xC8 = 0;
-@@ -1080,7 +1084,7 @@ void grCastle_801CEACC(Ground_GObj* gobj)
+@@ -1080,7 +1091,7 @@ void grCastle_801CEACC(Ground_GObj* gobj)
      s32 i;
      PAD_STACK(0x8);
  
@@ -124525,7 +124575,7 @@ index 13bfb555b..6efff6f3c 100644
      gp->x10_flags.b5 = 1;
      gp->u.castle10.xC4 = 0;
      HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
-@@ -1172,8 +1176,8 @@ void grCastle_801CEACC(Ground_GObj* gobj)
+@@ -1172,8 +1183,8 @@ void grCastle_801CEACC(Ground_GObj* gobj)
      }
  
      grCastle_801D0298(gobj, 0);
@@ -124536,7 +124586,7 @@ index 13bfb555b..6efff6f3c 100644
  }
  
  bool grCastle_801CEEFC(Ground_GObj* gobj)
-@@ -1188,6 +1192,20 @@ void grCastle_801CEF04(Ground_GObj* gobj)
+@@ -1188,6 +1199,20 @@ void grCastle_801CEF04(Ground_GObj* gobj)
  
      switch (gp->u.castle6.xC4) {
      case 0:
@@ -124557,7 +124607,7 @@ index 13bfb555b..6efff6f3c 100644
          break;
      case 1: {
          int hi;
-@@ -1220,7 +1238,7 @@ void grCastle_801CEF04(Ground_GObj* gobj)
+@@ -1220,7 +1245,7 @@ void grCastle_801CEF04(Ground_GObj* gobj)
              gp->u.castle6.xCC = 0;
              for (i = 0; i < 5; i++) {
                  if (gp->u.castle10.x10C[i] != 0) {
@@ -124566,7 +124616,7 @@ index 13bfb555b..6efff6f3c 100644
                      gp->u.castle10.x10C[i] = 0;
                  }
              }
-@@ -1260,7 +1278,7 @@ void grCastle_801CEF04(Ground_GObj* gobj)
+@@ -1260,7 +1285,7 @@ void grCastle_801CEF04(Ground_GObj* gobj)
          break;
      }
      }
@@ -124575,7 +124625,7 @@ index 13bfb555b..6efff6f3c 100644
  }
  
  void grCastle_801CF0F0(Ground_GObj* gobj) {}
-@@ -1271,7 +1289,7 @@ void grCastle_801CF0F4(Ground_GObj* gobj)
+@@ -1271,7 +1296,7 @@ void grCastle_801CF0F4(Ground_GObj* gobj)
      HSD_JObj* jobj = GET_JOBJ(gobj);
      f32 scale;
  
@@ -124584,7 +124634,7 @@ index 13bfb555b..6efff6f3c 100644
      gp->u.castle7.xC4 = 0;
      gp->u.castle7.xD8 = 0;
      HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
-@@ -1318,7 +1336,7 @@ void grCastle_801CF308(Ground_GObj* gobj)
+@@ -1318,7 +1343,7 @@ void grCastle_801CF308(Ground_GObj* gobj)
          gp->u.castle.xC8 = -1;
          gp->u.castle11.xCA = 0;
          HSD_JObjClearFlagsAll(jobj, JOBJ_HIDDEN);
@@ -124593,7 +124643,7 @@ index 13bfb555b..6efff6f3c 100644
          gp->u.castle5.xC4 = 2;
          /* fallthrough */
      case 2: {
-@@ -1344,9 +1362,9 @@ void grCastle_801CF308(Ground_GObj* gobj)
+@@ -1344,9 +1369,9 @@ void grCastle_801CF308(Ground_GObj* gobj)
                          Event) fn_801CFAFC,
                      (void (*)(Item_GObj*, Ground*, HSD_GObj*))(
                          Event) fn_801CFB68);
@@ -124605,7 +124655,7 @@ index 13bfb555b..6efff6f3c 100644
                  gp->u.castle8.plat[0].state = yakumono_param->x54;
              }
          }
-@@ -1358,7 +1376,7 @@ void grCastle_801CF308(Ground_GObj* gobj)
+@@ -1358,7 +1383,7 @@ void grCastle_801CF308(Ground_GObj* gobj)
          break;
      case 4: {
          if (gp->u.castle11.xD8 != 0) {
@@ -124614,7 +124664,7 @@ index 13bfb555b..6efff6f3c 100644
              gp->u.castle11.xD8 = 0;
          }
          ((Ground*) (gp->u.castle7.xD0)->user_data)->u.castle5.xC4 = 1;
-@@ -1386,10 +1404,10 @@ void grCastle_801CF308(Ground_GObj* gobj)
+@@ -1386,10 +1411,10 @@ void grCastle_801CF308(Ground_GObj* gobj)
      }
  
      if (var_r6 != 0) {
@@ -124627,7 +124677,7 @@ index 13bfb555b..6efff6f3c 100644
          HSD_JObjSetRotation(jobj, &quat);
      }
  }
-@@ -1428,14 +1446,14 @@ void grCastle_801CF7B0(Ground_GObj* gobj)
+@@ -1428,14 +1453,14 @@ void grCastle_801CF7B0(Ground_GObj* gobj)
      Ground* gp = GET_GROUND(gobj);
      s16 x0, x2;
  
@@ -124647,7 +124697,7 @@ index 13bfb555b..6efff6f3c 100644
                          : x2 < x0
                              ? x2 + (x0 - x2 != 0 ? HSD_Randi(x0 - x2) : 0)
                              : x2;
-@@ -1454,7 +1472,7 @@ static inline void grCastle_ResetSatelliteTimer(Ground* gp)
+@@ -1454,7 +1479,7 @@ static inline void grCastle_ResetSatelliteTimer(Ground* gp)
          s32 diff = range_end - base;
          base = base + (diff != 0 ? HSD_Randi(diff) : 0);
      }
@@ -124656,7 +124706,7 @@ index 13bfb555b..6efff6f3c 100644
  }
  
  /// Pick the next satellite slot by weighted random choice and attach it to a
-@@ -1483,9 +1501,9 @@ static inline void grCastle_PickSatellite(Ground* gp, s32* wp)
+@@ -1483,9 +1508,9 @@ static inline void grCastle_PickSatellite(Ground* gp, s32* wp)
      if (slot == 3) {
          slot = 0;
      }
@@ -124668,7 +124718,7 @@ index 13bfb555b..6efff6f3c 100644
                   ->user_data;
  
      {
-@@ -1519,25 +1537,24 @@ void grCastle_801CF868(Ground_GObj* gobj)
+@@ -1519,25 +1544,24 @@ void grCastle_801CF868(Ground_GObj* gobj)
      Ground* gp = GET_GROUND(gobj);
      s32* wp;
  
@@ -124705,7 +124755,7 @@ index 13bfb555b..6efff6f3c 100644
              if (cur_slot != -1) {
                  weights.w[cur_slot] /= yakumono_param->x6;
              }
-@@ -1551,7 +1568,7 @@ void grCastle_801CF868(Ground_GObj* gobj)
+@@ -1551,7 +1575,7 @@ void grCastle_801CF868(Ground_GObj* gobj)
  void fn_801CFAFC(Item_GObj* item, Ground* gp, Vec3* pos, HSD_GObj* gobj)
  {
      PAD_STACK(4);
@@ -124714,7 +124764,7 @@ index 13bfb555b..6efff6f3c 100644
      if (ftLib_80086960(gobj)) {
          ftLib_80086A4C(gobj, (f32) yakumono_param->x4);
      }
-@@ -1565,7 +1582,19 @@ void fn_801CFB68(Item_GObj* item_gobj, Ground* gp, HSD_GObj* gobj)
+@@ -1565,7 +1589,19 @@ void fn_801CFB68(Item_GObj* item_gobj, Ground* gp, HSD_GObj* gobj)
      }
  }
  
@@ -124735,7 +124785,7 @@ index 13bfb555b..6efff6f3c 100644
  {
      s32 i = 0;
      s32 result = 1;
-@@ -1585,21 +1614,7 @@ s32 grCastle_801CFBD4(Ground_GObj* gobj, s32 arg1)
+@@ -1585,21 +1621,7 @@ s32 grCastle_801CFBD4(Ground_GObj* gobj, s32 arg1)
  
              if (arg1 != 0) {
                  if (HSD_JObjGetFlags(jobj) & 0x10) {
@@ -124758,7 +124808,7 @@ index 13bfb555b..6efff6f3c 100644
                          HSD_JObjClearFlags(jobj, JOBJ_HIDDEN);
                          if (eff_a != NULL && eff_b != NULL) {
                              if (gm_8016AE80() != -1 && gm_8016B238() == 0) {
-@@ -1653,10 +1668,10 @@ s32 grCastle_801CFBD4(Ground_GObj* gobj, s32 arg1)
+@@ -1653,10 +1675,10 @@ s32 grCastle_801CFBD4(Ground_GObj* gobj, s32 arg1)
                                                    HSD_GObj*))(
                                              Event) cb2.callbacks[i]);
                                  grMaterial_801C8DE0(
@@ -124771,7 +124821,7 @@ index 13bfb555b..6efff6f3c 100644
                              }
                          }
                          HSD_JObjSetScaleY(target, newScale);
-@@ -1749,7 +1764,7 @@ void grCastle_801D02B8(Ground_GObj* gobj)
+@@ -1749,7 +1771,7 @@ void grCastle_801D02B8(Ground_GObj* gobj)
      }
  }
  
@@ -124780,7 +124830,7 @@ index 13bfb555b..6efff6f3c 100644
  {
      Ground* gp = GET_GROUND(gobj);
      if (gp->u.castle.xC8 == 0) {
-@@ -1759,9 +1774,20 @@ void grCastle_801D0520(Ground_GObj* gobj, int renderpass)
+@@ -1759,9 +1781,20 @@ void grCastle_801D0520(Ground_GObj* gobj, int renderpass)
  
  static inline void grCastle_801D0550_sub(unkCastle* arg0, s32 i)
  {
@@ -124801,7 +124851,7 @@ index 13bfb555b..6efff6f3c 100644
      Ground_801C53EC(0x53020U);
  }
  
-@@ -1798,9 +1824,18 @@ void grCastle_801D0680(void* arg0, unkCastle* arg1)
+@@ -1798,9 +1831,18 @@ void grCastle_801D0680(void* arg0, unkCastle* arg1)
  static void grCastle_801D06CC_sub(unkCastle* arg0, Ground_GObj* gobj, s32 i)
  {
      if (ftLib_80086960(gobj) || itGetKind(gobj) != It_PKind_Random) {
@@ -124820,7 +124870,7 @@ index 13bfb555b..6efff6f3c 100644
          Ground_801C53EC(0x53020U);
      }
  }
-@@ -1830,7 +1865,7 @@ void grCastle_801D08AC(void* arg0, unkCastle* arg1, Ground_GObj* gobj)
+@@ -1830,7 +1872,7 @@ void grCastle_801D08AC(void* arg0, unkCastle* arg1, Ground_GObj* gobj)
      grCastle_801D06CC_sub(arg1, gobj, 4);
  }
  
@@ -124829,7 +124879,7 @@ index 13bfb555b..6efff6f3c 100644
  {
      Ground* gp = gobj->user_data;
      int i;
-@@ -1843,8 +1878,8 @@ void fn_801D0924(HSD_GObj* gobj, int renderpass)
+@@ -1843,8 +1885,8 @@ void fn_801D0924(HSD_GObj* gobj, int renderpass)
          PAD_STACK(4);
  
          for (i = 0; i < 12; i++) {
@@ -124840,7 +124890,7 @@ index 13bfb555b..6efff6f3c 100644
                              renderpass);
              }
          }
-@@ -1896,7 +1931,7 @@ void grCastle_801D0A9C(Vec3* arg0, f32 arg8)
+@@ -1896,7 +1938,7 @@ void grCastle_801D0A9C(Vec3* arg0, f32 arg8)
  
  DynamicsDesc* grCastle_801D0B04(enum_t arg)
  {
@@ -124849,6 +124899,26 @@ index 13bfb555b..6efff6f3c 100644
  }
  
  bool grCastle_801D0B0C(Vec3* v, int arg1, HSD_JObj* jobj)
+@@ -1919,6 +1961,19 @@ bool grCastle_801D0B0C(Vec3* v, int arg1, HSD_JObj* jobj)
+ 
+ static f32 grCs_804D45E0 = 0.017453292f;
+ static u8 grCs_804D45E4 = 1;
++#ifdef MU_NATIVE
++/* Slippi 3.7.0, Reset Castle Wind: the wind keeps these two values in static data, which outlive a
++ * game, and the second decides whether the wind draws an extra random number every 300 frames. Two
++ * games that played this stage differently before would seed differently and desync, so they go
++ * back to their boot values when the stage loads (online, and in replays recorded with the code). */
++static void mu_castle_wind_reset(void)
++{
++    if (mu_replay_code(MU_RC_CASTLE_WIND_RESET)) {
++        grCs_804D45E0 = 0.017453292f;   /* 0x3C8EFA35 */
++        grCs_804D45E4 = 1;
++    }
++}
++#endif
+ void grCastle_801D0BBC(void)
+ {
+     f32 angle;
 diff --git a/src/melee/gr/grcastle.h b/src/melee/gr/grcastle.h
 index af393e2b8..a6d42bde1 100644
 --- a/src/melee/gr/grcastle.h
@@ -128637,7 +128707,7 @@ index 87bf7f7a6..90ffc4d20 100644
  
  bool grKinokoRoute_8020875C(Vec3* a, int b, HSD_JObj* jobj)
 diff --git a/src/melee/gr/grkongo.c b/src/melee/gr/grkongo.c
-index faadd8162..d26d33498 100644
+index faadd8162..1f15b3e71 100644
 --- a/src/melee/gr/grkongo.c
 +++ b/src/melee/gr/grkongo.c
 @@ -5,7 +5,6 @@
@@ -128836,7 +128906,27 @@ index faadd8162..d26d33498 100644
      HSD_JObjGetTranslation(jobj, &sp44);
      HSD_JObjSetTranslate(jobj, &sp5C);
      sp34.x = sp50.x;
-@@ -1050,9 +1055,7 @@ void grKongo_801D7134(HSD_GObj* gobj, s32 arg1)
+@@ -828,6 +833,19 @@ void grKongo_801D69B0(HSD_GObj* gobj)
+     f32 rot_x;
+     u32 i;
+ 
++#ifdef MU_NATIVE
++    /* Slippi 3.7.0, Reset Kongo Log Bridge (801D69B0, start of the log bridge init): the bridge
++     * keeps its physics in static data, which outlives a game. The loop below resets each log's
++     * angle but not its velocity (+0x10), which the first physics step applies at once; the side
++     * platforms turn with the logs and players spawn on them, so two games that played this stage
++     * differently before would start in different places and desync. Every velocity goes to 0.0
++     * (online, and in replays recorded with the code). */
++    if (mu_replay_code(MU_RC_KONGO_LOG_RESET)) {
++        for (i = 0U; i < 0xFU; i += 1) {
++            grKg_803E188C[i].unk10 = 0.0f;
++        }
++    }
++#endif
+     for (i = 0U; i < 0xFU; i += 1) {
+         grKg_803E188C[i].unk4 =
+             Ground_801C3FA4(gobj, (s32) grKg_803E188C[i].unk0);
+@@ -1050,9 +1068,7 @@ void grKongo_801D7134(HSD_GObj* gobj, s32 arg1)
      }
  
      mpLib_80057424(4);
@@ -128847,7 +128937,7 @@ index faadd8162..d26d33498 100644
          s32 id;
          temp = table->unk14;
          id = line_id;
-@@ -1062,10 +1065,7 @@ void grKongo_801D7134(HSD_GObj* gobj, s32 arg1)
+@@ -1062,10 +1078,7 @@ void grKongo_801D7134(HSD_GObj* gobj, s32 arg1)
          } else if (i == 14) {
              mpLib_80056758(id + 1, 0.0f, temp, 0.0f, temp);
          }
@@ -128859,7 +128949,7 @@ index faadd8162..d26d33498 100644
  }
  
  /// @copydoc mpLib_JointCollisionCallback
-@@ -1122,48 +1122,57 @@ void grKongo_801D77E0(HSD_GObj* gobj, s32 arg1)
+@@ -1122,48 +1135,57 @@ void grKongo_801D77E0(HSD_GObj* gobj, s32 arg1)
          gp->u.kongo.xD4 = 0.0f;
          gp->u.kongo.xD8 = 0.0f;
      } else {
@@ -128944,7 +129034,7 @@ index faadd8162..d26d33498 100644
  }
  
  void grKongo_801D7BBC(Ground_GObj* gobj)
-@@ -1302,23 +1311,22 @@ Vec3* grKongo_801D7E78(HSD_GObj* gobj, Vec3* pos)
+@@ -1302,23 +1324,22 @@ Vec3* grKongo_801D7E78(HSD_GObj* gobj, Vec3* pos)
              jobj = Ground_801C3FA4(gobj, 2);
              if (jobj != NULL) {
                  lb_8000B1CC(jobj, NULL, pos);
@@ -128975,20 +129065,20 @@ index faadd8162..d26d33498 100644
      return pos;
  }
  
-@@ -1409,32 +1417,27 @@ static int fn_801D8134(HSD_GObj* arg0, HSD_GObj* arg1)
+@@ -1409,32 +1430,27 @@ static int fn_801D8134(HSD_GObj* arg0, HSD_GObj* arg1)
  
      gp = GET_GROUND(arg0);
  
 -    if (gp->u.kongo3.xC6 != 0) {
 -        goto done;
 -    }
--
--    Ground_801C4DA0(&pos_gnd, &unk);
--    ftLib_80086644(arg1, &pos_ft);
 +    if (gp->u.kongo3.xC6 == 0) {
 +        Ground_801C4DA0(&pos_gnd, &unk);
 +        ftLib_80086644(arg1, &pos_ft);
  
+-    Ground_801C4DA0(&pos_gnd, &unk);
+-    ftLib_80086644(arg1, &pos_ft);
+-
 -    if (!((pos_gnd.x - pos_ft.x) * (pos_gnd.x - pos_ft.x) +
 -              (pos_gnd.y - pos_ft.y) * (pos_gnd.y - pos_ft.y) +
 -              (pos_gnd.z - pos_ft.z) * (pos_gnd.z - pos_ft.z) <
@@ -129027,7 +129117,7 @@ index faadd8162..d26d33498 100644
      return 0;
  }
  
-@@ -1452,10 +1455,12 @@ void grKongo_801D828C(HSD_GObj* gobj)
+@@ -1452,10 +1468,12 @@ void grKongo_801D828C(HSD_GObj* gobj)
      if (gp->u.kongo3.xC6 != 1) {
          return;
      }
@@ -129043,7 +129133,7 @@ index faadd8162..d26d33498 100644
          grMaterial_801C95C4(gobj);
      }
  }
-@@ -1522,7 +1527,7 @@ f32 grKongo_801D8314(void)
+@@ -1522,7 +1540,7 @@ f32 grKongo_801D8314(void)
  
  DynamicsDesc* grKongo_801D8444(enum_t arg)
  {

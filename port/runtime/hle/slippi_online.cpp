@@ -13,6 +13,7 @@
 #include "yougame_friends.h"
 #include "native_slippi_bridge.h"
 #include "slippi_net.h"
+#include "slippi_input_suggestions.h"
 #include "slippi_report.h"
 #ifdef YOUGAME_AGENT_TEST_HOOK
 #include "yougame_agent_static.h"
@@ -216,8 +217,13 @@ static void send_early_pad(int32_t target, const uint8_t pad[host::early_input::
   std::lock_guard<std::mutex> lk(g_early_send_mutex);
   if (g_netplay) g_netplay->SendEarlyPad(target, pad);
 }
+static void send_suggestion(int32_t target, uint32_t seq, const uint8_t pad[host::early_input::kPadBytes]) {
+  std::lock_guard<std::mutex> lk(g_early_send_mutex);
+  if (g_netplay) g_netplay->SendSlippiPadSuggestion(target, seq, pad);
+}
 static void stop_early_inputs() {
   host::early_input::stop();
+  suggestions::end_game();
 }
 static int g_match_delay = 0;
 bool g_in_online_match = false;
@@ -440,7 +446,7 @@ bool should_skip_online_frame(int32_t frame, int32_t finalized_frame) {
   uint8_t remote_count = bounded_remote_count();
   for (uint8_t i = 0; i < remote_count; ++i) {
     auto pad = g_netplay->GetSlippiRemotePad(i, ROLLBACK_MAX_FRAMES);
-    if (pad->is_disconnected) { g_stall_frame_counts[i] = 0; continue; }
+    if (pad->is_disconnected && pad->despawn_frame != 0) { g_stall_frame_counts[i] = 0; continue; }
     int32_t latest = pad->latest_frame;
     bool enough = latest - finalized_frame >= (frame - finalized_frame - ROLLBACK_MAX_FRAMES);
     // Start in step. The Source Port loads a match with no emulated disc time, so it reached frame 1
@@ -604,6 +610,7 @@ void prepare_opponent_inputs(int32_t frame, bool should_skip, std::vector<uint8_
   q.push_back(frame_result);
   uint8_t remote_count = bounded_remote_count();
   q.push_back(remote_count);
+  g_netplay->FillDroppedPlayerInputs(frame);
   std::unique_ptr<RemotePadOutput> results[REMOTE_PLAYER_MAX];
   int32_t latest_from_opps = -123 - 1;
   uint32_t last_checksum_frame = 0, last_checksum = 0;
@@ -625,17 +632,10 @@ void prepare_opponent_inputs(int32_t frame, bool should_skip, std::vector<uint8_
       latest_from_opps = results[i]->latest_frame;
     }
   }
-  constexpr int32_t DESPAWN_INTERVAL = 30;
-  uint8_t should_despawn[REMOTE_PLAYER_MAX] = {0, 0, 0};
-  for (int i = 0; i < remote_count; ++i) {
-    if (!results[i]->is_disconnected) continue;
-    int32_t threshold = results[i]->latest_frame + 2 * ROLLBACK_MAX_FRAMES + 2;
-    int32_t despawn = ((threshold + DESPAWN_INTERVAL - 1) / DESPAWN_INTERVAL) * DESPAWN_INTERVAL;
-    if (frame >= despawn) should_despawn[i] = 1;
-  }
   for (int i = 0; i < remote_count; ++i) {
     if (!results[i]->is_disconnected) { append_u32(q, (uint32_t)results[i]->checksum_frame); append_u32(q, results[i]->checksum); continue; }
-    results[i]->latest_frame = latest_from_opps;
+    // A dropped player's checksums stop: the game gets someone else's current one to compare. Their
+    // frames need no such trick, FillDroppedPlayerInputs keeps them current.
     append_u32(q, last_checksum_frame); append_u32(q, last_checksum);
   }
   for (int i = remote_count; i < REMOTE_PLAYER_MAX; ++i) { append_u32(q, 0); append_u32(q, 0); }
@@ -649,13 +649,30 @@ void prepare_opponent_inputs(int32_t frame, bool should_skip, std::vector<uint8_
   }
   for (int i = remote_count; i < REMOTE_PLAYER_MAX; ++i) { latest_read[i] = frame; append_u32(q, (uint32_t)frame); }
   append_u32(q, (uint32_t)*std::min_element(std::begin(latest_read), std::end(latest_read)));
+  uint8_t latest_inputs[REMOTE_PLAYER_MAX][PAD_FULL_SIZE] = {};
   for (int i = 0; i < REMOTE_PLAYER_MAX; ++i) {
     std::vector<uint8_t> tx;
     if (i < remote_count && offset[i] < (int)results[i]->data.size()) tx.assign(results[i]->data.begin() + offset[i], results[i]->data.end());
     tx.resize(PAD_FULL_SIZE * ROLLBACK_MAX_FRAMES, 0);
+    std::copy(tx.begin(), tx.begin() + PAD_FULL_SIZE, latest_inputs[i]);   // what the game loads when it has no input for the frame
     q.insert(q.end(), tx.begin(), tx.end());
   }
-  for (int i = 0; i < REMOTE_PLAYER_MAX; ++i) q.push_back(should_despawn[i]);
+  // Slippi 3.7.0. The frame each remote player's fighter despawns on, 0 if it does not: the game
+  // compares it with the frame it is processing, so it lands on the same frame for everyone, also in
+  // a rollback.
+  for (int i = 0; i < REMOTE_PLAYER_MAX; ++i) append_u32(q, i < remote_count ? (uint32_t)results[i]->despawn_frame : 0);
+  // The input to predict with for each of the frames after each player's latest: the latest input,
+  // or a newer input suggestion from that player. The game checks every prediction against the real
+  // input and rolls back if they differ.
+  for (int i = 0; i < REMOTE_PLAYER_MAX; ++i) {
+    uint8_t predictions[suggestions::kPredictedFrames][suggestions::kReportBytes];
+    for (auto& p : predictions) std::memcpy(p, latest_inputs[i], PAD_FULL_SIZE);
+    if (i < remote_count) suggestions::fill_predictions((size_t)i, latest_read[i], results[i]->is_disconnected, latest_inputs[i], predictions);
+    q.insert(q.end(), &predictions[0][0], &predictions[0][0] + sizeof predictions);
+  }
+  // Random bits the game sends with its next pad and mixes into the RNG seed. Not from the match's
+  // own generator: the opponent sees them and could work out that generator's state.
+  { static std::random_device pad_rng_bits; q.push_back((uint8_t)(pad_rng_bits() & 0xFF)); }
   // Early inputs, Source Port only (its online code is native and reads past Slippi's reply; the
   // Static Recomp's game code reads the fixed reply and must get exactly that): per remote, a count
   // and then entries of target pad frame + 12-byte pad, for frames after that remote's latest
@@ -702,6 +719,7 @@ void handle_online_inputs(const uint8_t* payload, std::vector<uint8_t>& q) {
   uint32_t finalized_checksum = be32(payload + 8);
   uint8_t delay = payload[12];
   const uint8_t* inputs = payload + 13;
+  const bool is_leaving = payload[26] != 0;   // Slippi 3.7.0; payload[25] is the port the local inputs come from
   if (frame == 1) {
     g_available_savestates.clear();
     g_active_savestates.clear();
@@ -737,9 +755,18 @@ void handle_online_inputs(const uint8_t* payload, std::vector<uint8_t>& q) {
     host::input_mark_match_start();
     // Early inputs: watch the controller for the match. Sent only to peers whose build takes them.
     host::early_input::reset_stats();
-    if (early_inputs_enabled()) host::early_input::start(send_early_pad);
+    // Slippi input suggestions: on with the same setting, and off whenever a bot is in the game, on
+    // either side (a bot is expected to make the connection feel good on its own).
+    bool bot_in_game = false;
+    if (g_matchmaking) for (const auto& player : g_matchmaking->GetPlayerInfo()) bot_in_game |= player.is_bot;
+    const bool suggest = early_inputs_enabled() && !bot_in_game;
+    suggestions::start_game(suggest, bounded_remote_count());
+    if (early_inputs_enabled()) host::early_input::start(send_early_pad, suggest ? send_suggestion : nullptr);
     g_local_checksums.clear(); g_checksums_compared = 0; g_checksums_mismatched = 0; g_trace_desync_pending = false; std::fill(std::begin(g_last_checksum_frame), std::end(g_last_checksum_frame), 0);
   }
+  // The local player chose to leave (party mode): that ends the game for this side as losing the
+  // connection does, and the other players take it for a disconnect too.
+  if (is_leaving && !is_disconnected() && g_netplay) g_netplay->ForceDisconnect();
   if (is_disconnected()) {
     q.push_back(3);
     return;
@@ -757,6 +784,7 @@ void handle_online_inputs(const uint8_t* payload, std::vector<uint8_t>& q) {
     host::input_note_pad_frame(frame);
   }
   prepare_opponent_inputs(frame, skip, q);
+  host::early_input::note_frame_done(skip, !q.empty() && q[0] == 4, inputs);
   // Session trace: the tick before is complete now; open this one.
   trace_close_tick();
   g_trace_record = {};
@@ -1368,10 +1396,7 @@ void prepare_online_match_state(std::vector<uint8_t>& q) {
       g_game_facts.characters[1] = block[0x60 + 0x24];
     }
   }
-  if (g_last_search.mode == Matchmaking::PARTY) {
-    block[0x0] = 0x12; block[0x3] = 0xCC;
-    uint32_t t = 5 * 60; block[0x10] = (uint8_t)(t >> 24); block[0x11] = (uint8_t)(t >> 16); block[0x12] = (uint8_t)(t >> 8); block[0x13] = (uint8_t)t;
-  } else {
+  {
     block[0x0] = 0x32; block[0x3] = 0x4C;
     uint32_t t = 8 * 60;
     // Tests only: MELEE_ONLINE_TEST_TIMER=<seconds> ends a match quickly so the
@@ -1424,6 +1449,19 @@ void prepare_online_match_state(std::vector<uint8_t>& q) {
   match_id.resize(51);
   q.insert(q.end(), match_id.begin(), match_id.end());
   q.push_back((uint8_t)alt_stage_mode);
+  // Slippi 3.7.0: what decides each player's rank, and their ranked MMR, by port, then whether each
+  // is a bot account. The game records them in the replay.
+  for (int i = 0; i < 4; ++i) {
+    const UserInfo info = i < (int)players.size() ? players[i] : UserInfo();
+    uint32_t rating, mmr;
+    std::memcpy(&rating, &info.ranked_rating, 4); std::memcpy(&mmr, &info.ranked_mmr, 4);
+    append_u32(q, rating);
+    append_u32(q, (uint32_t)info.ranked_update_count);
+    q.push_back((uint8_t)((uint16_t)info.ranked_global_placement >> 8)); q.push_back((uint8_t)info.ranked_global_placement);
+    q.push_back((uint8_t)((uint16_t)info.ranked_regional_placement >> 8)); q.push_back((uint8_t)info.ranked_regional_placement);
+    append_u32(q, mmr);
+  }
+  for (int i = 0; i < 4; ++i) q.push_back((uint8_t)(i < (int)players.size() && players[i].is_bot));
 }
 
 void prepare_online_status(std::vector<uint8_t>& q) {
@@ -1462,6 +1500,12 @@ void handle_report_game(const uint8_t* p) {
               early_inputs_enabled() ? (early_inputs_accept() ? "on" : "sending only") : "off",
               (unsigned long long)e.changes, (unsigned long long)e.packets, (unsigned long long)e.guarded,
               (unsigned long long)e.resent_after_skip, (unsigned long long)e.follow_ups, (unsigned long long)e.received, (unsigned long long)e.samples, e.local_port + 1);
+  }
+  {
+    const suggestions::Stats s = suggestions::stats();
+    host::log("slippi: input suggestions %s: %llu sent, %llu received, %llu replies predicted from one, %d players ignored",
+              s.enabled ? "on" : "off", (unsigned long long)host::early_input::stats().suggestions,
+              (unsigned long long)s.received, (unsigned long long)s.predicted_frames, s.ignored_players);
   }
   stop_early_inputs();
   g_latched_delay = 0;   // the next match picks its delay from its own ping
@@ -1568,7 +1612,12 @@ void set_native_gameplay_profile(NativeGameplayProfile profile) {
 uint64_t rollback_count() { return g_rollbacks; }
 void note_rollback(int32_t to_frame) { ++g_rollbacks; trace_rollback(to_frame); }
 bool early_inputs_enabled() { return host::early_input::enabled(); }
-bool early_inputs_accept() { return host::early_input::enabled() && host::game_image != nullptr; }
+// MELEE_TEST_NO_EARLY_PADS=1 (tests only): this side does not take this build's early pads, as a Slippi
+// Dolphin player does not, so the other side sends it Slippi input suggestions instead.
+bool early_inputs_accept() {
+  static const bool no_early_pads = [] { const char* v = host::test_env::getenv("MELEE_TEST_NO_EARLY_PADS"); return v && *v == '1'; }();
+  return host::early_input::enabled() && host::game_image != nullptr && !no_early_pads;
+}
 // The project's own peer-to-peer session (app/source_p2p.cpp) publishes its state in
 // host::netplay::session(). Everything in the host that asks "is a network match running" asks the
 // functions below, so when Slippi has no session of its own they answer from that state: offline-only

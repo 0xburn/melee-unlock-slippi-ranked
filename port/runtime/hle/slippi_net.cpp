@@ -41,12 +41,13 @@
 #include <thread>
 
 #include "slippi_version.h"
+#include "slippi_input_suggestions.h"
 
 using json = nlohmann::json;
 
 namespace slippi {
 
-const char* const SLIPPI_SEMVER = "3.6.4";
+const char* const SLIPPI_SEMVER = "3.7.0";
 
 // Type-checked reads of JSON that came from a server or a file: a missing key, a null or a value of
 // another type gives the default. None of these throws (value() and get<T>() do on a wrong type).
@@ -539,6 +540,8 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       if (!(packet >> frame) || !(packet >> packet_player_port) || !(packet >> checksum_frame) || !(packet >> checksum)) { host::log("slippi: pad packet too small"); break; }
       uint8_t pidx = PlayerIdxFromPort(packet_player_port);
       if (pidx >= remote_player_count_) { host::log("slippi: pad packet with invalid player idx %u", pidx); break; }
+      // The other players were told which inputs this side has of a dropped player: that cannot change any more.
+      if (packet_player_port >= PLAYER_COUNT_MAX || !player_active_[packet_player_port].load(std::memory_order_acquire)) break;
       int conn_idx = 0;
       for (int i = 0; i < (int)server_.size(); ++i)
         if (peer->address.host == server_[i]->address.host && peer->address.port == server_[i]->address.port) { conn_idx = i; break; }
@@ -570,11 +573,26 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       int64_t inputs_to_copy;
       {
         std::lock_guard<std::mutex> lk(pad_mutex_);
-        const auto received = receive::PadInputs(frame, packet.data(), packet.size(), remote_pad_queue_[pidx]);
+        const auto received = receive::PadInputs(frame, packet.data(), packet.size(), remote_pad_queue_[pidx], &remote_pad_history_[pidx]);
         inputs_to_copy = received.inputs;
         if (received.error == receive::PadError::TooSmall) { host::log("slippi: pad packet too small for %lld inputs", (long long)inputs_to_copy); break; }
         if (received.error == receive::PadError::TooMany) { host::log("slippi: pad packet with too many frames (%lld)", (long long)inputs_to_copy); break; }
         remote_checksums_[pidx] = {checksum_frame, checksum};
+      }
+      // Input suggestions check their predictions against the real inputs, oldest first.
+      static const bool trace_suggestions = [] { const char* v = std::getenv("MELEE_EARLY_TRACE"); return v && *v == '1'; }();
+      const uint64_t mistakes_before = trace_suggestions ? suggestions::mistakes(pidx, nullptr) : 0;
+      for (int64_t i = inputs_to_copy - 1; i >= 0; --i)
+        if (suggestions::on_remote_input(pidx, (int32_t)((int64_t)frame - i), packet.data() + 14 + i * PAD_WIRE_SIZE))
+          host::log("slippi: ignoring player %u's input suggestions for the rest of the game from frame %d: they kept disagreeing with the real inputs",
+                    packet_player_port, (int32_t)((int64_t)frame - i));
+      if (trace_suggestions) {
+        suggestions::Remote::Mistake m;
+        if (suggestions::mistakes(pidx, &m) != mistakes_before && m.frame < 1200)
+          host::log("suggestion wrong: frame %d seq %u cost %u suggested %02x%02x %d,%d %d,%d %u %u previous %02x%02x %d,%d real %02x%02x %d,%d %d,%d %u %u",
+                    m.frame, m.seq, m.cost, m.suggested[0], m.suggested[1], (int8_t)m.suggested[2], (int8_t)m.suggested[3], (int8_t)m.suggested[4], (int8_t)m.suggested[5], m.suggested[6], m.suggested[7],
+                    m.previous[0], m.previous[1], (int8_t)m.previous[2], (int8_t)m.previous[3],
+                    m.real[0], m.real[1], (int8_t)m.real[2], (int8_t)m.real[3], (int8_t)m.real[4], (int8_t)m.real[5], m.real[6], m.real[7]);
       }
       if (inputs_to_copy > 0) {
         Packet ack;
@@ -605,6 +623,41 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       if (frame % 600 == 0 && pidx == 0) host::log("slippi: ping %llu ms", (unsigned long long)(ping_us_[0] / 1000));
       break;
     }
+    case NP_MSG_SLIPPI_PAD_SUGGESTION: {
+      // Slippi 3.7.0 input suggestions: the sender's newest input between frames, for predicting its
+      // not yet received frames (slippi_input_suggestions.h). The real input still decides every frame.
+      uint8_t port; int32_t target; uint32_t seq;
+      constexpr size_t pad_offset = 10;   // message id, port, target frame and seq
+      if (!(packet >> port) || !(packet >> target) || !(packet >> seq) || packet.size() < pad_offset + (size_t)PAD_DATA_SIZE) { host::log("slippi: input suggestion packet too small"); break; }
+      const uint8_t pidx = PlayerIdxFromPort(port);
+      if (port == player_idx_ || pidx >= remote_player_count_) { host::log("slippi: input suggestion with invalid player idx %u", pidx); break; }
+      suggestions::on_remote_suggestion(pidx, target, seq, packet.data() + pad_offset);
+      break;
+    }
+    case NP_MSG_SLIPPI_PLAYER_DROP: {
+      uint8_t sender_port, dropped_port, input_count; int32_t last_frame;
+      if (!(packet >> sender_port) || !(packet >> dropped_port) || !(packet >> last_frame) || !(packet >> input_count)) { host::log("slippi: player drop packet too small"); break; }
+      constexpr size_t inputs_offset = 8;   // message id, ports, last frame and input count
+      if (packet.size() < inputs_offset + (size_t)input_count * PAD_WIRE_SIZE) { host::log("slippi: player drop packet too small for its inputs"); break; }
+      if (sender_port == player_idx_ || sender_port == dropped_port || last_frame < 0 || sender_port >= PLAYER_COUNT_MAX || dropped_port >= PLAYER_COUNT_MAX ||
+          PlayerIdxFromPort(sender_port) >= remote_player_count_ || (dropped_port != player_idx_ && PlayerIdxFromPort(dropped_port) >= remote_player_count_)) {
+        host::log("slippi: invalid player drop packet (sender %u, dropped %u, last frame %d)", sender_port, dropped_port, last_frame);
+        break;
+      }
+      // The others remove this side if it is about us. A player already lost has no say, or two players
+      // that lost each other would take each other out.
+      if (dropped_port == player_idx_ || !player_active_[sender_port].load(std::memory_order_acquire)) break;
+      // Losing a player to anyone is losing them to everyone. This also reports what we have of them.
+      ForceDisconnectPlayer(dropped_port);
+      ProcessPlayerDrops();
+      const int32_t despawn = despawn_frames_[dropped_port].load(std::memory_order_acquire);
+      if (despawn != 0) {
+        if (last_frame + DROP_DESPAWN_FRAMES > despawn) host::log("slippi: report about player %u came too late (last frame %d, despawn frame %d)", dropped_port, last_frame, despawn);
+        break;
+      }
+      AddPlayerDropReportInputs(PlayerIdxFromPort(dropped_port), last_frame, input_count, packet.data() + inputs_offset);
+      break;
+    }
     case NP_MSG_SLIPPI_MATCH_SELECTIONS: {
       auto s = ReadSelections(packet);
       if (!s->error) {
@@ -615,6 +668,7 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
           std::scoped_lock lock(selection_mutex_, timing_mutex_, pad_mutex_);
           receive::Selections(*s, match_info_.remote[idx], remote_game_started_, idx,
             remote_pad_queue_[idx], early_pads_[idx]);
+          if (remote_pad_queue_[idx].empty()) { remote_pad_history_[idx].clear(); suggestions::reset_remote(idx); }
           has_game_started_ = false;
         }
       }
@@ -873,6 +927,19 @@ NetplayClient::RemoteBuild NetplayClient::GetRemoteBuild(int index) {
   return remote_build_[index];
 }
 
+void NetplayClient::SendSlippiPadSuggestion(int32_t target_frame, uint32_t seq, const uint8_t pad[host::early_input::kPadBytes]) {
+  if (status_.load(std::memory_order_acquire) != ConnectStatus::CONNECTED) return;
+  bool anyone = false;
+  {
+    std::lock_guard<std::mutex> lk(build_mutex_);
+    for (int i = 0; i < remote_player_count_; ++i) if (!remote_build_[i].early_pads) anyone = true;
+  }
+  if (!anyone) return;   // everyone on the other side takes this build's early pads
+  auto p = std::make_unique<Packet>();
+  *p << (uint8_t)NP_MSG_SLIPPI_PAD_SUGGESTION << player_idx_ << target_frame << seq;
+  p->append(pad, PAD_DATA_SIZE);
+  SendAsync(std::move(p));
+}
 void NetplayClient::SendEarlyPad(int32_t target, const uint8_t pad[host::early_input::kPadBytes]) {
   ConnectStatus st = status_.load(std::memory_order_acquire);
   if (st != ConnectStatus::CONNECTED) return;
@@ -928,6 +995,12 @@ void NetplayClient::Send(Packet& packet) {
     enet_uint32 flags = ENET_PACKET_FLAG_RELIABLE;
     uint8_t channel = 0;
     if (mid == NP_MSG_SLIPPI_PAD || mid == NP_MSG_SLIPPI_PAD_ACK) { flags = ENET_PACKET_FLAG_UNSEQUENCED; channel = 1; }
+    if (mid == NP_MSG_SLIPPI_PAD_SUGGESTION) {
+      // A peer that takes this build's early pads gets those instead, as before.
+      std::lock_guard<std::mutex> lk(build_mutex_);
+      if (i < (size_t)REMOTE_PLAYER_MAX && remote_build_[i].early_pads) continue;
+      flags = ENET_PACKET_FLAG_UNSEQUENCED; channel = 1;
+    }
     if (mid == NP_MSG_MU_PING) {
       std::lock_guard<std::mutex> lk(build_mutex_);
       if (i >= (size_t)REMOTE_PLAYER_MAX || !remote_build_[i].pings) continue;
@@ -952,6 +1025,13 @@ void NetplayClient::Send(Packet& packet) {
     ENetPacket* epac = enet_packet_create(packet.data(), packet.size(), flags);
     enet_peer_send(server_[i], channel, epac);
   }
+}
+
+// ENet drops unreliable packets on purpose while the round trip time rises, and pads and acks are all
+// unreliable: a latency rise became gaps in the inputs, which stall the game. A deceleration of 0 keeps
+// the throttle at full, and ENet sends the setting to the peer too (Slippi 3.7.0).
+static void disable_packet_throttle_drops(ENetPeer* peer) {
+  enet_peer_throttle_configure(peer, ENET_PEER_PACKET_THROTTLE_INTERVAL, ENET_PEER_PACKET_THROTTLE_ACCELERATION, 0);
 }
 
 void NetplayClient::Disconnect() {
@@ -1015,6 +1095,7 @@ void NetplayClient::ThreadFunc() {
           break;
         case ENET_EVENT_TYPE_CONNECT: {
           if (!ev.peer) break;
+          disable_packet_throttle_drops(ev.peer);
           int early_idx = 0;
           for (int i = 0; i < (int)remote_addrs.size(); ++i)
             if (remote_addrs[i].host == ev.peer->address.host && remote_addrs[i].port == ev.peer->address.port) { early_idx = i; break; }
@@ -1126,6 +1207,8 @@ void NetplayClient::ThreadFunc() {
       next_ping_ms = time_ms() + 100;
       SendPrematchPing();
     }
+    // Everyone can be halted waiting on a dropped player, when no packet arrives to wake this thread.
+    const bool waiting_on_drop = ProcessPlayerDrops();
     for (auto& conn : active_connections_) {
       for (auto& peer : conn.second) {
         if (peer.second.is_disconnected || player_active_[peer.second.player_idx].load(std::memory_order_acquire)) continue;
@@ -1140,7 +1223,7 @@ void NetplayClient::ThreadFunc() {
 #ifdef YOUGAME_AGENT_TEST_HOOK
     // Preserve the old service/drain path exactly when the keys are absent.
     if (net_config.enabled()) drain_outgoing();
-    const uint32_t normal_wait = held.empty() ? 250 : 1;
+    const uint32_t normal_wait = !held.empty() ? 1 : waiting_on_drop ? 10 : 250;
     const uint32_t service_wait = net_config.enabled() ? delayed.wait_ms(time_ms(), normal_wait) : normal_wait;
     int net = enet_host_service(client_, &ev, service_wait);
     if (net_config.enabled() && net > 0 && ev.type == ENET_EVENT_TYPE_DISCONNECT) {
@@ -1149,7 +1232,7 @@ void NetplayClient::ThreadFunc() {
     }
     drain_outgoing();
 #else
-    int net = enet_host_service(client_, &ev, held.empty() ? 250 : 1);
+    int net = enet_host_service(client_, &ev, !held.empty() ? 1 : waiting_on_drop ? 10 : 250);
     for (;;) {
       std::unique_ptr<Packet> p;
       { std::lock_guard<std::mutex> lk(async_mutex_); if (async_queue_.empty()) break; p = std::move(async_queue_.front()); async_queue_.pop_front(); }
@@ -1180,22 +1263,31 @@ void NetplayClient::ThreadFunc() {
         std::string key = peer_key(ev.peer);
         if (active_connections_.count(key) && active_connections_[key].count(ev.peer)) active_connections_[key][ev.peer].is_disconnected = true;
         bool all_peers_gone = AreAllPeersDisconnectedForKey(key);
-        if (all_peers_gone && active_connections_.count(key) && active_connections_[key].count(ev.peer))
-          player_active_[active_connections_[key][ev.peer].player_idx].store(false, std::memory_order_release);
         bool connected_client = false;
         for (size_t i = 0; i < server_.size(); ++i)
           if (ev.peer->address.host == server_[i]->address.host && ev.peer->address.port == server_[i]->address.port) connected_client = true;
+        // Only a port this side is really connected to: losing a player makes everyone else drop them too.
+        if (connected_client && all_peers_gone && active_connections_.count(key) && active_connections_[key].count(ev.peer))
+          player_active_[active_connections_[key][ev.peer].player_idx].store(false, std::memory_order_release);
         if (connected_client && ev.data != 0) disconnect_reason_.store(ev.data, std::memory_order_release);
         host::log("slippi: disconnect (all peers gone: %d, connected client: %d)", all_peers_gone, connected_client);
         if (connected_client && all_peers_gone && AreAllConnectionsDisconnected()) do_loop_.store(false);
         break;
       }
       case ENET_EVENT_TYPE_CONNECT: {
+        disable_packet_throttle_drops(ev.peer);
         int late_idx = 0;
         for (int i = 0; i < (int)server_.size(); ++i)
           if (server_[i]->address.host == ev.peer->address.host && server_[i]->address.port == ev.peer->address.port) { late_idx = i; break; }
         ActiveConnectionInfo info;
         info.player_idx = match_info_.remote[late_idx].player_idx;
+        // A dropped player stays dropped: the other players have moved on without them.
+        if (info.player_idx < PLAYER_COUNT_MAX && player_drop_times_ms_[info.player_idx] != 0) {
+          info.is_disconnected = true;
+          active_connections_[peer_key(ev.peer)][ev.peer] = info;
+          enet_peer_disconnect(ev.peer, 0);
+          break;
+        }
         active_connections_[peer_key(ev.peer)][ev.peer] = info;
         player_active_[info.player_idx].store(true, std::memory_order_release);
         break;
@@ -1246,7 +1338,7 @@ void NetplayClient::SendSlippiPad(std::unique_ptr<Pad> pad) {
   int32_t frame = local_pad_queue_.front()->frame;
   auto spac = std::make_unique<Packet>();
   *spac << (uint8_t)NP_MSG_SLIPPI_PAD << frame << player_idx_ << local_pad_queue_.front()->checksum_frame << local_pad_queue_.front()->checksum;
-  for (auto& p : local_pad_queue_) spac->append(p->buf, PAD_DATA_SIZE);
+  for (auto& p : local_pad_queue_) spac->append(p->buf, PAD_WIRE_SIZE);
   SendAsync(std::move(spac));
   uint64_t t = time_us();
   {
@@ -1323,6 +1415,11 @@ uint8_t NetplayClient::GetSlippiRemoteSentChatMessage(bool chat_enabled) {
 std::unique_ptr<RemotePadOutput> NetplayClient::GetSlippiRemotePad(int index, int max_frame_count) {
   std::lock_guard<std::mutex> lk(pad_mutex_);
   auto out = std::make_unique<RemotePadOutput>();
+  if (index >= 0 && index < REMOTE_PLAYER_MAX) {
+    out->player_idx = (uint8_t)(index >= player_idx_ ? index + 1 : index);
+    out->is_disconnected = !player_active_[out->player_idx].load(std::memory_order_acquire);
+    out->despawn_frame = despawn_frames_[out->player_idx].load(std::memory_order_acquire);
+  }
   if (index < 0 || index >= REMOTE_PLAYER_MAX || remote_pad_queue_[index].empty()) {
     Pad empty(0);
     out->latest_frame = 0;
@@ -1332,8 +1429,6 @@ std::unique_ptr<RemotePadOutput> NetplayClient::GetSlippiRemotePad(int index, in
   out->latest_frame = 0;
   out->checksum_frame = remote_checksums_[index].frame;
   out->checksum = remote_checksums_[index].value;
-  out->player_idx = (uint8_t)(index >= player_idx_ ? index + 1 : index);
-  out->is_disconnected = !player_active_[out->player_idx].load(std::memory_order_acquire);
   int count = 0;
   for (auto it = remote_pad_queue_[index].rbegin(); it != remote_pad_queue_[index].rend(); ++it) {
     out->latest_frame = std::max(out->latest_frame, (*it)->frame);
@@ -1373,7 +1468,79 @@ void NetplayClient::ForceDisconnect(DisconnectReason reason) {
 #endif
   pending_disconnect_reason_.store((uint32_t)reason, std::memory_order_release);
   disconnect_reason_.store((uint32_t)reason, std::memory_order_release);
+  // Before the players are marked gone: this side is the one leaving, so the network thread must not
+  // take that for those players dropping and tell the others (ProcessPlayerDrops).
+  status_.store(ConnectStatus::DISCONNECTED, std::memory_order_release);
   for (uint8_t i = 0; i < remote_player_count_; ++i) ForceDisconnectPlayer(match_info_.remote[i].player_idx);
+}
+// Network thread. Finds the players just lost and tells the others which inputs this side has of them.
+// Those reports add to the player's inputs, so once they have had time to arrive the newest input is
+// the one everyone has. Returns whether a report is still awaited.
+bool NetplayClient::ProcessPlayerDrops() {
+  bool waiting = false;
+  const uint64_t now = time_ms();
+  for (int i = 0; i < remote_player_count_; ++i) {
+    const uint8_t port = match_info_.remote[i].player_idx;
+    if (port >= PLAYER_COUNT_MAX || player_active_[port].load(std::memory_order_acquire)) continue;
+    // ForceDisconnect sets the status before it marks the players: this side is leaving, nothing to report.
+    if (status_.load(std::memory_order_acquire) != ConnectStatus::CONNECTED) return false;
+    int32_t last_frame;
+    { std::lock_guard<std::mutex> lk(pad_mutex_); last_frame = remote_pad_history_[i].empty() ? 0 : remote_pad_history_[i].front().frame; }
+    if (player_drop_times_ms_[port] == 0) {
+      host::log("slippi: lost player %u, last input frame %d", port, last_frame);
+      player_drop_times_ms_[port] = now ? now : 1;
+      SendPlayerDropReport(port);
+    }
+    if (despawn_frames_[port].load(std::memory_order_acquire) != 0) continue;
+    if (now - player_drop_times_ms_[port] < DROP_REPORT_WAIT_MS) { waiting = true; continue; }
+    host::log("slippi: settled on player %u: last input frame %d, despawn frame %d", port, last_frame, last_frame + DROP_DESPAWN_FRAMES);
+    despawn_frames_[port].store(last_frame + DROP_DESPAWN_FRAMES, std::memory_order_release);
+  }
+  return waiting;
+}
+void NetplayClient::SendPlayerDropReport(uint8_t port) {
+  Packet spac;
+  spac << (uint8_t)NP_MSG_SLIPPI_PLAYER_DROP << player_idx_ << port;
+  {
+    std::lock_guard<std::mutex> lk(pad_mutex_);
+    const auto& history = remote_pad_history_[PlayerIdxFromPort(port)];
+    spac << (history.empty() ? (int32_t)0 : history.front().frame) << (uint8_t)history.size();
+    for (const auto& pad : history) spac.append(pad.buf, PAD_WIRE_SIZE);
+  }
+  Send(spac);
+}
+// Adds the inputs this side was missing from a report about a dropped player, newest first. They are
+// the real inputs: the game rolls back if they differ from what it predicted.
+void NetplayClient::AddPlayerDropReportInputs(uint8_t pidx, int32_t last_frame, uint8_t count, const uint8_t* inputs) {
+  std::lock_guard<std::mutex> lk(pad_mutex_);
+  const int32_t head = remote_pad_queue_[pidx].empty() ? 0 : remote_pad_queue_[pidx].front()->frame;
+  const int64_t missing = (int64_t)last_frame - (int64_t)head;
+  if (missing > 128) { host::log("slippi: player drop packet with too many frames (%lld)", (long long)missing); return; }
+  for (int64_t i = missing - 1; i >= 0; --i) {
+    uint8_t pad[PAD_WIRE_SIZE] = {};
+    if (i < count) std::copy_n(&inputs[i * PAD_WIRE_SIZE], PAD_WIRE_SIZE, pad);
+    else {
+      // The queue cannot have gaps: repeat an input. The desync detection catches a wrong one.
+      host::log("slippi: player drop packet is missing frame %lld", (long long)((int64_t)last_frame - i));
+      if (!remote_pad_queue_[pidx].empty()) std::copy_n(remote_pad_queue_[pidx].front()->buf, PAD_WIRE_SIZE, pad);
+    }
+    const int32_t frame = (int32_t)((int64_t)last_frame - i);
+    remote_pad_queue_[pidx].push_front(std::make_unique<Pad>(frame, pad));
+    remote_pad_history_[pidx].emplace_front(frame, pad);
+    if (remote_pad_history_[pidx].size() > 64) remote_pad_history_[pidx].pop_back();
+  }
+}
+// Game thread. A dropped player's settled last input repeats; these go in the same queue as real
+// inputs since they are as final, so the game need not know the player is gone.
+void NetplayClient::FillDroppedPlayerInputs(int32_t frame) {
+  std::lock_guard<std::mutex> lk(pad_mutex_);
+  for (int i = 0; i < remote_player_count_; ++i) {
+    const uint8_t port = match_info_.remote[i].player_idx;
+    if (port >= PLAYER_COUNT_MAX || despawn_frames_[port].load(std::memory_order_acquire) == 0) continue;
+    auto& queue = remote_pad_queue_[i];
+    if (queue.empty()) queue.push_front(std::make_unique<Pad>(0));
+    while (queue.front()->frame < frame) queue.push_front(std::make_unique<Pad>(queue.front()->frame + 1, queue.front()->buf));
+  }
 }
 bool NetplayClient::AreAllPeersDisconnectedForKey(const std::string& key) {
   if (!active_connections_.count(key)) return true;
@@ -1521,6 +1688,7 @@ void Matchmaking::disconnectFromServer() {
   server_ = nullptr;
 }
 void Matchmaking::terminateMmConnection() {
+  mm_session_.reset();   // leaves the queue if still in it
   disconnectFromServer();
   if (client_) { enet_host_destroy(client_); client_ = nullptr; }
 }
@@ -1607,6 +1775,57 @@ static json local_peer_ticket(const UserInfo& me, Matchmaking::OnlinePlayMode mo
   return resp;
 }
 
+// Public STUN servers asked for the netplay socket's public address, in order until two have answered.
+// Two are needed to tell a cone NAT, which reuses one public port, from a symmetric one, which hands
+// out a new port per destination. The later entries are for networks that block the first.
+static const std::pair<const char*, uint16_t> kStunServers[] = {
+    {"stun.l.google.com", 19302}, {"stun1.l.google.com", 19302}, {"stun.cloudflare.com", 3478}, {"global.stun.twilio.com", 3478}};
+constexpr uint64_t kStunKeepaliveIntervalMs = 15000;
+
+// A STUN binding request from the netplay socket; the reply names the public address the server saw.
+bool Matchmaking::stunBindingRequest(uint32_t host, uint16_t port, mm_service::StunObservation* result) {
+  uint8_t request[mm_service::kStunRequestLen];
+  mm_service::stun_build_request(request);
+  ENetAddress server; server.host = host; server.port = port;
+  ENetBuffer send_buf; send_buf.data = request; send_buf.dataLength = sizeof request;
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const int sent = enet_socket_send(client_->socket, &server, &send_buf, 1);
+    if (sent != (int)sizeof request) { host::log("slippi: STUN send failed (%d)", sent); return false; }
+    const uint64_t start = time_ms();
+    while (time_ms() - start < 500) {
+      if (is_mm_terminated_) return false;
+      enet_uint32 condition = ENET_SOCKET_WAIT_RECEIVE;
+      if (enet_socket_wait(client_->socket, &condition, 100) != 0) { host::log("slippi: STUN wait failed"); return false; }
+      if (!(condition & ENET_SOCKET_WAIT_RECEIVE)) continue;
+      uint8_t response[512];
+      ENetBuffer recv_buf; recv_buf.data = response; recv_buf.dataLength = sizeof response;
+      ENetAddress from;
+      const int received = enet_socket_receive(client_->socket, &from, &recv_buf, 1);
+      if (received <= 0) continue;
+      if (mm_service::stun_parse_response(request, response, (size_t)received, result)) return true;
+    }
+  }
+  return false;
+}
+// Keeps the NAT mapping of the netplay socket alive while queued. Any reply is drained, so it is not
+// left for the netplay host to find later.
+void Matchmaking::sendStunKeepalive() {
+  last_keepalive_ms_ = time_ms();
+  if (!client_ || !has_stun_addr_) return;
+  uint8_t request[mm_service::kStunRequestLen];
+  mm_service::stun_build_request(request);
+  ENetAddress server; server.host = stun_host_; server.port = stun_port_;
+  ENetBuffer send_buf; send_buf.data = request; send_buf.dataLength = sizeof request;
+  enet_socket_send(client_->socket, &server, &send_buf, 1);
+  enet_uint32 condition = ENET_SOCKET_WAIT_RECEIVE;
+  if (enet_socket_wait(client_->socket, &condition, 100) == 0 && (condition & ENET_SOCKET_WAIT_RECEIVE)) {
+    uint8_t response[512];
+    ENetBuffer recv_buf; recv_buf.data = response; recv_buf.dataLength = sizeof response;
+    ENetAddress from;
+    enet_socket_receive(client_->socket, &from, &recv_buf, 1);
+  }
+}
+
 void Matchmaking::startMatchmaking() {
   if (!yougame::session() && !local_peer.enabled) {
     std::string error;
@@ -1657,6 +1876,48 @@ void Matchmaking::startMatchmaking() {
     client_ = enet_host_create(&addr, 1, 3, 0, 0);
   }
   if (!client_) { fail("Failed to create mm client"); return; }
+  if (!mm_test_server(nullptr, nullptr)) {
+    // Slippi 3.7.0. The host is bound to the port the match is played on: talking to the STUN servers
+    // through its socket makes the NAT mapping the opponents will use and tells what it is.
+    std::vector<ENetAddress> stun_addrs;
+    for (const auto& server : kStunServers) {
+      ENetAddress a;
+      if (enet_address_set_host(&a, server.first) != 0) { host::log("slippi: could not resolve STUN server %s", server.first); continue; }
+      a.port = server.second;
+      stun_addrs.push_back(a);
+    }
+    has_stun_addr_ = !stun_addrs.empty();
+    if (has_stun_addr_) { stun_host_ = stun_addrs[0].host; stun_port_ = stun_addrs[0].port; }
+    std::string lan = has_stun_addr_ ? local_address_string(&stun_addrs[0]) : std::string();
+    // Two servers are asked what public address they see, walking the list so a network that blocks
+    // the first entries still gets an answer. The addresses themselves are never logged.
+    mm_service::StunObservation stun[2];
+    for (const auto& a : stun_addrs) {
+      if (is_mm_terminated_ || state_ != INITIALIZING) return;
+      if (!stun[0].answered) {
+        if (stunBindingRequest(a.host, a.port, &stun[0])) { stun_host_ = a.host; stun_port_ = a.port; }   // keepalives go to a server known to answer
+      } else if (stunBindingRequest(a.host, a.port, &stun[1])) break;
+    }
+    last_keepalive_ms_ = time_ms();
+    const int answers = (stun[0].answered ? 1 : 0) + (stun[1].answered ? 1 : 0);
+    if (answers == 0) host::log("slippi: STUN lookup failed; the matchmaking service will use the address it observes");
+    else host::log("slippi: STUN servers answered: %d of 2", answers);
+    mm_service::Request request;
+    request.mode = (uint8_t)search_settings_.mode;
+    request.connect_code.assign(search_settings_.connect_code.begin(), search_settings_.connect_code.end());
+    request.netplay_port = (uint16_t)host_port_;
+    request.lan_addr = lan.empty() ? "" : lan + ":" + std::to_string(host_port_);
+    request.stun[0] = stun[0]; request.stun[1] = stun[1];
+    request.uid = me.uid; request.play_key = me.play_key; request.connect_code_self = me.connect_code;
+    request.display_name = me.display_name; request.app_version = SLIPPI_SEMVER;
+    // A cancel that came during STUN must not start a search nobody will poll.
+    if (is_mm_terminated_ || state_ != INITIALIZING) return;
+    mm_session_ = std::make_unique<mm_service::Session>(std::move(request));
+    state_ = MATCHMAKING;
+    host::log("slippi: matchmaking search started");
+    return;
+  }
+  // Tests only from here: the ENet stand-in for the matchmaking server Slippi had before 3.7.0.
   ENetAddress addr;
   std::string test_host;
   int test_port = 0;
@@ -1753,10 +2014,46 @@ void Matchmaking::startYouGameMatchmaking() {
 void Matchmaking::handleMatchmaking() {
   if (state_ != MATCHMAKING) return;
   json resp;
+  if (mm_session_) {
+    switch (mm_session_->state()) {
+      case mm_service::State::Connecting:
+      case mm_service::State::Queued:
+        if (has_stun_addr_ && time_ms() - last_keepalive_ms_ >= kStunKeepaliveIntervalMs) sendStunKeepalive();
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        return;
+      case mm_service::State::Failed: {
+        std::string message = mm_session_->error_message();
+        // The service knows a newer release: remembered, so the version gate names it from now on.
+        const std::string latest = mm_session_->latest_version();
+        if (!latest.empty() && user_) user_->OverwriteLatestVersion(latest);
+        mm_session_.reset();
+        if (message.empty()) message = "Matchmaking failed";
+        host::log("slippi: mm error: %s", message.c_str());
+        fail(message);
+        return;
+      }
+      case mm_service::State::Matched: break;
+      default:
+        // Ended without a result: only when it was cancelled from under this search.
+        mm_session_.reset();
+        fail("Matchmaking was cancelled");
+        return;
+    }
+    std::string text;
+    const bool have = mm_session_->take_result_json(&text);
+    mm_session_.reset();
+    resp = have ? json::parse(text, nullptr, false) : json();
+    if (!have || resp.is_discarded() || !resp.is_object()) {
+      host::log("slippi: the match result was missing or unreadable");
+      fail("Invalid response when getting mm status");
+      return;
+    }
+  } else {
   int r = mm_receive(client_, resp, 2000);
   if (r == -1) return;
   if (r != 0) { fail("Lost connection to the mm server"); return; }
   if (str_or(resp, "type", "") != "get-ticket-resp") { fail("Invalid response when getting mm status"); return; }
+  }
   std::string err = str_or(resp, "error", "");
   std::string latest = str_or(resp, "latestVersion", "");
   if (!err.empty()) {
@@ -1805,6 +2102,15 @@ static Matchmaking::ParsedTicket parse_ticket(const json& resp) {
     p.connect_code = str_or(el, "connectCode", "");
     p.port = int_or(el, "port", 0);
     p.is_bot = bool_or(el, "isBot", false);
+    if (const json* rank = json_member(el, "rank"))
+      if (rank->is_object()) {
+        auto number = [&](const char* key) { const json* v = json_member(*rank, key); return v && v->is_number() ? v->get<double>() : 0.0; };
+        p.ranked_rating = (float)number("rating");
+        p.ranked_update_count = (int)number("updateCount");
+        p.ranked_global_placement = (int)number("globalPlacement");
+        p.ranked_regional_placement = (int)number("regionalPlacement");
+        p.ranked_mmr = (float)number("mmr");
+      }
     if (p.port < 1 || p.port > PLAYER_COUNT_MAX) { t.error = "player port " + std::to_string(p.port); return t; }
     if (port_used[p.port - 1]) { t.error = "port " + std::to_string(p.port) + " used twice"; return t; }
     port_used[p.port - 1] = true;

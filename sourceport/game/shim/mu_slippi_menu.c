@@ -55,7 +55,8 @@ enum {
     CMD_NAME_ENTRY_INDEX = 0xBE,
     CMD_YOUGAME_RANKED = 0xE7,   /* YouGame flags, then the Ranked header (0xFA is the Hack Pack's) */
     REPLY_CAPACITY = 4096,   /* the bridge refuses a smaller reply buffer */
-    MSRB_SIZE = 962,
+    MSRB_SIZE = 1030,        /* Slippi 3.7.0 (Online.s MSRB_SIZE): ranked info and bot flags appended */
+    MSRB_MIN_SIZE = 962,     /* 3.6.4's, what the peer-to-peer host answers: the rest reads as zero */
     OSB_SIZE = 42,
     FIGHTER_NUM = 33,        /* GetFighterNum: "no fighter" */
     ICON_ZELDA = 0x12,
@@ -262,7 +263,7 @@ int mu_slippi_load_match_state(MuMatchState* out)
     if (out != NULL && out != &last_match) {
         *out = last_match;
     }
-    return result != 0 || got < MSRB_SIZE ? -1 : 0;
+    return result != 0 || got < MSRB_MIN_SIZE ? -1 : 0;
 }
 
 const MuMatchState* mu_slippi_match_state(void)
@@ -549,7 +550,10 @@ void mu_slippi_switch_to_online_menu(void)
         split_page = split_start_page();
     }
     mn_80229894(MENU_KIND_8, (u16) mu_slippi_first_unlocked(), 1);
-    slp.force_clear = 1;
+    /* Slippi 3.7.0 (OnMenuPrep): without a think function the switch ends before the force. */
+    if (mn_803EB6B0[MENU_KIND_8].think != NULL) {
+        slp.force_clear = 1;
+    }
 }
 
 /* AllowSwapToSameSubmenu: the menu clears when the kinds differ or the force flag is set; either
@@ -863,7 +867,10 @@ static void vs_decide(GameModeState* state)
     slp.game_local_index = (u8) local;   /* StaticData: read by the Party results screen */
 
     if (slp.mode == MU_SLP_MODE_PARTY) {
-        next = MU_SLP_STATE_RESULTS;
+        /* Someone who chose to leave (Slippi 3.7.0) goes straight back to the CSS. */
+        if (!mu_online_is_leaving()) {
+            next = MU_SLP_STATE_RESULTS;
+        }
         mu_slippi_cleanup_connections();   /* always disconnect after Party */
     }
     gm_SetNextGameModeStateId((u8) next);
