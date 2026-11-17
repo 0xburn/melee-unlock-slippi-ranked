@@ -69,6 +69,7 @@ void set_owner_tracking(bool) {}
 bool owner_tracking_enabled() { return false; }
 uint8_t observed_owner() { return 0xFF; }
 bool observed_skinned() { return false; }
+uint8_t observed_stage_map() { return 0xFF; }   // native GX tags stage draws itself (token 0xF7)
 #ifndef MELEE_LINUX_UNLOCKED
 AuthoredStats& authored_stats() { static AuthoredStats stats; return stats; }
 #endif
