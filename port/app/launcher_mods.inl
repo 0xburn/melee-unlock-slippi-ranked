@@ -645,6 +645,18 @@ void install_file_job(std::wstring file, std::string id, const std::string& iso,
     if (!catalog_core::copy_pack(file, out, true, &error, cancel)) { set_status(key, error); return; }
     scan_installed();
     if (!id.empty()) enable_installed(id);
+    if (id.empty()) {
+      // A copy of Melee (picked as the game disc, most often) stays off: say so, and why.
+      for (const auto& entry : installed()) {
+        std::error_code same;
+        if (entry.second.enabled || !fs::equivalent(fs::u8path(entry.second.path), out, same)) continue;
+        if (entry.second.copy) {
+          set_status(key, "Added to Mods, switched off. " + entry.second.message +
+                          " Your game disc has to be the original Melee NTSC 1.02 ISO.");
+          return;
+        }
+      }
+    }
     set_status(key, id.empty() ? "Added to Mods. Online compatibility is unverified; different builds can desync." : "Installed and turned on.");
     return;
   }
