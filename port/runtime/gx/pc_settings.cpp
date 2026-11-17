@@ -1,6 +1,7 @@
 ﻿// SPDX-License-Identifier: GPL-2.0-or-later
 #include "walter_egg.h"
 #include "settings_search.h"
+#include "gecko_session.h"
 #include "test_env.h"
 #include "pc_settings.h"
 #include "settings_imgui_input.h"
@@ -4374,6 +4375,55 @@ static void draw_replay_practice(RenderOptions& options, const host::PadState& p
 
 #ifndef MELEE_NO_SLIPPI
 // An arena room in the bars beside the picture, on the online character select (gx/arena_panel.h).
+// Gecko codes online (gecko_session.h): the opponent's codes on the character select, each with what
+// it does and a box, none ticked; this player answers with the ones to run. Then one line saying
+// what was agreed. Direct and arenas between Melee Unlocked players only.
+static void draw_gecko_offer_panel() {
+  const std::string line = gecko_session::status();
+  if (!gecko_session::asking()) {
+    if (!line.empty() && !slippi::online::is_online_match()) {
+      ImDrawList* dl = ImGui::GetForegroundDrawList();
+      const ImVec2 size = ImGui::CalcTextSize(line.c_str());
+      const ImVec2 at(ImGui::GetIO().DisplaySize.x * 0.5f - size.x * 0.5f, 8.0f);
+      dl->AddRectFilled(ImVec2(at.x - 10, at.y - 4), ImVec2(at.x + size.x + 10, at.y + size.y + 4), IM_COL32(10, 12, 24, 210), 6.0f);
+      dl->AddText(at, IM_COL32(235, 240, 250, 255), line.c_str());
+    }
+    return;
+  }
+  static std::map<std::string, bool> ticked;
+  const auto offered = gecko_session::incoming();
+  const ImVec2 display = ImGui::GetIO().DisplaySize;
+  ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.42f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, display.x - 40.0f), 0.0f), ImGuiCond_Always);
+  ImGui::Begin("Gecko codes##online_offer", nullptr,
+               ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove);
+  ImGui::TextWrapped("Your opponent wants to use these Gecko codes this match. Tick the ones you are OK with: only codes you both agree on run, on both games.");
+  ImGui::Separator();
+  for (const auto& code : offered) {
+    ImGui::PushID(code.id.c_str());
+    bool on = ticked[code.id] && code.runnable;
+    ImGui::BeginDisabled(!code.runnable);
+    if (ImGui::Checkbox(code.name.c_str(), &on)) ticked[code.id] = on;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s)", code.kind.c_str());
+    ImGui::Indent();
+    ImGui::TextWrapped("%s", code.runnable ? code.what.c_str() : ("Cannot run here: " + code.why_not).c_str());
+    ImGui::Unindent();
+    ImGui::PopID();
+  }
+  ImGui::Separator();
+  if (ImGui::Button("Use the ticked codes")) {
+    std::vector<std::string> ids;
+    for (const auto& code : offered) if (ticked[code.id] && code.runnable) ids.push_back(code.id);
+    gecko_session::answer(ids);
+    ticked.clear();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("No codes")) { gecko_session::answer({}); ticked.clear(); }
+  ImGui::End();
+}
+
 static void draw_arena_panel(RenderOptions& options, const host::PadState* pads, const host::PadState& followed, bool have_followed) {
   // The local player's controller: any port can drive the online select's hand (a controller in
   // port 2 moves it while port 1 reads as connected and idle, as with an adapter), so the panel
@@ -11094,6 +11144,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   }
 #ifndef MELEE_NO_SLIPPI
   if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active()) draw_arena_panel(options, pads, pad, have_pad);
+  if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active()) draw_gecko_offer_panel();
 #endif
   if (!state.fill_window && !state.open && !state.menu_open && !replay_control::active() && walter_egg::active()) {
     const ImVec2 screen = ImGui::GetIO().DisplaySize;

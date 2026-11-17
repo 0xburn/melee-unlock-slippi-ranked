@@ -114,6 +114,13 @@ std::vector<uint8_t> encode_answer(const std::vector<std::string>& accepted_ids)
   return v;
 }
 
+std::vector<uint8_t> encode_final(const std::string& fingerprint);
+std::vector<uint8_t> encode_lock(const std::string& fingerprint) {
+  std::vector<uint8_t> v = encode_final(fingerprint);
+  v[4] = 3;
+  return v;
+}
+
 std::vector<uint8_t> encode_final(const std::string& fingerprint) {
   std::vector<uint8_t> v = head(2);
   const std::string fp = fingerprint == "none" ? std::string(16, '0') : fingerprint;
@@ -157,7 +164,7 @@ bool decode(const uint8_t* d, size_t size, Message* out) {
       if (!is_id(id)) return false;
       out->ids.push_back(id);
     }
-  } else if (kind == 2) {
+  } else if (kind == 2 || kind == 3) {
     if (!take(16)) return false;
     std::string fp((const char*)d + at - 16, 16);
     if (fp == std::string(16, '0')) fp = "none";

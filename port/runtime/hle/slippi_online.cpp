@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "test_env.h"
 #include "slippi_online.h"
+#include "gecko_session.h"
 #include "yougame_net_test.h"
 #include "yougame_link.h"
 #include "online_rows.h"
@@ -419,6 +420,7 @@ void cleanup_connection(yougame::Leave why = yougame::Leave::Lost) {
   g_overwrite_selections.clear();
   g_play_session_active = false;
   g_in_online_match = false;
+  gecko_session::disconnected();
 #ifdef YOUGAME_AGENT_TEST_HOOK
   yougame::agent_test::static_match.event(yougame::agent_test::StaticEvent::Cancel, true, [] {});
 #endif
@@ -730,6 +732,7 @@ void handle_online_inputs(const uint8_t* payload, std::vector<uint8_t>& q) {
     host::log("slippi: online game starts, delay %d frames, direct peer to peer", (int)delay);
     g_latched_delay = (int)delay;   // the delay the game took: every later answer this match agrees with it
     g_in_online_match = true;
+    gecko_session::match_started();   // the agreed Gecko codes, decided from both locks
     if (g_user) g_user->ResetOnlineCompatibility();  // the next game needs its own fresh check
     host::input_mark_match_start();
     // Early inputs: watch the controller for the match. Sent only to peers whose build takes them.
@@ -1575,6 +1578,31 @@ static bool slippi_session_up() {
   return g_in_online_match || g_play_session_active || (g_matchmaking && g_matchmaking->IsSearching());
 }
 static bool p2p_session_up() { return !slippi_session_up() && host::netplay::session_mode() >= 0; }
+// Gecko codes for the match (gecko_session.h), every character select frame: the exchange starts when
+// a connection to one opponent is up and its build message came (or did not, within the wait), and
+// its messages move both ways; when the codes are agreed, this side's selection goes again with the
+// new lock.
+void gecko_pump() {
+  static const NetplayClient* started = nullptr;
+  const bool up = g_netplay && g_netplay->GetSlippiConnectStatus() == NetplayClient::ConnectStatus::CONNECTED;
+  if (!up) {
+    if (started) { gecko_session::disconnected(); started = nullptr; }
+    return;
+  }
+  if (started != g_netplay.get()) {
+    const auto rb = g_netplay->GetRemoteBuild(0);
+    const uint64_t since = g_netplay->ConnectedAtMs();
+    const uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (!rb.received && (since == 0 || now - since < kBuildWaitMs)) return;   // its build message may still come
+    const bool direct = g_last_search.mode == Matchmaking::DIRECT;
+    gecko_session::connected(direct && rb.received && rb.gecko && g_netplay->RemoteCount() == 1);
+    started = g_netplay.get();
+  }
+  std::vector<uint8_t> message;
+  while (g_netplay->PopGecko(message)) gecko_session::receive(message.data(), message.size());
+  for (const auto& out : gecko_session::take_outgoing()) g_netplay->SendGecko(out);
+  if (gecko_session::take_resend()) g_netplay->ResendSelections();
+}
 bool is_online_match() { return g_in_online_match || (p2p_session_up() && host::netplay::is_online_match()); }
 int local_player_slot() { return p2p_session_up() ? host::netplay::local_player_slot() : (int)g_local_player_index; }
 std::array<std::string, 4> player_names_for_overlay() {

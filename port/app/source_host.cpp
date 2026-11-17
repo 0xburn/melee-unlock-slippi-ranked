@@ -74,6 +74,7 @@
 #include "native_savestate.h"
 #include "lab_view.h"
 #include "walter_egg.h"
+#include "gecko_session.h"
 #include "../runtime/abi/mu_look_snapshot.h"
 // Both builds: the neutral netplay state. In the build without the Slippi layer it also answers the
 // Slippi names; in the normal build a peer-to-peer session (--p2p-*) is found through it.
@@ -1971,6 +1972,7 @@ int32_t h_slippi_command(uint8_t command, const uint8_t* payload, uint32_t paylo
           }
           return true;
         }
+        if (c == CMD_CSS_FRAME) slippi::online::gecko_pump();   // Gecko codes for the match (gecko_session.h)
         if (c == CMD_CSS_FRAME && n == 0) { walter_egg::set_camera(nullptr); reply.push_back(walter_egg::css_frame()); return true; }
         if (c == CMD_CSS_FRAME && n == 13 * sizeof(float)) {   // with the menu camera (shim mu_menu_camera): the C-stick's turn
           float camera[13];
@@ -2432,7 +2434,11 @@ void h_pad_read(MuPadStatus out[4]) {
   // The player's data-only Gecko codes, once per frame. Offline only: the writer in the game
   // library also refuses during an online match, whichever kind.
   if (slippi::online::session_mode() < 0 && !g_replaying) user_gecko::apply();
-  else user_gecko::suspend_function_patches();   // a code's rewritten functions go back online and in replays
+  else {
+    user_gecko::suspend_function_patches();   // a code's rewritten functions go back online and in replays
+    // Online: only the codes both players agreed to run (gecko_session.h), on both games alike.
+    if (!g_replaying && slippi::online::is_online_match()) user_gecko::run_agreed(gecko_session::match_codes());
+  }
   // A pasted always-display hitbox code turns on the Arcade look switches its lines stand for.
   gx::set_arcade_display(gx::ArcadeSource::Codes, user_gecko::arcade_bits_of_codes());
   // Hidden test hook: MELEE_TEST_INSTALL_LOOK=<0 Diet, 1 Animelee, 2 Animelee x DBZ> starts that one-click install once.
@@ -4451,6 +4457,8 @@ int run(void (*shutdown)(int)) {
   g_look_extras = (void (*)(MuLookExtras*))game_proc("mu_look_extras_v1");
   user_gecko::set_native_writer((user_gecko::NativeWrite)game_proc("mu_user_gecko_write"));
   user_gecko::set_native_reader((user_gecko::NativeRead)game_proc("mu_user_gecko_read"));
+  user_gecko::set_agreed_writer((user_gecko::NativeWrite)game_proc("mu_user_gecko_write_agreed"),
+                                (user_gecko::NativeRead)game_proc("mu_user_gecko_read_agreed"));
   {
     // Functions a code may make return at once (shim/mu_gecko_functions.c); an older library has none.
     using Functions = uint32_t (*)(const user_gecko::NativeFunction**);

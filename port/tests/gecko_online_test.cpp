@@ -41,6 +41,8 @@ int main() {
   check(decode(fin.data(), fin.size(), &m) && m.kind == 2 && m.fingerprint == set_fingerprint(mine), "the final fingerprint round-trips");
   const auto none = encode_final("none");
   check(decode(none.data(), none.size(), &m) && m.fingerprint == "none", "an empty set round-trips as none");
+  const auto lock = encode_lock(set_fingerprint(mine));
+  check(decode(lock.data(), lock.size(), &m) && m.kind == 3 && m.fingerprint == set_fingerprint(mine), "a lock round-trips");
   auto bad = o; bad.pop_back();
   check(!decode(bad.data(), bad.size(), &m), "a cut message is refused");
   bad = o; bad.push_back(0);

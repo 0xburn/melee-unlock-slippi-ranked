@@ -59,9 +59,15 @@ bool runs_without_consent(Match m, const Lines& lines);
 //   offer:  'M' 'U' 'G' 1, kind 0, count, then per code: line count, lines (8 bytes each, big endian), name length, name
 //   answer: 'M' 'U' 'G' 1, kind 1, count, then per accepted code id: 16 ASCII hex digits
 //   final:  'M' 'U' 'G' 1, kind 2, 16 ASCII hex digits (set_fingerprint)
+//   lock:   'M' 'U' 'G' 1, kind 3, 16 ASCII hex digits: sent just before every character select
+//           selection message, on the same ordered channel. A match starts only after both sides'
+//           last selections arrived, so at its first frame each game holds the fingerprint the
+//           other last sent and the one it last sent itself; codes run only when the two are equal
+//           and not "none". Both games compare the same two values, so both decide the same.
 std::vector<uint8_t> encode_offer(const std::vector<Offer>& codes);
 std::vector<uint8_t> encode_answer(const std::vector<std::string>& accepted_ids);
 std::vector<uint8_t> encode_final(const std::string& fingerprint);
+std::vector<uint8_t> encode_lock(const std::string& fingerprint);
 struct Message { int kind = -1; std::vector<Offer> offer; std::vector<std::string> ids; std::string fingerprint; };
 // False for anything malformed or over the limits (then nothing from it is used).
 bool decode(const uint8_t* data, size_t size, Message* out);

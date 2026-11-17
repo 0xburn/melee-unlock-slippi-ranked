@@ -208,6 +208,7 @@ class NetplayClient {
   void StartSlippiGame();
   void SendSlippiPad(std::unique_ptr<Pad> pad);
   void SetMatchSelections(PlayerSelections& s);
+  void ResendSelections();   // the same selection again, with a fresh Gecko lock
   std::unique_ptr<RemotePadOutput> GetSlippiRemotePad(int index, int max_frame_count);
   void DropOldRemoteInputs(int32_t finalized_frame);
   std::unordered_map<uint8_t, bool> GetActivePlayerIndices() const;
@@ -245,6 +246,7 @@ class NetplayClient {
   // The shield colour the opponent on in-game `slot` sent (0 none).
   uint32_t RemoteShieldColor(int slot);
   RemoteBuild GetRemoteBuild(int index);
+  int RemoteCount() { std::lock_guard<std::mutex> lk(build_mutex_); return remote_player_count_; }   // opponents on this connection
   uint64_t ConnectedAtMs() const { return connected_at_ms_.load(std::memory_order_acquire); }
   // Early inputs. SendEarlyPad goes to the peers that take them (any thread: it only queues).
   // EarlyPads gives remote `index`'s early pads for frames after `latest` (its confirmed pads reach

@@ -71,6 +71,8 @@ uint64_t rollback_count();
 constexpr int32_t kRollbackFrameUnknown = INT32_MIN;
 void note_rollback(int32_t to_frame = kRollbackFrameUnknown);
 bool is_online_match();
+// Gecko codes agreed for the match (gecko_session.h): call every character select frame.
+void gecko_pump();
 // The in-game slot the local player occupies in the running online match (0-3).
 int local_player_slot();
 // The shield colour the opponent on in-game `slot` sent after connecting (0x1000000 | RGB), 0 none.

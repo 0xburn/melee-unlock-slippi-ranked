@@ -17,6 +17,7 @@
 #include "gx_core.h"   // the player's own shield colour for the build message
 #include "early_input.h"
 #include "lcancel.h"   // automatic L-cancel, announced in the build message
+#include "gecko_session.h"   // Gecko codes agreed for the match, locked with each selection
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -1268,6 +1269,21 @@ void NetplayClient::SetMatchSelections(PlayerSelections& s) {
     match_info_.local.player_idx = player_idx_;
     WriteSelections(*spac, match_info_.local);
   }
+  // Gecko codes (gecko_session.h): the lock goes just before each selection, on the same ordered
+  // queue, so the opponent always has it by the time this selection can start a match.
+  const std::vector<uint8_t> lock = gecko_session::lock_message();
+  if (!lock.empty()) SendGecko(lock);
+  SendAsync(std::move(spac));
+}
+// The same selection again, with a fresh Gecko lock (codes were agreed after this side locked in).
+void NetplayClient::ResendSelections() {
+  auto spac = std::make_unique<Packet>();
+  {
+    std::lock_guard<std::mutex> lk(selection_mutex_);
+    WriteSelections(*spac, match_info_.local);
+  }
+  const std::vector<uint8_t> lock = gecko_session::lock_message();
+  if (!lock.empty()) SendGecko(lock);
   SendAsync(std::move(spac));
 }
 void NetplayClient::SendChatMessage(int message_id) {
