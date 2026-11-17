@@ -209496,7 +209496,7 @@ index 6d5505e85..e6807fd4f 100644
      return gen;
  }
 diff --git a/src/sysdolphin/baselib/gobj.c b/src/sysdolphin/baselib/gobj.c
-index 8caeba264..35f233dcb 100644
+index 8caeba264..10bb4d945 100644
 --- a/src/sysdolphin/baselib/gobj.c
 +++ b/src/sysdolphin/baselib/gobj.c
 @@ -1,18 +1,11 @@
@@ -209547,13 +209547,14 @@ index 8caeba264..35f233dcb 100644
  {
      s32 i;
      HSD_GObjProc* proc;
-@@ -147,12 +127,36 @@ u32 HSD_GObj_80390EB8(s32 i)
+@@ -147,12 +127,49 @@ u32 HSD_GObj_80390EB8(s32 i)
      return HSD_GObj_804085F0[i];
  }
  
 +#ifdef MU_NATIVE
 +#include "mu_gxpipe.h"
 +int mu_native_owner_tracking(void);
++int mu_stage_map_tag(void* ground);   /* shim/mu_stage_scenery.c */
 +#endif
 +
  static inline void render_gobj(HSD_GObj* cur, int i)
@@ -209567,9 +209568,17 @@ index 8caeba264..35f233dcb 100644
 +     * particles (0xFE); class 8 with user data are model effects (0xFC: shields, reflectors and
 +     * the glows of moves), the same three owners the recompiled build reads. */
 +    int effect = (cur->classifier == 6 || cur->classifier == 8) && mu_native_owner_tracking();
++    /* Private token 0xF7: the draws that follow belong to map gobj n of the stage (0x80 set when it
++     * is scenery, shim/mu_stage_scenery.c), 0xFF after; for the looks that keep only the play plane. */
++    int stage = cur->classifier == 3 && cur->user_data_kind == 3 && cur->user_data != NULL &&
++                mu_native_owner_tracking();
 +    if (effect) {
 +        GXW_u8(0xF1);
 +        GXW_u8(cur->classifier == 6 ? 0xFD : cur->user_data == NULL ? 0xFE : 0xFC);
++    }
++    if (stage) {
++        GXW_u8(0xF7);
++        GXW_u8((u8) mu_stage_map_tag(cur->user_data));
 +    }
 +#endif
      HSD_GObj_804D7814 = cur;
@@ -209580,11 +209589,15 @@ index 8caeba264..35f233dcb 100644
 +        GXW_u8(0xF1);
 +        GXW_u8(0xFF);
 +    }
++    if (stage) {
++        GXW_u8(0xF7);
++        GXW_u8(0xFF);
++    }
 +#endif
  }
  
  /// GObj_SetTextureCamera
-@@ -199,76 +203,6 @@ void HSD_GObj_80390FC0(void)
+@@ -199,76 +216,6 @@ void HSD_GObj_80390FC0(void)
      }
  }
  

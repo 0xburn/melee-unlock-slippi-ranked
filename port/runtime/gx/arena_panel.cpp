@@ -432,6 +432,18 @@ std::string ping_text(const View& v, uint8_t id) {
 // The sheet's .slot: 5px 6px padding, a 34px portrait, the name; "you" glows gold with a YOU chip.
 // The ping sits at the right in small print (the room's player list keeps everyone's ping).
 constexpr float kSlotH = 46;
+// The room's leader (the member who made it, ar::owner): a small gold-outlined HOST badge on the bottom edge
+// of their portrait, centred on `cx`, so it never takes room from a name. Nothing for anyone else.
+void host_badge(float cx, float edge_y, const View& v, const Member* m) {
+  if (!m || m->id != ar::owner(v.room)) return;
+  const Ink hk{Face::Bold, 8, kGold};
+  const float tw = text_w(hk, "HOST") + px(6), th = px(12);
+  const float y0 = edge_y - th * .6f;
+  dl()->AddRectFilled(ImVec2(cx - tw * .5f, y0), ImVec2(cx + tw * .5f, y0 + th), IM_COL32(12, 16, 28, 235), px(3));
+  dl()->AddRect(ImVec2(cx - tw * .5f, y0), ImVec2(cx + tw * .5f, y0 + th), kGold, px(3), 0, px(1));
+  text_center(hk, cx, line_top(hk, y0, 12), "HOST");
+}
+
 void slot_card(float x, float y, float w, const View& v, const Member& m, bool you, bool asking, float icon_css = 34) {
   const float h = px(icon_css + 12), r = px(5);
   const bool lit = hot(x, y, y + h, Do::Member, m.id);
@@ -453,6 +465,7 @@ void slot_card(float x, float y, float w, const View& v, const Member& m, bool y
     text(ak, right - tw, line_top(ak, y, kSlotH), "asks");
     right -= tw + px(4);
   }
+  host_badge(x + px(6) + is * .5f, y + px(6) + is, v, &m);
   if (lit) {   // the hand on a player: their ping
     const std::string p = ping_text(v, m.id);
     if (!p.empty()) {
@@ -947,10 +960,13 @@ float corner(float x0, float x1, float y0, bool red, const View& v, int side, bo
   const float is = px(icon_css);
   if (fighters == 1) {
     icon(cx - is * .5f, y, is, m[0], false, red ? Ground::Red : Ground::Blue);
+    host_badge(cx, y + is, v, m[0]);
   } else {
     const float gap = px(6);
     icon(cx - is - gap * .5f, y, is, m[0], false, red ? Ground::Red : Ground::Blue);
     icon(cx + gap * .5f, y, is, m[1], false, red ? Ground::Red : Ground::Blue);
+    host_badge(cx - gap * .5f - is * .5f, y + is, v, m[0]);
+    host_badge(cx + gap * .5f + is * .5f, y + is, v, m[1]);
   }
   y += is + px(8);
   const Ink big{Face::Black, 15, kWhite, false, 1};
@@ -1134,6 +1150,7 @@ void card_row(float x, float y, float w, const View& v, const Member& m) {
   const std::string rec = record(m);
   const float rw = text_w(rk, rec);
   text(rk, x + w - rw, line_top(rk, y, 34), rec);
+  host_badge(x + px(17), y + px(34), v, &m);
   Ink nk{Face::Bold, 14, kWhite, false, 1, true, .3f};
   const std::string shown = fit_name(nk, m.name, w - px(41) - rw - px(4));
   text(nk, x + px(41), line_top(nk, y, 34), shown);

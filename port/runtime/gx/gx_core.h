@@ -146,6 +146,10 @@ struct DrawCall {
   // particles, 0xFF for everything else. Display only: it feeds the per-player tint and the
   // particle tier of Visual effects, is not part of `identity` and never reaches a shader UID.
   uint8_t owner_player = 0xFF;
+  // The stage map gobj a draw came from (Source Port token 0xF7): its index (0..0x3F), 0x80 set when
+  // the game calls it scenery, 0x40 when its props stand close behind the floor (abi/mu_stage_scenery.h);
+  // 0xFF for anything else or unknown. Display only.
+  uint8_t stage_map = 0xFF;
   // Skinned (envelope) draw: the fighter's model. Its shadow and its effects are rigid draws, so
   // this is what tells the model apart from everything else the same player renders.
   bool skinned = false;
@@ -618,6 +622,9 @@ inline LightweightFilter lightweight_filter(const Frame& f, int level) {
 // (they have an owner or are skinned) never count, nor does anything off the world camera. With no
 // fighter in view (a cut-in, the results walk-off) nothing is skipped.
 inline bool lightweight_background(const LightweightFilter& e, const Frame& f, const DrawCall& d) {
+  // Scenery the game itself names (Whispy, Fountain of Dreams' trees, Yoshi's Story's clouds): off
+  // whatever its depth, which on those stages is the fighters' own.
+  if (e.backdrop_off && e.have_fighters && d.stage_map != 0xFF && (d.stage_map & 0x80) && lightweight_world_draw(e, d)) return true;
   if (!e.backdrop_off || !e.have_fighters || d.owner_player != 0xFF || d.skinned || !lightweight_world_draw(e, d)) return false;
   // The frame's own vertices: a stage piece is rigid, so the sub-frame solver never rewrites them.
   const Vertex* v = d.first_vertex + (size_t)d.vertex_count <= f.vertices.size() ? f.vertices.data() + d.first_vertex : nullptr;
@@ -629,7 +636,10 @@ inline bool lightweight_background(const LightweightFilter& e, const Frame& f, c
   // fighters (platforms, floors, walls, ledges). Scenery further back or in front (trees, poles, building fronts,
   // foreground props) goes too, so the lines stay readable and there are fewer draws.
   const bool band = e.level >= 5;
-  const float limit = e.fighter_far - (band ? 20.0f : kLightweightBackgroundDepth);
+  // A stage map the game marks as holding props close behind the floor (token 0xF7, bit 0x40): those
+  // props go from 8 units behind the fighters (Yoshi's Story's trees, Fountain of Dreams' tower).
+  const bool tight = d.stage_map != 0xFF && (d.stage_map & 0x40);
+  const float limit = e.fighter_far - (tight ? 8.0f : band ? 20.0f : kLightweightBackgroundDepth);
   const float front = e.fighter_far + 30.0f;
   bool seen = false;
   float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};

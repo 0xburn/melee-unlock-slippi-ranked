@@ -35,6 +35,7 @@ struct LookLive {
   std::atomic<bool> exact{false};                        // an exact look's pack is served: the game's art is theirs, no treatment
   std::atomic<bool> exact_low_poly{true};                // that look's own fighters are the low poly ones (Diet Classic, Diet 64; not Crystal)
   std::atomic<bool> full_models{false};                  // the look keeps the fighters' full models (Silhouettes)
+  std::atomic<uint8_t> lightweight{0};                   // the Lightweight level (gx_core set_lightweight_level), for owner tracking
 };
 inline LookLive& look_live() { static LookLive l; return l; }
 inline void set_retro_textures(bool on) { look_live().retro.store(on, std::memory_order_relaxed); }
