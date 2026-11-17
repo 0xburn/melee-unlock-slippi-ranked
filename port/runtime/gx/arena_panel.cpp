@@ -83,7 +83,7 @@ struct State {
   // The hand: pushed against the left (1) or right (2) edge of the character select it goes into
   // that side's panel; the button under it lights up and A presses it.
   int side = 0;
-  int push_side = 0, push_frames = 0;
+  int push_side = 0, push_frames = 0, push_needed = 10;   // push_needed: kPushFrames or kPushFramesOverCard
   uint8_t hover = 0, hover_member = 0xFF;   // a Do and, for a player card, whose
   float pop[2] = {0, 0};                    // Hidden: how far each panel has slid in (0..1)
   double pop_seen[2] = {-10, -10};          // when the hand was last near that side
@@ -754,6 +754,7 @@ void open_code_page() { g.page = Page::Code; g.code.clear(); g.recent_pick = -1;
 // toward the picture lets the hand out again. While the hand is in a panel the game sees nothing.
 constexpr float kLeftEdge = -34.8f, kRightEdge = 25.8f;   // the hand's limits: -35, and 26 (29 with m-ex)
 constexpr int kPushFrames = 10;
+constexpr int kPushFramesOverCard = 30;   // half a second: the glove only reaches the card from above
 float g_bar_y0 = 0, g_bar_y1 = 1;
 
 void leave_panel() {
@@ -878,15 +879,36 @@ void handle_input(const Frame& f, const View& v) {
     // higher up the right edge the hand is on Ganondorf or Young Link, whose players hold the stick
     // right to reach them and then press A to pick.
     if (want) {
-      const float bar_y = g_bar_y0 + (25.0f - hy) / 47.0f * (g_bar_y1 - g_bar_y0);   // as hover_nearest
-      bool beside = false;
-      for (const Item& it : g_last_items)
-        if (it.side == want && (v.active || (bar_y >= it.y0 && bar_y <= it.y1))) beside = true;
-      if (!beside) want = 0;
+      // Where the hand is on screen, the way the game draws it (the picture is 57.3 of the select's
+      // units tall, its middle 0; walter_egg.cpp measured it), and the glove's height around that:
+      // beside the card when any of the glove is level with it. The old estimate, (25 - hy) / 47 of
+      // the picture, sat a fifth off at the card's height, so a hand pushed against the card's upper
+      // half read as above it and never went in (0.9.204, 2560x1440).
+      const float unit = (g_bar_y1 - g_bar_y0) / 57.3f;
+      const float hand_y = (g_bar_y0 + g_bar_y1) * 0.5f - hy * unit;
+      // The glove hangs about seven units below the point the game reports. Level with the card: in
+      // after the usual push. Only the glove's lower part over the card (its point is up on Young
+      // Link, whose players hold the stick right to reach him): in after a longer push, so picking
+      // him never opens the panel, while pushing into the card still does (0.9.204, 2560x1440).
+      int level = 0;   // 2 level with the card, 1 the glove's lower part over it
+      for (const Item& it : g_last_items) {
+        if (it.side != want) continue;
+        if (v.active || (hand_y + 2.0f * unit >= it.y0 && hand_y - 5.0f * unit <= it.y1)) level = 2;
+        else if (level < 1 && hand_y + 7.0f * unit >= it.y0 && hand_y <= it.y1) level = 1;
+      }
+      if (!level) want = 0;
+      g.push_needed = level == 1 ? kPushFramesOverCard : kPushFrames;
+    }
+    {
+      // MELEE_TEST_ARENA_HANDLOG=1 (tests): the hand and the push, every 15 frames while it is right of 20.
+      static const bool log_hand = [] { const char* e = host::test_env::getenv("MELEE_TEST_ARENA_HANDLOG"); return e && *e == '1'; }();
+      static int n = 0;
+      if (log_hand && have_hand && hx > 20.0f && ++n % 15 == 0)
+        host::log("arena panel: hand %.1f %.1f stick %d want %d", hx, hy, (int)f.stick_x, want);
     }
     if (want && want == g.push_side) ++g.push_frames;
     else { g.push_side = want; g.push_frames = want ? 1 : 0; }
-    if (want && g.push_frames >= kPushFrames) {
+    if (want && g.push_frames >= g.push_needed) {
       g.side = want;
       g.push_frames = 0;
       hover_nearest(want, hy);
