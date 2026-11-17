@@ -1,10 +1,11 @@
 // An easter egg on every character select: the D-pad code (Up Up Down Down Left Right Left Right, then
 // B A or A B) sends a dog's face bouncing around the picture like the old DVD screensaver: B A is
-// Bailey, A B is Walter. Most launches never meet a corner; about one in five is aimed so that after
-// a few bounces he lands exactly in one, which gets a flash, a spin and a menu sound. After ten
-// seconds out he starts to turn as he flies. The same code again, or leaving the character select,
-// sends him away; the other code swaps the face. A hand that presses A on him takes hold: moving it
-// stretches him from that spot, and letting go lets him swing back.
+// Bailey, A B is Walter. Each code sends one more, from any port, up to 200 at once (then the oldest
+// leaves for each new one). Most launches never meet a corner; about one in five is aimed so that after
+// a few bounces it lands exactly in one, which gets a flash, a spin and a menu sound. After ten
+// seconds out a face starts to turn as it flies. Leaving the character select sends them all away. A
+// hand that presses A on one takes hold: moving it stretches the face from that spot, and letting go
+// lets it swing back.
 //
 // Local drawing only: the detector reads the pads and changes nothing in them, nothing is sent to
 // an opponent, and nothing is drawn in a match or a replay. The pure parts (the code detector and the
