@@ -218,8 +218,13 @@ static void settings_search_box() {
     test_query_set = true;
     if (const char* q = host::test_env::getenv("MELEE_TEST_SETTINGS_SEARCH")) std::snprintf(g_search_text, sizeof g_search_text, "%s", q);
   }
+  // Ctrl+F or "/" from anywhere in the settings puts the cursor in the box.
+  const ImGuiIO& io = ImGui::GetIO();
+  if (!ImGui::IsAnyItemActive() &&
+      ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) || ImGui::IsKeyPressed(ImGuiKey_Slash, false)))
+    ImGui::SetKeyboardFocusHere();
   ImGui::SetNextItemWidth(-1.0f);
-  ImGui::InputTextWithHint("##settings_search", "Search all settings", g_search_text, sizeof g_search_text);
+  ImGui::InputTextWithHint("##settings_search", "Search all settings (Ctrl+F)", g_search_text, sizeof g_search_text);
   g_search = g_search_text[0] != 0;
   g_search_hits = 0;
   // A "Go to" whose row never drew (it sits in a closed list of its own) gives up after a second.
