@@ -920,7 +920,8 @@ void handle_input(const Frame& f, const View& v) {
 }
 
 // ---------------------------------------------------------------- the looks
-struct Bars { float lx0, lx1, rx0, rx1, y0, y1; };
+struct Bars { float lx0, lx1, rx0, rx1, y0, y1; float px0 = 0, px1 = 0; };   // px0, px1: the picture's left and right
+float g_card_left = 0;   // this frame's Arena card (out of a room): its left edge, 0 when not drawn
 
 // The legend at the foot of a bar: the sheet's hints. They are buttons: the hand pushed into the
 // panel lights one up and A presses it (and X, Y and Z work while the hand is in the panel).
@@ -1341,17 +1342,27 @@ void draw_not_in_room(const Bars& b, const View& v) {
   // Not in a room: the Arena card in the right bar. Pushing the hand into the right edge beside it
   // lights it up; A (or Z) then adds a friend's code, which starts a room.
   if (g.page != Page::None) return;
-  if (!v.notice.empty()) {   // a full room said no: the reason, in the bar above the card
-    const Ink nk{Face::Bold, 11, kWhite};
-    const float w = b.rx1 - b.rx0 - px(16);
-    std::vector<std::string> lines = wrap(nk, v.notice, w);
-    float y = b.y0 + (b.y1 - b.y0) * .42f - px(10) - lines.size() * px(16);
-    dl()->AddRectFilled(ImVec2(b.rx0 + px(4), y - px(6)), ImVec2(b.rx1 - px(4), y + lines.size() * px(16) + px(4)), IM_COL32(0, 0, 0, 190), px(5));
-    for (const std::string& l : lines) { text(nk, b.rx0 + px(8), line_top(nk, y, 16), l); y += px(16); }
-  }
   const bool open = g.side == 2;
   const float tw = b.rx1 - b.rx0 - px(16), th = px(86);
-  const float x = b.rx1 - tw - px(8), y = b.y0 + (b.y1 - b.y0) * .42f;
+  float x = b.rx1 - tw - px(8);
+  const float y = b.y0 + (b.y1 - b.y0) * .42f;
+  // A picture wider than 4:3 (widescreen): the hand stops at the 4:3 select's own edge, far short of
+  // the screen's (2560x1440 report: "I can't put my hand there"). The card then sits right beside the
+  // fingertip at the hand's limit, so the hand reaches it and pushes into it.
+  const float pic_w = b.px1 - b.px0, pic_h = b.y1 - b.y0;
+  if (pic_h > 1.0f && pic_w / pic_h > 1.40f) {
+    const float unit = pic_h / 57.3f;   // the select's units at the hand's depth (walter_egg.cpp measured it)
+    const float reach = (b.px0 + b.px1) * .5f + (kRightEdge + 5.0f) * unit + px(10);
+    x = std::min(x, reach);
+  }
+  g_card_left = x;
+  if (!v.notice.empty()) {   // a full room said no: the reason, above the card
+    const Ink nk{Face::Bold, 11, kWhite};
+    std::vector<std::string> lines = wrap(nk, v.notice, tw);
+    float ny = y - px(10) - lines.size() * px(16);
+    dl()->AddRectFilled(ImVec2(x - px(4), ny - px(6)), ImVec2(x + tw + px(4), ny + lines.size() * px(16) + px(4)), IM_COL32(0, 0, 0, 190), px(5));
+    for (const std::string& l : lines) { text(nk, x, line_top(nk, ny, 16), l); ny += px(16); }
+  }
   steel(x, y, x + tw, y + th, open ? kGold : IM_COL32(154, 166, 192, 200));
   hot(x, y, y + th, Do::AddCode);   // so the hand lands on it
   const Ink sm{Face::Body, 10, kGold, false, 0, false, 1.5f};
@@ -1396,7 +1407,9 @@ void check_text(const Bars& b) {
   for (size_t i = 0; i < g_text_boxes.size(); ++i) {
     const TextBox& t = g_text_boxes[i];
     const bool left = t.x0 < (b.lx1 + b.rx0) * 0.5f;
-    const float px0 = left ? b.lx0 : b.rx0, px1 = left ? b.lx1 : b.rx1;
+    // The Arena card beside a widescreen hand's reach is its own panel, reaching in from the bar.
+    const float right0 = g_card_left > 0.0f ? std::min(b.rx0, g_card_left - px(4)) : b.rx0;
+    const float px0 = left ? b.lx0 : right0, px1 = left ? b.lx1 : b.rx1;
     if (t.x0 < px0 - tol || t.x1 > px1 + tol || t.y0 < b.y0 - tol || t.y1 > b.y1 + tol) {
       std::snprintf(buf, sizeof buf, "look %d '%s' at %.0f..%.0f x %.0f..%.0f leaves the %s panel %.0f..%.0f x %.0f..%.0f",
                     (int)g.look, t.s.c_str(), t.x0, t.x1, t.y0, t.y1, left ? "left" : "right", px0, px1, b.y0, b.y1);
@@ -1478,6 +1491,8 @@ void frame(const Frame& f) {
   b.lx0 = 0; b.lx1 = bar;
   b.rx0 = f.display_w - bar; b.rx1 = f.display_w;
   b.y0 = f.game_y0; b.y1 = f.game_y1;
+  b.px0 = f.game_x0; b.px1 = f.game_x1;
+  g_card_left = 0;
   handle_input(f, v);
   g.focus = g.side != 0 || g.page != Page::None;
   // Hidden: each panel slides out when the hand comes near its side (or is in it), and back in a
@@ -1539,7 +1554,9 @@ void frame(const Frame& f) {
   if (g.page != Page::None) page_box(b.rx0 + px(8), b.y0 + px(10), b.rx1 - b.rx0 - px(16), v);
   // Move what was just drawn: the left half to the left, the right half to the right, each by how
   // far its panel is from fully in.
-  const float shift[2] = {(1.0f - shown[0]) * (bar + px(10)), (1.0f - shown[1]) * (bar + px(10))};
+  // The Arena card beside a widescreen hand's reach slides the whole way out from there.
+  const float right_span = g_card_left > 0.0f ? std::max(bar, f.display_w - g_card_left) : bar;
+  const float shift[2] = {(1.0f - shown[0]) * (bar + px(10)), (1.0f - shown[1]) * (right_span + px(10))};
   if (shift[0] > 0.5f || shift[1] > 0.5f)
     for (int i = start; i < draw->VtxBuffer.Size; ++i) {
       ImDrawVert& vert = draw->VtxBuffer[i];
