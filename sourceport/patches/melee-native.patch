@@ -122353,7 +122353,7 @@ index ab2401ab1..000000000
 - * @todo Create @c entities directory to hold individual stages.
 - */
 diff --git a/src/melee/gr/granime.c b/src/melee/gr/granime.c
-index 26a021223..16153955f 100644
+index 26a021223..e12e4e711 100644
 --- a/src/melee/gr/granime.c
 +++ b/src/melee/gr/granime.c
 @@ -47,7 +47,7 @@
@@ -122479,7 +122479,7 @@ index 26a021223..16153955f 100644
      }
  }
  
-@@ -294,19 +294,19 @@ void grAnime_801C6A54(HSD_JObj* jobj, HSD_AnimJoint* animjoint,
+@@ -294,22 +294,51 @@ void grAnime_801C6A54(HSD_JObj* jobj, HSD_AnimJoint* animjoint,
          return;
      }
      if (animjoint != NULL) {
@@ -122504,11 +122504,46 @@ index 26a021223..16153955f 100644
      }
  }
  
-@@ -319,19 +319,19 @@ static inline void grAnime_801C6A54_inner(HSD_JObj* jobj,
++#ifdef MU_NATIVE
++const char* mu_test_getenv(const char* name);
++/* MELEE_TEST_BAD_ANIM_JOINT=<hex address> (tests only): each stage animation loaded names that
++ * address as its joint, as a stage file with a reference it never relocated does. */
++static void grAnime_TestBadJoint(HSD_AnimJoint* animjoint)
++{
++    static int checked;
++    static u32 bad;
++    if (!checked) {
++        const char* e = mu_test_getenv("MELEE_TEST_BAD_ANIM_JOINT");
++        bad = 0;
++        for (; e != NULL && *e != '\0'; e++) {
++            const int c = *e;
++            const int v = c >= '0' && c <= '9' ? c - '0'
++                        : c >= 'a' && c <= 'f' ? c - 'a' + 10
++                        : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
++            if (v < 0) {
++                break;
++            }
++            bad = (bad << 4) | (u32) v;
++        }
++        checked = 1;
++    }
++    if (bad != 0 && !DISC_NULL(animjoint->aobjdesc)) {
++        ((HSD_AObjDesc*) DP(animjoint->aobjdesc))->obj_id = bad;
++    }
++}
++#endif
++
+ static inline void grAnime_801C6A54_inner(HSD_JObj* jobj,
+                                           HSD_AnimJoint* animjoint,
+                                           HSD_MatAnimJoint* matanimjoint,
+@@ -319,19 +348,22 @@ static inline void grAnime_801C6A54_inner(HSD_JObj* jobj,
          return;
      }
      if (animjoint != NULL) {
 -        if (animjoint->aobjdesc != NULL) {
++#ifdef MU_NATIVE
++        grAnime_TestBadJoint(animjoint);
++#endif
 +        if (!DISC_NULL(animjoint->aobjdesc)) {
              if (jobj->aobj != NULL) {
                  HSD_AObjRemove(jobj->aobj);
@@ -122529,7 +122564,7 @@ index 26a021223..16153955f 100644
      }
  }
  
-@@ -364,20 +364,20 @@ static inline void grAnime_801C6C0C_inner(HSD_JObj* jobj,
+@@ -364,20 +396,20 @@ static inline void grAnime_801C6C0C_inner(HSD_JObj* jobj,
          if (!(jobj->flags & 0x1000)) {
              child = jobj->child;
              if (animjoint != NULL) {
@@ -122553,7 +122588,7 @@ index 26a021223..16153955f 100644
              } else {
                  next_csj = NULL;
              }
-@@ -386,19 +386,19 @@ static inline void grAnime_801C6C0C_inner(HSD_JObj* jobj,
+@@ -386,19 +418,19 @@ static inline void grAnime_801C6C0C_inner(HSD_JObj* jobj,
                  grAnime_801C6C0C(child, caj, cmj, csj);
                  child = child->next;
                  if (caj != NULL) {
@@ -122576,7 +122611,7 @@ index 26a021223..16153955f 100644
                  } else {
                      next_csj = NULL;
                  }
-@@ -425,20 +425,20 @@ void grAnime_801C6C0C(HSD_JObj* jobj, HSD_AnimJoint* animjoint,
+@@ -425,20 +457,20 @@ void grAnime_801C6C0C(HSD_JObj* jobj, HSD_AnimJoint* animjoint,
          if (!(jobj->flags & 0x1000)) {
              jp = jobj->child;
              if (animjoint != NULL) {
@@ -122600,7 +122635,7 @@ index 26a021223..16153955f 100644
              } else {
                  next_sj = NULL;
              }
-@@ -447,19 +447,19 @@ void grAnime_801C6C0C(HSD_JObj* jobj, HSD_AnimJoint* animjoint,
+@@ -447,19 +479,19 @@ void grAnime_801C6C0C(HSD_JObj* jobj, HSD_AnimJoint* animjoint,
                  grAnime_801C6C0C_inner(jp, aj, mj, sj);
                  jp = jp->next;
                  if (aj != NULL) {
@@ -122623,7 +122658,7 @@ index 26a021223..16153955f 100644
                  } else {
                      next_sj = NULL;
                  }
-@@ -500,9 +500,40 @@ typedef void (*Callback2)(HSD_AObj* aobj, int param);
+@@ -500,9 +532,40 @@ typedef void (*Callback2)(HSD_AObj* aobj, int param);
  typedef void (*Callback4)(HSD_AObj* aobj, HSD_TObj* obj, u32 flags, int param);
  typedef void (*Callback3)(HSD_AObj* aobj, HSD_TObj* obj, int param);
  
@@ -122664,7 +122699,7 @@ index 26a021223..16153955f 100644
      switch (type) {
      case 0:
          ((Event) func)();
-@@ -570,11 +601,11 @@ static inline void grAnime_PObjForeachAnim(HSD_PObj* pobj, int flags,
+@@ -570,11 +633,11 @@ static inline void grAnime_PObjForeachAnim(HSD_PObj* pobj, int flags,
                                             void* func, u32 type, void* param)
  {
      if ((flags & CALL_ON_POBJ) && pobj != NULL &&
@@ -122680,7 +122715,7 @@ index 26a021223..16153955f 100644
      }
  }
  
-@@ -887,9 +918,9 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
+@@ -887,9 +950,9 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
      u32 req_flags = 0;
      s32 anim_flags = 0;
      UnkArchiveStruct* archive;
@@ -122693,7 +122728,7 @@ index 26a021223..16153955f 100644
      HSD_AnimJoint* aj;
      HSD_MatAnimJoint* mj;
      HSD_ShapeAnimJoint* sj;
-@@ -901,8 +932,8 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
+@@ -901,8 +964,8 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
      }
      archive = grDatFiles_801C6330(map_id);
      HSD_ASSERT(0x4DE, archive);
@@ -122704,7 +122739,7 @@ index 26a021223..16153955f 100644
      {
          aj = &aj[arg2];
          req_flags |= 0x81;
-@@ -910,8 +941,8 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
+@@ -910,8 +973,8 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
      } else {
          aj = NULL;
      }
@@ -122715,7 +122750,7 @@ index 26a021223..16153955f 100644
      {
          mj = &mj[arg2];
          req_flags |= 0x416;
-@@ -919,8 +950,8 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
+@@ -919,8 +982,8 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
      } else {
          mj = NULL;
      }
@@ -122726,7 +122761,7 @@ index 26a021223..16153955f 100644
      {
          sj = &sj[arg2];
          req_flags |= 8;
-@@ -938,7 +969,7 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
+@@ -938,7 +1001,7 @@ void grAnime_801C7C1C(HSD_JObj* jobj, s32 map_id, s32 arg2, s32 arg3, s32 arg4,
      grAnime_801C752C(jobj, arg5, anim_flags, HSD_AObjSetRate, 1, farg1);
      archive = grDatFiles_801C6330(map_id);
      HSD_ASSERT(0x148, archive);
@@ -122735,7 +122770,7 @@ index 26a021223..16153955f 100644
      if (eflags != NULL) {
          flag = eflags[arg4];
      } else {
-@@ -985,9 +1016,9 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
+@@ -985,9 +1048,9 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
      HSD_JObj* jobj = gobj->hsd_obj;
      UnkArchiveStruct* archive;
      HSD_Joint* joint;
@@ -122748,7 +122783,7 @@ index 26a021223..16153955f 100644
      HSD_AnimJoint* aj;
      HSD_MatAnimJoint* ma;
      HSD_ShapeAnimJoint* sa;
-@@ -999,7 +1030,7 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
+@@ -999,7 +1062,7 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
      }
      archive = grDatFiles_801C6330(arg1);
      HSD_ASSERT(0x556, archive);
@@ -122757,7 +122792,7 @@ index 26a021223..16153955f 100644
      if (HSD_JObjGetChild(jobj) != NULL) {
          jobj = HSD_JObjGetChild(jobj);
      }
-@@ -1008,21 +1039,21 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
+@@ -1008,21 +1071,21 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
      }
      grMaterial_801C8B68(jobj, 0);
      HSD_JObjRemoveAnimAll(jobj);
@@ -122785,7 +122820,7 @@ index 26a021223..16153955f 100644
      } else {
          aj = NULL;
      }
-@@ -1030,7 +1061,7 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
+@@ -1030,7 +1093,7 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
      HSD_JObjReqAnimAll(jobj, 0.0f);
      archive = grDatFiles_801C6330(arg1);
      HSD_ASSERT(0x148, archive);
@@ -122794,7 +122829,7 @@ index 26a021223..16153955f 100644
      if (flags != NULL) {
          flag = flags[arg2];
      } else {
-@@ -1042,7 +1073,7 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
+@@ -1042,7 +1105,7 @@ void grAnime_801C8138(HSD_GObj* gobj, enum_t arg1, bool arg2)
      HSD_JObjAnimAll(jobj);
  }
  
@@ -122803,7 +122838,7 @@ index 26a021223..16153955f 100644
  {
      *arg1 = arg0;
      longjmp(grAnime_8049EE40, 1);
-@@ -1052,7 +1083,7 @@ HSD_AObj* grAnime_801C8318(HSD_GObj* gobj, int arg1, u32 arg2)
+@@ -1052,7 +1115,7 @@ HSD_AObj* grAnime_801C8318(HSD_GObj* gobj, int arg1, u32 arg2)
  {
      HSD_JObj* jobj;
      enum _HSD_TypeMask var_r30 = 0;
@@ -122812,7 +122847,7 @@ index 26a021223..16153955f 100644
      jobj = Ground_801C3FA4(gobj, arg1);
      if (jobj == NULL) {
          return 0;
-@@ -1098,16 +1129,16 @@ HSD_Joint* grAnime_801C8578(HSD_Joint* joint, s32* counter)
+@@ -1098,16 +1161,16 @@ HSD_Joint* grAnime_801C8578(HSD_Joint* joint, s32* counter)
      if (*counter == 0) {
          return joint;
      }
@@ -122833,7 +122868,7 @@ index 26a021223..16153955f 100644
          if (*counter == 0) {
              return joint;
          }
-@@ -1123,22 +1154,23 @@ static inline HSD_Joint* grAnime_801C8578_noinline(HSD_Joint* joint,
+@@ -1123,22 +1186,23 @@ static inline HSD_Joint* grAnime_801C8578_noinline(HSD_Joint* joint,
  
  void grAnime_801C86D4(s32 arg0, HSD_GObj* arg1, s32 arg2)
  {
@@ -200182,7 +200217,7 @@ index 948c401c4..cb009d266 100644
  #define S32_TO_F32 4503601774854144.0
  
 diff --git a/src/sysdolphin/baselib/aobj.c b/src/sysdolphin/baselib/aobj.c
-index 74b4581ac..c772d852d 100644
+index 74b4581ac..eb168e611 100644
 --- a/src/sysdolphin/baselib/aobj.c
 +++ b/src/sysdolphin/baselib/aobj.c
 @@ -114,11 +114,14 @@ void HSD_AObjStopAnim(HSD_AObj* aobj, void* obj, HSD_ObjUpdateFunc func)
@@ -200233,17 +200268,19 @@ index 74b4581ac..c772d852d 100644
      }
  
      if (aobj->flags & AOBJ_NO_ANIM) {
-@@ -172,9 +168,6 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
+@@ -172,8 +168,9 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
          HSD_AObj_804D7630 += 1;
      }
  }
 -#ifdef MUST_MATCH
 -#pragma pop
--#endif
++
++#ifdef MU_NATIVE
++unsigned int mu_game_memory_has(unsigned int addr);   /* shim/mu_os.c */
+ #endif
  
  HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
- {
-@@ -184,7 +177,7 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
+@@ -184,7 +181,7 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
      u8 _[4];
  
      HSD_FObj* fobj;
@@ -200252,7 +200289,7 @@ index 74b4581ac..c772d852d 100644
      HSD_Obj* phi_r30;
  
      if (aobjdesc != NULL) {
-@@ -192,7 +185,7 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
+@@ -192,7 +189,7 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
          HSD_AObjSetFlags(aobj, aobjdesc->flags);
          HSD_AObjSetRewindFrame(aobj, 0.0F);
          HSD_AObjSetEndFrame(aobj, aobjdesc->end_frame);
@@ -200261,16 +200298,28 @@ index 74b4581ac..c772d852d 100644
          fobj = HSD_FObjLoadDesc(fobjdesc);
          HSD_AObjSetFObj(aobj, fobj);
          id = aobjdesc->obj_id;
-@@ -203,7 +196,7 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
+@@ -202,8 +199,19 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
+             if (hsd_obj != NULL) {
                  ref_INC(hsd_obj);
              } else {
++#ifdef MU_NATIVE
++                /* A joint the animation names that no loaded file holds is read from the address it
++                 * names. A file with a reference it never relocated (a stage skin) names one outside
++                 * the game's memory: the console and Dolphin read zeros there and the match goes on,
++                 * here the read faulted (Final Destination's background, 0.9.204). Outside the
++                 * game's memory the animation gets no joint, as when it names none. */
++                phi_r30 = mu_game_memory_has(id)
++                              ? (HSD_Obj*) HSD_JObjLoadJoint((void*) MU_Z(aobjdesc->obj_id))
++                              : NULL;
++#else
                  phi_r30 =
 -                    (HSD_Obj*) HSD_JObjLoadJoint((void*) aobjdesc->obj_id);
 +                    (HSD_Obj*) HSD_JObjLoadJoint((void*) MU_Z(aobjdesc->obj_id));
++#endif
              }
              if (aobj != NULL) {
                  if (aobj->hsd_obj != NULL) {
-@@ -241,7 +234,7 @@ void HSD_AObjRemove(HSD_AObj* aobj)
+@@ -241,7 +249,7 @@ void HSD_AObjRemove(HSD_AObj* aobj)
  
  HSD_AObj* HSD_AObjAlloc(void)
  {
@@ -200279,7 +200328,7 @@ index 74b4581ac..c772d852d 100644
      HSD_ASSERT(489, new);
  
      memset(new, 0, sizeof(HSD_AObj));
-@@ -256,7 +249,7 @@ void HSD_AObjFree(HSD_AObj* aobj)
+@@ -256,7 +264,7 @@ void HSD_AObjFree(HSD_AObj* aobj)
          return;
      }
  
