@@ -59,6 +59,10 @@ enum NetMsg : uint8_t {
   // Melee Unlocked only: Gecko codes offered, answered and agreed for the match (gecko_online.h),
   // sent only to a peer whose build message said it takes them (capability bit 6).
   NP_MSG_MU_GECKO = 0xE4,
+  // Melee Unlocked only: the sender went to warm up in Training while staying connected, or came back
+  // to the character select (slippi_warmup.h). Sent only to a peer whose build message said it takes
+  // it (capability bit 7); anyone else just sees a player who has not picked yet.
+  NP_MSG_MU_WARMUP = 0xE5,
 };
 
 // sf::Packet wire format: integers big-endian, bool as one byte, strings as u32 length + bytes.
@@ -257,7 +261,21 @@ class NetplayClient {
                        std::string ranked_rules_digest;
                        bool arena = false;         // takes arena room messages
                        bool auto_lcancel = false;     // presses for L-cancels this session (automatic L-cancel)
-                       bool gecko = false; };         // takes Gecko code messages (NP_MSG_MU_GECKO)
+                       bool gecko = false;            // takes Gecko code messages (NP_MSG_MU_GECKO)
+                       bool warmup = false; };        // takes and sends warm-up messages (NP_MSG_MU_WARMUP)
+  // Warm-up (slippi_warmup.h): tell every opponent whose build takes it that this player is warming up
+  // in Training (true) or on the character select (false), and the character picked there (Slippi's
+  // external id and costume, 0xFF none: Slippi itself sends a pick only at the lock-in). Any thread.
+  void SendWarmup(bool warming, uint8_t character = 0xFF, uint8_t costume = 0);
+  // Remote `index`'s pick as its last warm-up message said: character << 8 | costume, -1 none.
+  int RemotePick(int index) const {
+    return index >= 0 && index < REMOTE_PLAYER_MAX ? (int)remote_pick_[index].load(std::memory_order_relaxed) : -1;
+  }
+  // What remote `index` last said: 1 warming up, 0 on the character select, -1 never said (an older
+  // build or Slippi Dolphin). UI thread safe.
+  int RemoteWarmup(int index) const {
+    return index >= 0 && index < REMOTE_PLAYER_MAX ? (int)remote_warmup_[index].load(std::memory_order_relaxed) : -1;
+  }
   // The shield colour the opponent on in-game `slot` sent (0 none).
   uint32_t RemoteShieldColor(int slot);
   RemoteBuild GetRemoteBuild(int index);
@@ -369,6 +387,8 @@ class NetplayClient {
   std::deque<std::vector<uint8_t>> arena_inbox_;
   std::mutex gecko_mutex_;                       // gecko_inbox_ (network thread in, game thread out)
   std::deque<std::vector<uint8_t>> gecko_inbox_;
+  std::atomic<int8_t> remote_warmup_[REMOTE_PLAYER_MAX] = {-1, -1, -1};   // NP_MSG_MU_WARMUP, by remote index
+  std::atomic<int32_t> remote_pick_[REMOTE_PLAYER_MAX] = {-1, -1, -1};    // and the pick it carried
   void SendBuild();
 };
 

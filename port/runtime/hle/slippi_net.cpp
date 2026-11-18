@@ -709,7 +709,8 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       {
         std::lock_guard<std::mutex> lk(build_mutex_);
         remote_build_[pidx] = {true, mod_view != 0, fp, name, (caps & 1) != 0, (caps & 2) != 0, (caps & 4) != 0, shield, port, rules_digest,
-                               (caps & 16) != 0, (caps & 32) != 0, (caps & 64) != 0};
+                               (caps & 16) != 0, (caps & 32) != 0, (caps & 64) != 0, (caps & 128) != 0};
+        if ((caps & 128) && remote_warmup_[pidx].load(std::memory_order_relaxed) < 0) remote_warmup_[pidx].store(0, std::memory_order_relaxed);
       }
       host::log("slippi: opponent %u build: %s%s%s%s, shield colour %s%06X", port, mod_view ? "mod " : "retail game",
                 mod_view ? name.c_str() : "", mod_view ? (" " + fp.substr(0, 16)).c_str() : "",
@@ -797,6 +798,24 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
       gecko_inbox_.emplace_back(packet.data() + head, packet.data() + packet.size());
       break;
     }
+    case NP_MSG_MU_WARMUP: {
+      // 'M' 'U' 'W' version, sender port, state (1 warming up in Training, 0 on the character select),
+      // then the character picked on the select and its costume (0xFF: none yet), from a peer that
+      // announced it.
+      uint8_t m, u, w, version, port, state, character = 0xFF, costume = 0;
+      if (!(packet >> m >> u >> w >> version >> port >> state) || m != 'M' || u != 'U' || w != 'W' || version != 1) break;
+      if (!(packet >> character >> costume)) { character = 0xFF; costume = 0; }
+      const uint8_t pidx = PlayerIdxFromPort(port);
+      if (pidx >= remote_player_count_) break;
+      {
+        std::lock_guard<std::mutex> lk(build_mutex_);
+        if (!remote_build_[pidx].warmup) break;
+      }
+      remote_pick_[pidx].store(character < 26 ? (int32_t)(character << 8 | costume) : -1, std::memory_order_relaxed);
+      const int8_t was = remote_warmup_[pidx].exchange(state ? 1 : 0, std::memory_order_relaxed);
+      if (was != (state ? 1 : 0)) host::log("slippi: opponent %u %s", port, state ? "went to warm up in Training" : "is back on the character select");
+      break;
+    }
     case NP_MSG_SLIPPI_CONN_SELECTED: break;
     case NP_MSG_SLIPPI_COMPLETE_STEP: {
       if (!yougame::session()) break;
@@ -841,9 +860,10 @@ void NetplayClient::SendBuild() {
   const std::string rules_digest = online::ranked_rules_digest(online::session_mode());
   // Bit 4: this side takes arena room messages (NP_MSG_MU_ARENA). Bit 5: automatic L-cancel is on
   // for this session (the opponent's character select says so; older builds ignore the bit). Bit 6:
-  // this side takes Gecko code messages (NP_MSG_MU_GECKO).
+  // this side takes Gecko code messages (NP_MSG_MU_GECKO). Bit 7: this side sends and takes warm-up
+  // messages (NP_MSG_MU_WARMUP).
   *p << (uint8_t)((early ? 1 : 0) | 2 | (me.static_engine ? 4 : 0) | (rules_digest.empty() ? 0 : 8) | 16 |
-                  (lcancel::automatic_active_online() ? 32 : 0) | 64);
+                  (lcancel::automatic_active_online() ? 32 : 0) | 64 | 128);
   // Then the player's own shield colour ("Shield colours", Online): a byte 1 and the three RGB bytes, or
   // a byte 0. Builds before it stop reading at the capabilities byte.
   const uint32_t shield = gx::shield_color_online();
@@ -896,6 +916,20 @@ bool NetplayClient::SendGecko(const std::vector<uint8_t>& message) {
   p->append(message.data(), message.size());
   SendAsync(std::move(p));
   return true;
+}
+
+void NetplayClient::SendWarmup(bool warming, uint8_t character, uint8_t costume) {
+  if (status_.load(std::memory_order_acquire) != ConnectStatus::CONNECTED) return;
+  {
+    std::lock_guard<std::mutex> lk(build_mutex_);
+    bool anyone = false;
+    for (int i = 0; i < remote_player_count_; ++i) if (remote_build_[i].warmup) anyone = true;
+    if (!anyone) return;   // nobody on the other side reads them: no message at all
+  }
+  auto p = std::make_unique<Packet>();
+  *p << (uint8_t)NP_MSG_MU_WARMUP << (uint8_t)'M' << (uint8_t)'U' << (uint8_t)'W' << (uint8_t)1 << player_idx_
+     << (uint8_t)(warming ? 1 : 0) << character << costume;
+  SendAsync(std::move(p));
 }
 
 bool NetplayClient::PopGecko(std::vector<uint8_t>& out) {
@@ -1021,6 +1055,11 @@ void NetplayClient::Send(Packet& packet) {
       // Only to a peer whose build said it takes them; reliable, on the control channel.
       std::lock_guard<std::mutex> lk(build_mutex_);
       if (i >= (size_t)REMOTE_PLAYER_MAX || !remote_build_[i].gecko) continue;
+    }
+    if (mid == NP_MSG_MU_WARMUP) {
+      // Only to a peer whose build said it reads them; reliable, on the control channel.
+      std::lock_guard<std::mutex> lk(build_mutex_);
+      if (i >= (size_t)REMOTE_PLAYER_MAX || !remote_build_[i].warmup) continue;
     }
     ENetPacket* epac = enet_packet_create(packet.data(), packet.size(), flags);
     enet_peer_send(server_[i], channel, epac);
