@@ -172,6 +172,7 @@ int g_pip = 0;   // 0 as it was, 1 small, 2 big
 bool g_pip_no_focus = false;   // the room's match window: never takes the focus from the game in Training
 std::atomic<int> g_pip_answer{-1};   // the other window's answer: the mode it has taken
 std::atomic<int> g_spectate_choice{-1};   // the match window's view chosen at its corner, -1 none new
+std::atomic<int> g_spectate_action{-1};   // a button pressed on the match window (window_spectate_action), -1 none new
 // The match window's corner selector, in client pixels: clicks there go to it, not to the drag.
 std::atomic<int> g_hot_rect[4] = {0, 0, 0, 0};
 std::atomic<uint64_t> g_hover_tick{0};   // GetTickCount64 when the mouse was last over the small window
@@ -189,6 +190,12 @@ void pip_apply(HWND h, int mode, bool mute, bool no_focus) {
     g_pip_exstyle = GetWindowLongPtrW(h, GWL_EXSTYLE);
     GetWindowPlacement(h, &g_pip_place);
   }
+  // The new mode first: the frame changes below send WM_NCCALCSIZE at once, and wnd_proc answers it by
+  // g_pip (no frame only while small). Set after, a window going back kept "no frame" for good: its
+  // title bar never came back, and its inside read as the whole window.
+  const int was = g_pip;
+  g_pip = mode;
+  g_pip_no_focus = mode && no_focus;
   if (mode == 1) {
     // WS_THICKFRAME for the sizing edges (WM_NCHITTEST below); WM_NCCALCSIZE keeps the whole window
     // client, so no frame shows.
@@ -199,7 +206,7 @@ void pip_apply(HWND h, int mode, bool mute, bool no_focus) {
     SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP | visible);
     SetWindowLongPtrW(h, GWL_EXSTYLE, g_pip_exstyle | (no_focus ? WS_EX_NOACTIVATE : 0));
     SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-  } else if (g_pip) {
+  } else if (was) {
     SetWindowLongPtrW(h, GWL_STYLE, (g_pip_style & ~(LONG_PTR)WS_VISIBLE) | visible);
     SetWindowLongPtrW(h, GWL_EXSTYLE, g_pip_exstyle);
     if (visible) SetWindowPlacement(h, &g_pip_place);
@@ -208,9 +215,7 @@ void pip_apply(HWND h, int mode, bool mute, bool no_focus) {
                       g_pip_place.rcNormalPosition.bottom - g_pip_place.rcNormalPosition.top, SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
   }
-  if (mode != g_pip) log("window: picture in picture %s%s", mode == 1 ? "small" : mode == 2 ? "big" : "off", mode && mute ? " (sound off)" : "");
-  g_pip = mode;
-  g_pip_no_focus = mode && no_focus;
+  if (mode != was) log("window: picture in picture %s%s", mode == 1 ? "small" : mode == 2 ? "big" : "off", mode && mute ? " (sound off)" : "");
   audio_set_page_volume(mode && mute ? 0 : 100);
 }
 
@@ -225,6 +230,7 @@ LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     if (w & 8) { g_pip_answer.store((int)(w & 3)); return 0; }
     if (w & 32) { g_spectate_choice.store((int)((w >> 8) & 3)); return 0; }   // the match window chose a view
+    if (w & 8192) { g_spectate_action.store((int)((w >> 8) & 3)); return 0; }   // a button on the match window
     if (w & 64) {   // the game that opened us set one
       options.spectate_view = (int)((w >> 8) & 3);
       log("spectate: view %d set by the room's game", options.spectate_view);
@@ -552,6 +558,10 @@ void window_report_spectate_view(int view) {
   if (options.spectate_owner) PostMessageW((HWND)(uintptr_t)options.spectate_owner, pip_message(), (WPARAM)(32 | ((view & 3) << 8)), 0);
 }
 int window_spectate_choice() { return g_spectate_choice.exchange(-1); }
+void window_report_spectate_action(int action) {
+  if (options.spectate_owner) PostMessageW((HWND)(uintptr_t)options.spectate_owner, pip_message(), (WPARAM)(8192 | ((action & 3) << 8)), 0);
+}
+int window_spectate_action() { return g_spectate_action.exchange(-1); }
 int window_pip_mode() { return g_pip; }
 bool window_hovered_recently() { return GetTickCount64() - g_hover_tick.load() < 2000; }
 int window_take_clicks() { return g_pip_clicks.exchange(0); }
@@ -849,6 +859,8 @@ void* window_of_process(uint32_t) { return nullptr; }
 void window_send_spectate_view(void*, int) {}
 void window_report_spectate_view(int) {}
 int window_spectate_choice() { return -1; }
+void window_report_spectate_action(int) {}
+int window_spectate_action() { return -1; }
 void window_set_hot_rect(int, int, int, int) {}
 int window_pip_mode() { return 0; }
 bool window_hovered_recently() { return false; }

@@ -1,6 +1,6 @@
-// Warm-up room (slippi_warmup.h): going to Training and back, the opponent's states shown while there,
-// the opponent leaving, both players warming up, the arena's turn call with its countdown, and the
-// time limits that keep a lost scene change from leaving the room stuck.
+// Warm-up room (slippi_warmup.h): going to Training and back, staying away in any other mode, the
+// opponent's states shown while away, the opponent leaving, both players warming up, the arena's turn
+// call with its countdown, and the time limits that keep a lost scene change from leaving the room stuck.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "slippi_warmup.h"
 #include <cstdio>
@@ -44,7 +44,7 @@ void into_training(Room& r, uint64_t t, Kind kind = Kind::Pair) {
   CHECK(r.tick(select_frame(t + 16)) == Action::None);   // the select still answers for a few frames
   CHECK(r.tick(between_frame(t + 100)) == Action::None);
   CHECK(r.tick(training_frame(t + 300)) == Action::None);
-  CHECK(r.stage() == Stage::Training);
+  CHECK(r.stage() == Stage::Away);
 }
 }  // namespace
 
@@ -76,7 +76,7 @@ TEST(long_stay_twelve_minutes) {
   Room r;
   into_training(r, 0);
   CHECK(run(r, 400, 12 * 60 * 1000, [](uint64_t t) { return training_frame(t); }) == Action::None);
-  CHECK(r.stage() == Stage::Training);
+  CHECK(r.stage() == Stage::Away);
   CHECK(r.request_return(12 * 60 * 1000 + 16));
   CHECK(r.tick(select_frame(12 * 60 * 1000 + 400)) == Action::Arrived);
 }
@@ -87,7 +87,7 @@ TEST(training_select_counts_as_training) {
   Room r;
   into_training(r, 0);
   CHECK(run(r, 400, 30000, [](uint64_t t) { return training_frame(t); }) == Action::None);
-  CHECK(r.stage() == Stage::Training);
+  CHECK(r.stage() == Stage::Away);
 }
 
 TEST(opponent_ready_goes_back_at_once) {
@@ -113,7 +113,7 @@ TEST(opponent_ready_stays_when_turned_off) {
   into_training(r, 0);
   CHECK(r.tick(training_frame(6000, PeerState::Ready)) == Action::None);
   CHECK(r.banner() == Banner::PeerReady);
-  CHECK(r.stage() == Stage::Training);
+  CHECK(r.stage() == Stage::Away);
   CHECK(run(r, 6016, 30000, [](uint64_t t) { return training_frame(t, PeerState::Ready); }) == Action::None);
 }
 
@@ -229,14 +229,76 @@ TEST(return_never_arrives) {
   CHECK(!r.active());
 }
 
-TEST(player_leaves_for_the_menus) {
-  // Training's own exit to the main menu ends the warm-up (the menus end the connection too).
+TEST(player_goes_to_other_modes) {
+  // Out of Training to the menus and any other mode (VS, Classic...): the room keeps the player, for as
+  // long as they like, with the opponent's news still coming.
   Room r;
   into_training(r, 0);
-  uint64_t at = 0;
-  CHECK(run(r, 5000, 20000, [](uint64_t t) { return between_frame(t); }, &at) == Action::Abandoned);
-  CHECK(at >= 5000 + Room::kElsewhereMs);
+  CHECK(run(r, 5000, 5000 + 15 * 60 * 1000, [](uint64_t t) { return between_frame(t); }) == Action::None);
+  CHECK(r.active());
+  CHECK(r.stage() == Stage::Away);
+  CHECK(r.tick(between_frame(1000000, PeerState::WarmingUp)) == Action::None);
+  CHECK(r.banner() == Banner::PeerWarming);
+  CHECK(r.tick(training_frame(1000100)) == Action::None);   // and back into Training: still the same stay
+  CHECK(r.stage() == Stage::Away);
+}
+
+TEST(online_menus_lead_back) {
+  // The player picks Online from the menus: not a new online game, the way back to the room.
+  Room r;
+  into_training(r, 0, Kind::Arena);
+  CHECK(r.tick(between_frame(5000)) == Action::None);
+  Observe o; o.now_ms = 6000; o.online_menu = true;
+  CHECK(r.tick(o) == Action::GoBack);
+  CHECK(r.stage() == Stage::Returning);
+  Observe s; s.now_ms = 6500; s.online_select = true;
+  CHECK(r.tick(s) == Action::Arrived);
   CHECK(!r.active());
+}
+
+TEST(opponent_ready_elsewhere_counts_down) {
+  // In a match of another mode when the opponent locks in: the countdown, then back to play.
+  Room r;
+  r.set_countdown_ms(3000);
+  into_training(r, 0);
+  CHECK(r.tick(between_frame(5000, PeerState::Picking)) == Action::None);
+  CHECK(r.tick(between_frame(6000, PeerState::Ready)) == Action::None);
+  CHECK(r.banner() == Banner::PeerReady);
+  CHECK(r.ready_waiting());
+  CHECK(r.countdown_left_ms(6000) == 3000);
+  uint64_t at = 0;
+  CHECK(run(r, 6016, 20000, [](uint64_t t) { return between_frame(t, PeerState::Ready); }, &at) == Action::Ready);
+  CHECK(at >= 9000 && at < 9020);
+  CHECK(r.stage() == Stage::Returning);
+  CHECK(!r.ready_waiting());
+}
+
+TEST(opponent_ready_elsewhere_instant) {
+  Room r;
+  r.set_countdown_ms(0);
+  into_training(r, 0);
+  CHECK(r.tick(between_frame(6000, PeerState::Ready)) == Action::Ready);
+}
+
+TEST(opponent_unlocks_during_the_countdown) {
+  Room r;
+  r.set_countdown_ms(3000);
+  into_training(r, 0);
+  CHECK(r.tick(between_frame(6000, PeerState::Ready)) == Action::None);
+  CHECK(r.tick(between_frame(7000, PeerState::Picking)) == Action::None);
+  CHECK(!r.ready_waiting());
+  CHECK(r.countdown_left_ms(7000) == -1);
+  CHECK(run(r, 7016, 20000, [](uint64_t t) { return between_frame(t, PeerState::Picking); }) == Action::None);
+}
+
+TEST(press_during_ready_countdown) {
+  Room r;
+  r.set_countdown_ms(3000);
+  into_training(r, 0);
+  CHECK(r.tick(between_frame(6000, PeerState::Ready)) == Action::None);
+  CHECK(r.request_return(6500));
+  CHECK(r.stage() == Stage::Returning);
+  CHECK(!r.ready_waiting());
 }
 
 TEST(short_scene_gap_is_not_leaving) {
@@ -248,7 +310,7 @@ TEST(short_scene_gap_is_not_leaving) {
   CHECK(r.tick(training_frame(5600)) == Action::None);
   CHECK(r.tick(between_frame(9000)) == Action::None);
   CHECK(r.tick(training_frame(9100)) == Action::None);
-  CHECK(r.stage() == Stage::Training);
+  CHECK(r.stage() == Stage::Away);
 }
 
 TEST(arrived_by_other_way) {
@@ -312,7 +374,7 @@ TEST(arena_turn_taken_back) {
   CHECK(r.countdown_left_ms(11000) == -1);
   CHECK(r.banner() == Banner::None);
   CHECK(run(r, 11016, 30000, [](uint64_t t) { Observe x; x.now_ms = t; x.in_training = true; return x; }) == Action::None);
-  CHECK(r.stage() == Stage::Training);
+  CHECK(r.stage() == Stage::Away);
 }
 
 TEST(arena_turn_called_on_the_way) {
@@ -357,7 +419,7 @@ TEST(arena_ignores_peers) {
 }
 
 TEST(names) {
-  CHECK(stage_name(Stage::Training)[0] == 't');
+  CHECK(stage_name(Stage::Away)[0] == 'a');
   CHECK(peer_state_name(PeerState::WarmingUp)[0] == 'w');
 }
 

@@ -4131,16 +4131,38 @@ static void draw_spectate_view_selector() {
       if (std::sscanf(t, "%d@%d", &test_view, &test_secs) != 2) test_view = -1;
   }
   if (test_view >= 0 && now - shown_at >= test_secs) { pick_spectate_view(test_view); test_view = -1; }
+  // Test: MELEE_TEST_SPECTATE_ACTION=<button>@<seconds>: that button of the list (1 WARM UP, 2 PICTURE IN
+  // PICTURE, 3 FULL SIZE) pressed once, that long after the window was first laid out big (1, 2) or small (3).
+  static int test_action = -2, action_secs = 0;
+  static double laid_at = -1.0;
+  if (test_action == -2) {
+    test_action = -1;
+    if (const char* t = host::test_env::getenv("MELEE_TEST_SPECTATE_ACTION"))
+      if (std::sscanf(t, "%d@%d", &test_action, &action_secs) != 2) test_action = -1;
+  }
+  if (test_action > 0) {
+    const bool layout_for_it = host::window_pip_mode() == (test_action == 3 ? 1 : 2);
+    if (layout_for_it && laid_at < 0.0) laid_at = now;
+    if (layout_for_it && now - laid_at >= action_secs) {
+      host::window_report_spectate_action(test_action);
+      host::log("spectate: test: button %d pressed", test_action);
+      test_action = -1;
+    }
+  }
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   const ImU32 gold = IM_COL32(233, 180, 76, 255), ink = IM_COL32(236, 238, 244, 255), dark = IM_COL32(12, 14, 24, 235);
 
   // The list itself (both windows): STANDARD, LAB VIEW, LIGHT stacked at the top left, a gold dot and gold
-  // letters on the one in use; a click on a row picks it.
-  const auto draw_list = [&](float u, float a) {
-    const float text_px = 12.0f * u, row_h = 21.0f * u, pad = 7.0f * u, dot = 3.0f * u;
+  // letters on the one in use; a click on a row picks it. Under a rule, the window's own buttons (the
+  // room's game takes them, window_report_spectate_action): full size from the small window; from the
+  // big one, warm up or picture in picture (the match small, so the player can go anywhere).
+  struct Action { const char* name; int id; };
+  const auto draw_list = [&](float u, float a, const std::vector<Action>& actions) {
+    const float text_px = 12.0f * u, row_h = 21.0f * u, pad = 7.0f * u, dot = 3.0f * u, rule = actions.empty() ? 0.0f : 9.0f * u;
     float tw = 0;
     for (const char* n : kNames) tw = std::max(tw, practice_menu::text_width(text_px, n));
-    const float bw = pad + dot * 2 + 6.0f * u + tw + pad, bh = pad * 0.6f + 3 * row_h + pad * 0.6f;
+    for (const Action& act : actions) tw = std::max(tw, practice_menu::text_width(text_px, act.name));
+    const float bw = pad + dot * 2 + 6.0f * u + tw + pad, bh = pad * 0.6f + (3 + actions.size()) * row_h + rule + pad * 0.6f;
     const float x0 = 8.0f * u, y0 = 8.0f * u;
     host::window_set_hot_rect((int)x0, (int)y0, (int)(x0 + bw), (int)(y0 + bh));   // its rows take clicks
     const auto al = [a](ImU32 c) { return (c & ~IM_COL32_A_MASK) | ((ImU32)(((c >> IM_COL32_A_SHIFT) & 0xFF) * a) << IM_COL32_A_SHIFT); };
@@ -4159,6 +4181,22 @@ static void draw_spectate_view_selector() {
       practice_menu::text(dl, x0 + pad + dot * 2 + 6.0f * u, cy - text_px * 0.55f, text_px, al(lit ? gold : ink), kNames[i], 0.0f, false);
       if (hover && a > 0.5f && ImGui::IsMouseClicked(0)) { pick_spectate_view(i); picked = true; }
     }
+    if (!actions.empty()) {
+      const float ly = y0 + pad * 0.6f + 3 * row_h + rule * 0.5f;
+      dl->AddLine(ImVec2(x0 + pad, ly), ImVec2(x0 + bw - pad, ly), al(IM_COL32(255, 255, 255, 40)), 1.0f);
+    }
+    for (size_t k = 0; k < actions.size(); ++k) {
+      const float ry = y0 + pad * 0.6f + row_h * (3 + k) + rule;
+      const ImVec2 r0(x0 + 2.0f * u, ry), r1(x0 + bw - 2.0f * u, ry + row_h);
+      const bool hover = mouse_in && io.MousePos.x >= r0.x && io.MousePos.x < r1.x && io.MousePos.y >= r0.y && io.MousePos.y < r1.y;
+      if (hover) dl->AddRectFilled(r0, r1, al(IM_COL32(255, 255, 255, 26)), 4.0f * u);
+      practice_menu::text(dl, x0 + pad + dot * 2 + 6.0f * u, ry + row_h * 0.5f - text_px * 0.55f, text_px, al(ink), actions[k].name, 0.0f, false);
+      if (hover && a > 0.5f && ImGui::IsMouseClicked(0)) {
+        host::window_report_spectate_action(actions[k].id);
+        host::log("spectate: %s pressed", actions[k].name);
+        picked = true;
+      }
+    }
     return picked;
   };
 
@@ -4173,20 +4211,23 @@ static void draw_spectate_view_selector() {
     if (host::window_hovered_recently() || mouse_in) opened_at = std::max(opened_at, now - 0.001);
     if (open && !picked && now - opened_at > 6.0) open = false;
     if (!open && !picked) { host::window_set_hot_rect(0, 0, 0, 0); return; }
-    if (draw_list(std::clamp(std::min(w, h) / 220.0f, 0.55f, 1.6f), 1.0f)) open = false;
+    if (draw_list(std::clamp(std::min(w, h) / 220.0f, 0.55f, 1.6f), 1.0f, {{"FULL SIZE", 3}})) open = false;
     return;
   }
 
   // ---- the big window: the same list at the top left, for its first 7 seconds and while the mouse moves ----
   host::window_set_hot_rect(0, 0, 0, 0);
   const float u = std::clamp(h / 720.0f, 0.8f, 3.0f);
-  const bool over = mouse_in && io.MousePos.x < 160.0f * u && io.MousePos.y < 100.0f * u;
+  // Laid out big by the room's game (picture in picture's big half): its buttons under the views.
+  const bool big = host::window_pip_mode() == 2;
+  const bool over = mouse_in && io.MousePos.x < 200.0f * u && io.MousePos.y < (big ? 170.0f : 100.0f) * u;
   const float since = (float)std::min(now - shown_at - 7.0, now - moved_at - 2.5);   // > 0: time to hide
   static float a = 1.0f;
   const float want = (since < 0.0f || over) ? 1.0f : 0.0f;
   a += (want - a) * std::min(1.0f, io.DeltaTime * 8.0f);
   if (a < 0.02f) return;
-  draw_list(u, a);
+  if (big) draw_list(u, a, {{"WARM UP", 1}, {"PICTURE IN PICTURE", 2}});
+  else draw_list(u, a, {});
 }
 
 // The small window of the warm-up room's two (host::window_pip_mode() 1): the room's match, or this
@@ -4311,9 +4352,10 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     f.search.code = practice.connect_code;
     f.search.offer = practice.offer;
     {
-      // The warm-up room's strip over Training (only while the player is in Training for it).
+      // The warm-up room's panel: in Training, and anywhere else offline the player went from there
+      // (stage 2, slippi::warmup::Stage::Away: any mode, its selects and matches, the menus).
       const auto& w = practice.warmup;
-      f.warmup.active = w.active && practice.in_practice;
+      f.warmup.active = w.active && (practice.in_practice || w.stage == 2);
       f.warmup.in_small_window = host::window_pip_mode() == 1;   // Training in the small window: no panel in it
       f.warmup.arena = w.arena;
       f.warmup.mode = w.mode;
@@ -10005,18 +10047,20 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       {
         // The room's match while you warm up (the viewer window): not shown, small over Training, or
         // big with Training small. The Practice menu changes the same three while warming up.
-        static const char* const kWatch[] = {"Not shown (score only)", "Small window over Training", "Big, Training in the small window"};
+        static const char* const kWatch[] = {"Not shown (score only)", "Small window over your game", "Big, your game in the small window"};
         static const char* const kSize[] = {"Small", "Medium", "Large"};
         static const char* const kCorner[] = {"Top right", "Bottom right", "Bottom left", "Top left", "Right side bar"};
         ImGui::SetNextItemWidth(300.0f);
-        if (ImGui::Combo("Arena: the room's match while you warm up", &options.warmup_watch, kWatch, 3)) {
+        if (ImGui::Combo("Arena: the room's match while you're away", &options.warmup_watch, kWatch, 3)) {
           RenderOptions::live_warmup_watch() = options.warmup_watch;
           changed = true;
         }
         if (ImGui::IsItemHovered())
-          ImGui::SetTooltip("Small window: you train full size and the match plays in a small window on top.\n"
-                            "Big: the match fills your screen and you train in the small window.\n"
-                            "Drag the small window anywhere, or pull its edges to size it. Both run at once.");
+          ImGui::SetTooltip("Watching on the room's character select, the match starts full size: PICTURE IN PICTURE\n"
+                            "on it (or A on that button in the side bar) makes it small so you can do anything else.\n"
+                            "Warming up or in any other mode, the match plays as chosen here: in a small window over\n"
+                            "your game, or big with your game in the small window. Not shown: no window, the panel's\n"
+                            "score only. Drag the small window anywhere, or pull its edges to size it.");
         ImGui::SetNextItemWidth(140.0f);
         if (ImGui::Combo("Small window size", &options.warmup_pip_size, kSize, 3)) {
           RenderOptions::live_warmup_pip_size() = options.warmup_pip_size;

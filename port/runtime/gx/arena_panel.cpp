@@ -95,7 +95,10 @@ struct State {
 } g;
 
 // What a lit-up button does.
-enum class Do : uint8_t { None, Rules, AddCode, Spot, Ask, Doubles, Opt0, Opt1, Opt2, Member, Leave, Warmup };
+enum class Do : uint8_t { None, Rules, AddCode, Spot, Ask, Doubles, Opt0, Opt1, Opt2, Member, Leave, Warmup, Pip };
+// The room's match window's size button (watching): its label says what A on it does.
+constexpr const char* kPipSmall = "Picture in picture";
+constexpr const char* kPipBig = "Full size";
 bool warmup_row_shown();   // the warm-up room's row at the foot of a room's left bar
 struct Item { int side; float y0, y1; Do what; uint8_t member; };
 std::vector<Item> g_items, g_last_items;   // this frame's buttons, and last frame's (to move the hand over)
@@ -113,7 +116,7 @@ Do do_of(char chip, const std::string& label) {
     case 'X': return Do::Spot;
     case 'R': return Do::Doubles;
     case 'B': return Do::Leave;
-    case 'A': return label.rfind("Ask", 0) == 0 ? Do::Ask : Do::None;
+    case 'A': return label.rfind("Ask", 0) == 0 ? Do::Ask : label == kPipSmall || label == kPipBig ? Do::Pip : Do::None;
     case 'L': return Do::Warmup;   // "+ R  Warm up": L and R held, or A on the row
     default: return Do::None;
   }
@@ -881,6 +884,10 @@ void press(Do what, const View& v) {
       break;
     }
     case Do::Leave: leave_panel(); break;
+    case Do::Pip:
+      host::log("arena panel: %s pressed", ar::watch_layout() == 2 ? kPipSmall : kPipBig);
+      ar::toggle_watch_layout();
+      break;
     case Do::Warmup:
       host::log("arena panel: WARM UP pressed");
       slippi::native_practice::submit_warmup();
@@ -1190,6 +1197,8 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
   // The combined look (the default): corners on top, the line and the stands as cards under them.
   const float ly = corner(b.lx0, b.lx1, b.y0, true, v, 0);
   const float ry = corner(b.rx0, b.rx1, b.y0, false, v, 1);
+  // The room's match window in its small size sits under this card (slippi_arena pip_rect).
+  if (ImGui::GetIO().DisplaySize.y > 0) ar::note_side_card_bottom(ry / ImGui::GetIO().DisplaySize.y);
   // Left under: NEXT UP and the line, with an open spot after it.
   float y = ly + px(10);
   tag_gold(b.lx0 + pad, y, "NEXT UP");
@@ -1238,6 +1247,8 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
   // Right foot: the mode in gold capitals, then this member's X action (and A to ask when free).
   std::vector<std::pair<char, std::string>> right = {x_action(v)};
   const Role role = ar::role(r, v.self);
+  // Watching with the room's match window up: A on this makes it small (picture in picture) or full size.
+  if (role != Role::Fighter && ar::watch_layout() != 0) right.insert(right.begin(), {'A', ar::watch_layout() == 2 ? kPipSmall : kPipBig});
   if (g.side == 2 && role != Role::Fighter && r.asker == ar::kNone) right.push_back({'A', "Ask to play next"});
   if (g.side == 2 && r.members.size() >= 4 && !r.switch_pending) right.push_back({'R', r.doubles ? "Back to singles" : "Doubles"});
   if (g.side == 2) right.push_back({'B', "Close"});

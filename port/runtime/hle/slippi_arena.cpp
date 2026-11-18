@@ -4,6 +4,7 @@
 #include "arena_feed.h"
 #include "slippi_net.h"
 #include "slippi_online.h"
+#include "native_practice.h"
 #include "host.h"
 #include "window.h"
 #include "test_env.h"
@@ -108,7 +109,6 @@ uint64_t g_test_wait_since = 0;
 // Warm-up room: this member is in Training; the viewer window waits for the way back (unless the
 // setting keeps it open). The game's score from the first fighter (kScore), for the room's strip.
 bool g_warming = false;
-bool g_viewer_blocked = false;
 LiveScore g_score;
 uint32_t g_score_tag = 0;
 uint16_t g_warming_mask = 0;      // who in the room is warming up (the host's word), a bit per member id
@@ -521,9 +521,18 @@ struct Pip {
   uint64_t asked_ms = 0;
   float cx = -1, cy = -1, cw = -1;   // the controller's place it was laid out with (live_warmup_pip_*)
   bool adjusting = false;            // picked with the controller (Practice menu, Move and resize)
+  bool on_select = false;            // laid out for the room's select (under its side card)
 };
 Pip g_pip;
 std::atomic<int> g_pip_adjust_req{0};   // 1 pick the small window with the controller, 2 let it go
+// Watching on the room's character select: the match big (2) by default, small (1) once the player
+// asks (PICTURE IN PICTURE on it, or the side bar's button); big again for each new wait.
+std::atomic<int> g_watch_layout{2};
+std::atomic<int> g_watch_toggle{0};     // the side bar's button pressed (any thread): 1 toggle
+// The right side bar's top card on the select (arena_panel): its bottom as a share of the window's
+// height, and when it was said (ms); the small window sits under it there.
+std::atomic<float> g_card_bottom{0.0f};
+std::atomic<uint64_t> g_card_bottom_ms{0};
 std::atomic<bool> g_pip_up{false};      // the two windows are laid out (pip_active)
 
 #ifdef _WIN32
@@ -553,8 +562,13 @@ void pip_rect(const long area[4], const long client[4], int size, int corner, lo
       long w = bar - 2 * m, h = w * 3 / 4;
       if (h > ch * 6 / 10) { h = ch * 6 / 10; w = h * 4 / 3; }
       out[0] = client[2] - bar + (bar - w) / 2;
-      // level with the warm-up panel across the picture: at the top when the panel is flush in its bar
-      out[1] = client[1] + (gx::RenderOptions::live_warmup_panel_style() == 2 ? m : (long)(ch * 0.17f));
+      // level with the warm-up panel across the picture: at the top when the panel is flush in its bar;
+      // on the room's select (the Arena panel's cards in the bars), under the right bar's top card
+      const float card = g_card_bottom.load();
+      if (!g_warming && card > 0.0f && now_ms() - g_card_bottom_ms.load() < 1000)
+        out[1] = client[1] + (long)(ch * card) + 2 * m;
+      else
+        out[1] = client[1] + (gx::RenderOptions::live_warmup_panel_style() == 2 ? m : (long)(ch * 0.17f));
       out[2] = out[0] + w;
       out[3] = out[1] + h;
       return;
@@ -588,9 +602,33 @@ void pip_restore(const char* why) {
 }
 
 void pip_tick() {
-  // Called for the turn: the windows go back at once, so the countdown shows over Training at full size.
-  const int want = g_warming && viewer_running() && !turn_called() ? std::clamp(gx::RenderOptions::live_warmup_watch(), 0, 2) : 0;
-  if (!want) { pip_restore(g_warming ? "no match window now" : "the warm-up is over"); return; }
+  // The match window's buttons, and the side bar's: warm up (from the big window), small, full size.
+  const int action = host::window_spectate_action();
+  if (action == 1) {
+    event("WARM UP pressed on the match window");
+    native_practice::submit_warmup();
+  }
+  if (action == 2 || action == 3 || g_watch_toggle.exchange(0)) {
+    const int to = action == 2 ? 1 : action == 3 ? 2 : (g_warming ? gx::RenderOptions::live_warmup_watch() : g_watch_layout.load()) == 2 ? 1 : 2;
+    // Away (warming up, another mode) the setting says how it shows, so the choice is the setting's;
+    // on the select it is this wait's own.
+    if (g_warming) gx::RenderOptions::live_warmup_watch() = to;
+    else g_watch_layout.store(to);
+    event("the room's match %s (%s)", to == 1 ? "small: picture in picture" : "full size", g_warming ? "while away" : "on the select");
+  }
+  // Called for the turn: the windows go back at once, so the countdown shows full size; and the next
+  // wait starts big again.
+  const int setting = std::clamp(gx::RenderOptions::live_warmup_watch(), 0, 2);
+  if (turn_called()) g_watch_layout.store(2);
+  if (!setting && viewer_running()) {   // turned to "Not shown": the window goes (it opens again when turned back on)
+    pip_restore("the match window is off");
+    close_viewer();
+    g_viewer_open_for_tag = false;
+    event("viewer closed: the room's match is not shown");
+    return;
+  }
+  const int want = viewer_running() && !turn_called() && setting ? (g_warming ? setting : g_watch_layout.load()) : 0;
+  if (!want) { pip_restore(!viewer_running() ? "no match window now" : turn_called() ? "this player's turn" : "the match window is off"); return; }
   // The viewer's game window, found by its process (it takes a moment to open). A new one (the
   // room's next game) gets the layout afresh.
   if (!g_pip.viewer || !IsWindow((HWND)g_pip.viewer)) {
@@ -656,7 +694,12 @@ void pip_tick() {
   const int size = gx::RenderOptions::live_warmup_pip_size(), corner = gx::RenderOptions::live_warmup_pip_corner();
   const float cx = gx::RenderOptions::live_warmup_pip_cx().load(), cy = gx::RenderOptions::live_warmup_pip_cy().load(),
               cw = gx::RenderOptions::live_warmup_pip_cw().load();
-  if (want == g_pip.applied && size == g_pip.size && corner == g_pip.corner && cx == g_pip.cx && cy == g_pip.cy && cw == g_pip.cw) return;
+  // Where corner 4 puts it moves between the select (under the side card) and away: laid out again then.
+  const bool on_select = !g_warming && g_card_bottom.load() > 0.0f && now_ms() - g_card_bottom_ms.load() < 1000;
+  if (want == g_pip.applied && size == g_pip.size && corner == g_pip.corner && cx == g_pip.cx && cy == g_pip.cy && cw == g_pip.cw &&
+      on_select == g_pip.on_select)
+    return;
+  g_pip.on_select = on_select;
   const HWND main = (HWND)host::window_native(), viewer = (HWND)g_pip.viewer;
   if (!main) return;
   if (!g_pip.area[2]) {   // where this game's window is now: the area both layouts share
@@ -694,8 +737,10 @@ void pip_tick() {
     SetWindowPos(main, HWND_TOPMOST, box[0], box[1], box[2] - box[0], box[3] - box[1], SWP_NOACTIVATE);
   }
   if (!g_pip.adjusting || want != g_pip.applied)   // not every step while the controller moves it
-    event("the room's match %s: small window %ldx%ld at %ld,%ld in %ldx%ld", want == 1 ? "small over Training" : "big, Training small",
-          box[2] - box[0], box[3] - box[1], box[0] - a[0], box[1] - a[1], a[2] - a[0], a[3] - a[1]);
+    event("the room's match %s: small window %ldx%ld at %ld,%ld in %ldx%ld (inside %ldx%ld at %ld,%ld, picture %.3f, %s)",
+          want == 1 ? "small over this game" : "big, this game small", box[2] - box[0], box[3] - box[1], box[0] - a[0], box[1] - a[1],
+          a[2] - a[0], a[3] - a[1], g_pip.client[2] - g_pip.client[0], g_pip.client[3] - g_pip.client[1], g_pip.client[0] - a[0],
+          g_pip.client[1] - a[1], host::window_picture_aspect(), on_select ? "under the side card" : "level with the panel");
   g_pip.applied = want;
   g_pip_up.store(true);
   g_pip.size = size;
@@ -783,8 +828,9 @@ void watch_feed(const uint8_t* data, size_t size) {
   // The viewer opens once the recording has its first frames (it reads the players from them).
   // Tests with many members (MELEE_ARENA_NO_VIEWER=1): the live recording only, no viewer window.
   static const bool no_viewer = [] { const char* v = std::getenv("MELEE_ARENA_NO_VIEWER"); return v && *v == '1'; }();
-  // In the warm-up room the window waits for the way back (set_warming), unless the setting keeps it.
-  if (!g_viewer_open_for_tag && g_receiver.stats().frames >= 2 && g_launch_viewer && !no_viewer && !g_viewer_blocked) {
+  // The setting "Not shown": no window at all, the warm-up panel's score only.
+  const bool shown = gx::RenderOptions::live_warmup_watch() != 0;
+  if (!g_viewer_open_for_tag && g_receiver.stats().frames >= 2 && g_launch_viewer && !no_viewer && shown) {
     g_viewer_open_for_tag = true;
     char name[32];
     std::snprintf(name, sizeof name, "live-%08X.slp", tag);
@@ -1653,6 +1699,12 @@ bool warmup_ok(std::string* why) {
 
 void pip_adjust(bool on) { g_pip_adjust_req.store(on ? 1 : 2); }
 bool pip_active() { return g_pip_up.load(); }
+void toggle_watch_layout() { g_watch_toggle.store(1); }
+int watch_layout() { return g_pip_up.load() ? g_pip.applied : 0; }
+void note_side_card_bottom(float share) {
+  g_card_bottom.store(share);
+  g_card_bottom_ms.store(now_ms());
+}
 
 void set_warming(bool on) {
   if (on == g_warming) return;
@@ -1665,22 +1717,8 @@ void set_warming(bool on) {
       send_to_host({kWarmup, (uint8_t)(on ? 1 : 0)});
     }
   }
-  if (on) {
-    event("warming up in Training");
-    if (gx::RenderOptions::live_warmup_watch() == 0) {
-      g_viewer_blocked = true;
-      if (viewer_running()) { close_viewer(); event("viewer closed while warming up"); }
-    }
-  } else {
-    event("back from the warm-up");
-    pip_restore("back from the warm-up");
-    if (g_viewer_blocked) {
-      g_viewer_blocked = false;
-      // The game being played is still on: its viewer opens again with the next feed message (and
-      // catches up to live).
-      if (g_receiver.started() && !g_receiver.ended()) g_viewer_open_for_tag = false;
-    }
-  }
+  // The match window stays as it is (pip_tick lays it out for where the player is now).
+  event(on ? "warming up (Training, then anywhere offline)" : "back from the warm-up");
 }
 
 WarmupInfo warmup_info() {

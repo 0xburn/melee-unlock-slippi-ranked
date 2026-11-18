@@ -50,6 +50,10 @@ int window_pip_answer();   // the mode the other window answered it took since t
 void window_send_spectate_view(void* window, int view);
 void window_report_spectate_view(int view);
 int window_spectate_choice();
+// The room's match window's buttons (its list): 1 WARM UP, 2 PICTURE IN PICTURE (make the match small),
+// 3 FULL SIZE. Reported to the game that opened it, which takes each once (-1: none new).
+void window_report_spectate_action(int action);
+int window_spectate_action();
 void window_set_hot_rect(int x0, int y0, int x1, int y1);
 // This window's own picture in picture state (0 as it was, 1 small, 2 big): the small one draws its frame.
 int window_pip_mode();

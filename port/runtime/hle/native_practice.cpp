@@ -39,6 +39,7 @@ constexpr uint32_t kSceneState = 0x80479D30;
 constexpr uint32_t kMinorSceneControl = 0x80479D58;
 constexpr uint8_t kOnlineMajor = 8;
 constexpr uint8_t kTrainingMajor = 0x1C;
+constexpr uint8_t kMainMenuMajor = 0x01;
 // OFST_R13_ONLINE_MODE is -0x5060 from Melee's r13 base (0x804DB6A0).
 constexpr uint32_t kOnlineMode = 0x804D6640;
 // OFST_R13_ISWINNER (-0x5037) and OFST_R13_CHOSESTAGE (-0x5036). Normal Direct
@@ -145,6 +146,9 @@ uint32_t g_warmup_autostart_ticks = 0;
 // Back on the select after the opponent left during the warm-up: the player asked for the select, so
 // "back to Training after a session" does not send them straight back.
 bool g_warmup_no_bounce = false;
+// The way back through the main menu (Source Port, from a match of another mode): the select is asked
+// for once the menu is up (warmup_tick). The retrace the menu was asked at, 0 none.
+uint32_t g_warmup_via_menu = 0;
 
 uint64_t steady_ms() {
   return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -902,14 +906,24 @@ void warmup_go_back(const char* why) {
   g_practice = g_warmup_css;
   if (g_practice.valid && g_practice.players[0].active) write_event_backup();
   set_online_mode(g_warmup_mode);
-  request_major(kOnlineMajor);
+  // Source Port: from VS or another match mode (not Training or an event), the online character select
+  // must not come straight after it: the select would set itself up from that mode's leftovers (a
+  // search found from a VS match stopped both games in its KO star setup, mncharsel.c, 0.9.56). Through
+  // the main menu first, as a player goes; the select is asked for once the menu is up.
+  if (g_bridge && is_match_mode_major(current_major())) {
+    host::log("native practice: warm-up: through the main menu first (scene %02X/%02X)", current_major(), current_minor());
+    g_warmup_via_menu = host::retrace_count() | 1u;
+    request_major(kMainMenuMajor);
+  } else {
+    request_major(kOnlineMajor);
+  }
   ++g_generation;
 }
 
-// The room ended without going back (the player left Training for the menus, or a scene change
-// never landed): no connection is kept for nobody.
+// The room ended without going back (a scene change never landed): no connection is kept for nobody.
 void warmup_end(const char* why) {
   host::log("native practice: warm-up over: %s", why);
+  g_warmup_via_menu = 0;
   if (g_warmup.kind() == warmup::Kind::Pair && slippi::online::warmup_parked()) {
     slippi::online::warmup_unpark();
     slippi::online::native_cleanup_match();   // nobody is going back to that select
@@ -920,7 +934,9 @@ void warmup_end(const char* why) {
 }
 
 bool warmup_request_back(const char* why) {
+  const bool match_waiting = g_warmup.ready_waiting();   // everyone else is ready: back to play
   if (!g_warmup.request_return(steady_ms())) return false;
+  if (match_waiting) { g_warmup_autostart = true; g_warmup_autostart_ticks = 0; }
   warmup_go_back(why);
   return true;
 }
@@ -939,7 +955,43 @@ int warmup_button_port() {
 //   leave  leaves the connection after <lock> (the other side's Training shows "left");
 //   idle   does nothing on the select (a player who is away).
 // Only the first select after a game warms up or leaves; later ones lock in after <lock>.
+// Tests only: MELEE_TEST_WARMUP_AWAY=<major>[,<major>...]:<frames>: once away (in Training), every
+// <frames> frames the game goes on to the next major scene of the list (1 the main menu, 2 VS mode's
+// character select, ...), the way a player wanders off while the room goes on.
+void warmup_away_test_tick() {
+  static const char* spec = host::test_env::getenv("MELEE_TEST_WARMUP_AWAY");
+  if (!spec) return;
+  static std::vector<int> majors;
+  static int every = 0;
+  static size_t next = 0;
+  static uint32_t frames = 0, last_retrace = 0;
+  if (!every) {
+    const char* p = spec;
+    for (;;) {
+      char* end = nullptr;
+      const long v = std::strtol(p, &end, 0);
+      if (end == p) break;
+      majors.push_back((int)v);
+      p = end;
+      if (*p != ',') break;
+      ++p;
+    }
+    if (*p == ':') every = std::atoi(p + 1);
+    if (every <= 0 || majors.empty()) { host::log("warm-up test: bad MELEE_TEST_WARMUP_AWAY '%s'", spec); spec = nullptr; return; }
+  }
+  if (g_warmup.stage() != warmup::Stage::Away) { frames = 0; if (!g_warmup.active()) next = 0; return; }
+  const uint32_t retrace = host::retrace_count();
+  if (retrace == last_retrace) return;
+  last_retrace = retrace;
+  if (next >= majors.size() || ++frames < (uint32_t)every) return;
+  frames = 0;
+  const int major = majors[next++];
+  host::log("warm-up test: away to scene %02X (from %02X/%02X)", major, current_major(), current_minor());
+  request_major((uint8_t)major);
+}
+
 void warmup_test_tick() {
+  warmup_away_test_tick();
   static const char* spec = host::test_env::getenv("MELEE_TEST_WARMUP");
   if (!spec) return;
   static std::string role;
@@ -985,7 +1037,7 @@ void warmup_test_tick() {
     ticks = 0;
     if (role == "lr") {
       if (g_warmup.stage() == warmup::Stage::Going) hold(false);   // let go once it went
-      if (g_warmup.stage() == warmup::Stage::Training && is_training()) {
+      if (g_warmup.stage() == warmup::Stage::Away && is_training()) {
         ++training_ticks;
         if (training_ticks == (uint32_t)stay) hold(true);
         if (training_ticks > (uint32_t)stay + 120) hold(false);   // never longer than two seconds
@@ -993,7 +1045,7 @@ void warmup_test_tick() {
       if (g_warmup.stage() == warmup::Stage::Returning) hold(false);
       return;
     }
-    if (g_warmup.stage() == warmup::Stage::Training && is_training() && ++training_ticks == (uint32_t)stay)
+    if (g_warmup.stage() == warmup::Stage::Away && is_training() && ++training_ticks == (uint32_t)stay)
       warmup_request_back("test: the stay is over");
     return;
   }
@@ -1035,6 +1087,57 @@ void warmup_test_tick() {
   }
 }
 
+// Tests only: MELEE_TEST_GO_ONLINE=<ticks>:<route> sends the game to the online character select
+// (Direct) <ticks> frames into an offline match (any is_offline_gameplay_scene), as a pull-back from
+// another mode does: route "direct" requests the online scene at once, "menu" goes through the main
+// menu first. The log says where it landed.
+void scene_route_test_tick() {
+  // MELEE_TEST_GOTO_MAJOR=<retrace>:<major>: once, that major scene requested at that retrace (the way
+  // into a mode the scripted pads then play, e.g. 2 for VS mode's character select).
+  {
+    static const char* go = host::test_env::getenv("MELEE_TEST_GOTO_MAJOR");
+    static bool gone = false;
+    unsigned at = 0, major = 0;
+    if (go && !gone && std::sscanf(go, "%u:%u", &at, &major) == 2 && host::retrace_count() >= at) {
+      gone = true;
+      host::log("scene route test: to scene %02X (from %02X/%02X)", major, current_major(), current_minor());
+      request_major((uint8_t)major);
+    }
+  }
+  static const char* spec = host::test_env::getenv("MELEE_TEST_GO_ONLINE");
+  if (!spec) return;
+  static int at = -1, step = 0;
+  static char route[16] = {};
+  static uint32_t ticks = 0, wait = 0;
+  if (at < 0 && std::sscanf(spec, "%d:%15[a-z]", &at, route) != 2) { host::log("scene route test: bad '%s'", spec); spec = nullptr; return; }
+  static uint8_t last_major = 0xFF, last_minor = 0xFF;
+  if (current_major() != last_major || current_minor() != last_minor) {
+    last_major = current_major(); last_minor = current_minor();
+    host::log("scene route test: scene %02X/%02X (retrace %u)", last_major, last_minor, host::retrace_count());
+  }
+  if (step == 0) {
+    if (!is_offline_gameplay_scene(current_major(), current_minor())) { ticks = 0; return; }
+    if (++ticks < (uint32_t)at) return;
+    step = 1;
+    host::log("scene route test: leaving the match %02X/%02X by route %s", current_major(), current_minor(), route);
+    if (std::strcmp(route, "menu") == 0) { request_major(1); return; }
+    set_online_mode(2);
+    request_major(kOnlineMajor);
+    step = 3;
+    return;
+  }
+  if (step == 1 && current_major() == 1 && ++wait > 30) {
+    step = 3;
+    host::log("scene route test: on the main menu, now the online select");
+    set_online_mode(2);
+    request_major(kOnlineMajor);
+  }
+  if (step == 3 && is_online_scene() && slippi::online::in_online_menus()) {
+    step = 4;
+    host::log("scene route test: the online character select is up");
+  }
+}
+
 // Once a frame: what the game and the link say, and what the room answers.
 void warmup_tick() {
   // L+R held: in Training toward going back (two thirds of a second: both triggers fully in for
@@ -1047,6 +1150,9 @@ void warmup_tick() {
   o.now_ms = now;
   o.in_training = is_training();
   o.online_select = is_online_scene() && slippi::online::in_online_menus();
+  // The online scene but not its select (the player picked Online from the menus): no new online game
+  // while the room holds them; the way back. Not while the main menu step of a way back is pending.
+  o.online_menu = is_online_scene() && !o.online_select;
   if (g_warmup.kind() == warmup::Kind::Pair) {
     const slippi::online::WarmupLink link = slippi::online::warmup_link();
     o.link_up = link.link_up;
@@ -1061,7 +1167,9 @@ void warmup_tick() {
   const warmup::Banner banner_before = g_warmup.banner();
   switch (g_warmup.tick(o)) {
     case warmup::Action::None: break;
-    case warmup::Action::GoBack: warmup_go_back("the room called this player's turn"); break;
+    case warmup::Action::GoBack:
+      warmup_go_back(o.online_menu ? "the player went to the online menus: back to the room" : "the room called this player's turn");
+      break;
     case warmup::Action::Ready:
       host::audio_ui_sound(2);
       g_warmup_autostart = true;
@@ -1076,7 +1184,6 @@ void warmup_tick() {
     case warmup::Action::GiveUp:
       warmup_end(before == warmup::Stage::Returning ? "the character select never came back" : "Training never came up");
       break;
-    case warmup::Action::Abandoned: warmup_end("the player left Training"); break;
   }
   if (g_warmup.banner() != banner_before) {
     const int p = g_warmup.banner_peer();
@@ -1092,7 +1199,7 @@ void warmup_tick() {
   }
 
   // The sparring partner: once the Training match runs, the pro who plays the CPU's character.
-  if (g_warmup.stage() == warmup::Stage::Training && is_training() && current_minor() == 2) {
+  if (g_warmup.stage() == warmup::Stage::Away && is_training() && current_minor() == 2) {
     if (++g_warmup_match_ticks == 30) {
       const PracticeConfig now_cfg = capture_practice();
       int cpu_kind = -1;
@@ -1120,14 +1227,34 @@ void warmup_tick() {
     }
   } else {
     g_warmup_match_ticks = 0;
+    // Out of Training (another mode, the menus): the player's own practice CPU again; the pro comes
+    // back with the next Training match.
+    if (g_warmup.stage() == warmup::Stage::Away && !is_training() && g_warmup_cpu_applied) {
+      practice_cpu::set_config(g_warmup_saved_cpu);
+      g_warmup_cpu_applied = false;
+      g_warmup_sparring.clear();
+      host::log("native practice: warm-up: out of Training (scene %02X): the player's own practice CPU is back", current_major());
+      ++g_generation;
+    }
+  }
+  // The way back through the main menu: once the menu is up (a third of a second), the select.
+  if (g_warmup_via_menu) {
+    if (!g_warmup.active() || is_online_scene()) {
+      g_warmup_via_menu = 0;
+    } else if (current_major() == kMainMenuMajor && host::retrace_count() - g_warmup_via_menu > 20) {
+      g_warmup_via_menu = 0;
+      host::log("native practice: warm-up: on the main menu, now the online character select");
+      set_online_mode(g_warmup_mode);
+      request_major(kOnlineMajor);
+    }
   }
 
-  // The hold back (Training's match or its menus).
+  // The hold back (anywhere the player is away: Training, another mode, the menus).
   // The hold that brought the player here may still be down when Training comes up: it counts only
   // after both triggers were let go once in Training.
   static bool armed = false;
   bool lr = false;
-  if (g_warmup.stage() == warmup::Stage::Training && is_training()) {
+  if (g_warmup.stage() == warmup::Stage::Away) {
     host::PadState pads[4];
     host::input_last_pads(pads);
     for (int port = 0; port < 4; ++port)
@@ -1139,7 +1266,7 @@ void warmup_tick() {
   if (!armed) lr = false;
   back_ticks = lr ? back_ticks + 1 : 0;
   g_warmup_hold = lr ? std::min(1.0f, (float)back_ticks / (float)kBackHold) : 0.0f;
-  if (back_ticks == kBackHold && g_warmup.request_return(now)) warmup_go_back("L+R held in Training");
+  if (back_ticks == kBackHold) warmup_request_back(is_training() ? "L+R held in Training" : "L+R held");
 }
 
 }  // namespace
@@ -1507,6 +1634,7 @@ void tick() {
 
   warmup_tick();
   warmup_test_tick();
+  scene_route_test_tick();
   // This player's pick on the online character select, for an opponent on our build to see
   // ("picked Falco") before any lock-in. A few times a second; sent only when it changes.
   {
@@ -1697,8 +1825,8 @@ void apply_pads(host::PadState* pads) {
     } else if (major == kOnlineMajor && minor != 0) {
       g_warmup_autostart = false;   // the stage select (the loser picks) or the match itself
       host::log("native practice: warm-up: on to the %s", minor == 1 ? "stage select" : "match");
-    } else if (major != kTrainingMajor && major != kOnlineMajor) {
-      g_warmup_autostart = false;
+    } else if (major != kOnlineMajor && !g_warmup.active()) {
+      g_warmup_autostart = false;   // the way back ended somewhere else (it is kept through the main menu step)
     }
   }
   if (g_enter_training) {

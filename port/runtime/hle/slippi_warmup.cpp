@@ -17,15 +17,16 @@ bool Room::enter(Kind kind, uint64_t now_ms) {
 }
 
 bool Room::request_return(uint64_t now_ms) {
-  if (stage_ != Stage::Going && stage_ != Stage::Training) return false;
+  if (stage_ != Stage::Going && stage_ != Stage::Away) return false;
   stage_ = Stage::Returning;
   stage_since_ = now_ms;
   deadline_ = 0;
+  ready_wait_ = false;
   return true;
 }
 
 int Room::countdown_left_ms(uint64_t now_ms) const {
-  if (!deadline_ || stage_ != Stage::Training) return -1;
+  if (!deadline_ || stage_ != Stage::Away) return -1;
   return now_ms >= deadline_ ? 0 : (int)(deadline_ - now_ms);
 }
 
@@ -43,7 +44,7 @@ void Room::show(Banner b, uint64_t now_ms, int peer) {
 Action Room::tick(const Observe& o) {
   if (stage_ == Stage::Off) return Action::None;
 
-  // The opponents, whatever the stage: a change is a banner while the player is in Training.
+  // The opponents, whatever the stage: a change is a banner while the player is away.
   if (kind_ == Kind::Pair) {
     const int n = o.peers < 0 ? 0 : o.peers > kMaxPeers ? kMaxPeers : o.peers;
     if (n > peers_) peers_ = n;
@@ -53,7 +54,7 @@ Action Room::tick(const Observe& o) {
       const PeerState was = peer_[i];
       if (was == PeerState::Left) continue;
       peer_[i] = now;
-      if (!seen_peers_ || now == was || stage_ != Stage::Training) continue;
+      if (!seen_peers_ || now == was || stage_ != Stage::Away) continue;
       if (now == PeerState::Left) show(Banner::PeerLeft, o.now_ms, i);
       else if (now == PeerState::Ready) show(Banner::PeerReady, o.now_ms, i);
       else if (now == PeerState::WarmingUp) show(Banner::PeerWarming, o.now_ms, i);
@@ -66,16 +67,15 @@ Action Room::tick(const Observe& o) {
   if (kind_ == Kind::Pair) {
     bool all = peers_ > 0;
     for (int i = 0; i < peers_; ++i) if (peer_[i] != PeerState::Ready) all = false;
-    became_ready = all && !all_ready_ && stage_ == Stage::Training;
+    became_ready = all && !all_ready_ && stage_ == Stage::Away;
     all_ready_ = all;
   }
 
   switch (stage_) {
     case Stage::Going:
       if (o.in_training) {
-        stage_ = Stage::Training;
+        stage_ = Stage::Away;
         stage_since_ = o.now_ms;
-        elsewhere_since_ = 0;
         // (Locked in already on the way here: that was before the player was in Training, no news.)
         // A turn already called (the room moved on while the game was on its way): count from now.
         if (kind_ == Kind::Arena && o.turn) {
@@ -96,24 +96,42 @@ Action Room::tick(const Observe& o) {
       }
       return Action::None;
 
-    case Stage::Training: {
-      if (o.online_select) {   // back on the select by some other way (the game's own menus)
+    case Stage::Away: {
+      if (o.online_select) {   // back on the select by some other way
         stage_ = Stage::Off;
         return Action::Arrived;
       }
-      if (!o.in_training) {
-        if (!elsewhere_since_) elsewhere_since_ = o.now_ms ? o.now_ms : 1;
-        if (o.now_ms - elsewhere_since_ >= kElsewhereMs) {
-          stage_ = Stage::Off;
-          return Action::Abandoned;
-        }
-      } else {
-        elsewhere_since_ = 0;
-      }
-      if (became_ready && back_when_ready_) {
+      // The online menus (the player picked Online): starting a new online game is not on while the
+      // room or the pair holds this player, so that way leads back to them.
+      if (o.online_menu) {
         stage_ = Stage::Returning;
         stage_since_ = o.now_ms;
-        return Action::Ready;
+        deadline_ = 0;
+        ready_wait_ = false;
+        return Action::GoBack;
+      }
+      if (became_ready && back_when_ready_) {
+        // In Training at once; anywhere else (a match of another mode may be on) after the countdown.
+        if (o.in_training || !countdown_ms_) {
+          stage_ = Stage::Returning;
+          stage_since_ = o.now_ms;
+          deadline_ = 0;
+          return Action::Ready;
+        }
+        ready_wait_ = true;
+        deadline_ = o.now_ms + countdown_ms_;
+      }
+      if (ready_wait_) {
+        if (!all_ready_) {   // someone unlocked again: no match is waiting any more
+          ready_wait_ = false;
+          deadline_ = 0;
+        } else if (o.now_ms >= deadline_) {
+          ready_wait_ = false;
+          stage_ = Stage::Returning;
+          stage_since_ = o.now_ms;
+          deadline_ = 0;
+          return Action::Ready;
+        }
       }
       if (kind_ == Kind::Arena) {
         if (o.turn && !turn_) {
@@ -155,7 +173,7 @@ const char* stage_name(Stage s) {
   switch (s) {
     case Stage::Off: return "off";
     case Stage::Going: return "going";
-    case Stage::Training: return "training";
+    case Stage::Away: return "away";
     case Stage::Returning: return "returning";
   }
   return "?";
