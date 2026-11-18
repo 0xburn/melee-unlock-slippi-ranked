@@ -2453,13 +2453,21 @@ class VulkanBackend final : public Backend {
     shader_was_on_ = shader_on;
     if (shader_on) draw_shader_source(c, w, h);
     vkCmdBeginRendering(f.cmd, &info);
+    // Kept for the shader preset path, which clears the whole window: the art is painted again in
+    // the bars after the preset (see the D3D12 backend).
+    std::shared_ptr<const video_bg::Frame> art_kept;
+    Image* art_texture_kept = nullptr;
+    bool art_reversed_kept = false;
     if (test_fill < 0) {
       // Border art fills the window first; the picture is drawn over it (as the Direct3D renderers).
       video_bg::set_border(opts_.border_art);
       bool art_reversed = false;
       if (present_plain_)
         if (const auto art = video_bg::border_frame(&art_reversed))
-          if (Image* texture = update_video_image(art, video_bg::kBorderSlot)) present_border(*texture, *art, art_reversed, w, h);
+          if (Image* texture = update_video_image(art, video_bg::kBorderSlot)) {
+            present_border(*texture, *art, art_reversed, w, h);
+            art_kept = art; art_texture_kept = texture; art_reversed_kept = art_reversed;
+          }
       const double aspect = presented_aspect(opts_, w, h, frame_widenable_);
       int pw = w, ph = (int)std::lround(w / aspect);
       if (ph > h) { ph = h; pw = (int)std::lround(h * aspect); }
@@ -2491,6 +2499,18 @@ class VulkanBackend final : public Backend {
                            (uint64_t)(uintptr_t)target, (int)swap_format_, (uint32_t)w, (uint32_t)h, where, presented_);
       color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // the settings panel goes over what the preset drew
       vkCmdBeginRendering(f.cmd, &info);
+      if (art_kept && art_texture_kept) {
+        // The preset cleared the bars: the border art goes back there, one scissor per bar.
+        const int32_t px0 = (int32_t)where.x, py0 = (int32_t)where.y;
+        const int32_t px1 = std::min(w, px0 + (int32_t)where.width), py1 = std::min(h, py0 + (int32_t)where.height);
+        const VkRect2D bars[4] = {{{0, 0}, {(uint32_t)std::max(px0, 0), (uint32_t)h}},
+                                  {{px1, 0}, {(uint32_t)std::max(w - px1, 0), (uint32_t)h}},
+                                  {{px0, 0}, {(uint32_t)std::max(px1 - px0, 0), (uint32_t)std::max(py0, 0)}},
+                                  {{px0, py1}, {(uint32_t)std::max(px1 - px0, 0), (uint32_t)std::max(h - py1, 0)}}};
+        for (const VkRect2D& bar : bars)
+          if (bar.extent.width > 0 && bar.extent.height > 0)
+            present_border(*art_texture_kept, *art_kept, art_reversed_kept, w, h, &bar);
+      }
     }
 #ifdef GX_PC_SETTINGS
     if (ui && settings_ui_ready()) {
@@ -2923,7 +2943,8 @@ class VulkanBackend final : public Backend {
   }
   // Border art across the window through the shared present shader (its art_frame: the picture's
   // rectangle casts a soft shadow on the art), with the Direct3D renderers' constants.
-  void present_border(const Image& texture, const video_bg::Frame& art, bool reversed, int w, int h) {
+  // clip: draw only there (the bars, when a shader preset cleared the window); null: the window.
+  void present_border(const Image& texture, const video_bg::Frame& art, bool reversed, int w, int h, const VkRect2D* clip = nullptr) {
     Frame_& f = frames_[slot_];
     const float window = (float)w / std::max((float)h, 1.0f), shape = (float)art.width / std::max((float)art.height, 1.0f);
     const float sx = shape > window ? window / shape : 1.0f, sy = shape > window ? 1.0f : shape / window;
@@ -2939,7 +2960,7 @@ class VulkanBackend final : public Backend {
                          px, py, px + pw, py + ph,
                          std::clamp(std::max(px, py) * 0.6f, 12.0f, 160.0f), 0.0f, 0.0f, opts_.border_edge ? 1.0f : 0.0f};
     VkViewport vp{0, 0, (float)w, (float)h, 0, 1};
-    VkRect2D sc{{0, 0}, swap_extent_};
+    VkRect2D sc = clip ? *clip : VkRect2D{{0, 0}, swap_extent_};
     vkCmdSetViewport(f.cmd, 0, 1, &vp);
     vkCmdSetScissor(f.cmd, 0, 1, &sc);
     const VkDeviceSize align = std::max<VkDeviceSize>(limits_.minUniformBufferOffsetAlignment, 16);
