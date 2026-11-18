@@ -35,6 +35,9 @@
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/random.h>
 #include <sysdolphin/baselib/sislib.h>
+#include <sysdolphin/baselib/cobj.h>
+#include <melee/lb/lb_00B0.h>
+#include <melee/lb/lbvector.h>
 #include <mu_test_env.h>
 #include <mu_native.h>
 
@@ -131,6 +134,12 @@ static int cursor_stops(int sel)
     return mn_80229938(MENU_KIND_8, sel);
 }
 static int yougame_query(int pick, char* out, unsigned int cap);
+/* YouGame's three rows on the first page: how far each has moved on screen (640x480 game pixels,
+ * x then y) from where it sits with the menu camera untilted. Set every frame by the menu's think
+ * (mu_slippi_menu_rows); 0 until the first frame of the page. */
+static float soon_offsets[6];
+static int soon_offsets_ok;
+int mu_menu_camera_neutral_eye(float out[3]);
 static int first_boot = 1;    /* OnMenuLoad's DOFST_IS_FIRST_BOOT */
 /* A peer-to-peer session with menus (mu_online_p2p_menus): the first online submenu confirms Direct
  * by itself. Set in the boot menu entry and cleared by that menu's think a few frames later, both
@@ -618,7 +627,16 @@ void mu_slippi_online_menu_think(HSD_GObj* gp)
     mn_804A04F0.buttons = buttons;
     if (yougame_soon() && split_page == 0 && mn_804A04F0.cur_menu == MENU_KIND_8) {
         /* The host draws the Coming soon stickers while this page is on screen. */
-        yougame_query(0x10 | (mn_804A04F0.hovered_selection & 3), NULL, 0);
+        if (soon_offsets_ok) {
+            /* The rows' offsets from where they sit with the camera untilted (mu_slippi_menu_rows):
+             * the host moves each sticker with its row. */
+            u8 msg[1 + sizeof soon_offsets];
+            msg[0] = (u8) (0x10 | (mn_804A04F0.hovered_selection & 3));
+            memcpy(msg + 1, soon_offsets, sizeof soon_offsets);
+            mu_slippi_cmd(CMD_YOUGAME_RANKED, msg, sizeof msg, NULL, 0, NULL);
+        } else {
+            yougame_query(0x10 | (mn_804A04F0.hovered_selection & 3), NULL, 0);
+        }
     }
     if (buttons & MenuInput_Confirm) {
         mn_804D6BC8.cooldown = 5;
@@ -1163,4 +1181,45 @@ void mu_slippi_menu_soon(int canvas, int idle)
         id = HSD_SisLib_803A6B98(soon_text, x, y, "Coming soon");
         HSD_SisLib_803A74F0(soon_text, id, &ink);
     }
+}
+
+/* The Coming soon stickers are drawn by the host over the picture, at each YouGame row's place with
+ * the camera untilted. The C-stick turns the menu camera and the rows move with it, so each row's
+ * centre is put on screen twice, through the turned camera and through the untilted one, and the
+ * difference moves its sticker. Reads only: the camera's eye is put back as it was. */
+void mu_slippi_menu_rows(struct HSD_JObj** rows, int count, void* cobj_ptr)
+{
+    HSD_CObj* cobj = (HSD_CObj*) cobj_ptr;
+    float eye[3];
+    Vec3 turned, neutral;
+    int i;
+    soon_offsets_ok = 0;
+    if (!yougame_soon() || split_page != 0 || cobj == NULL || count < 3 || !mu_menu_camera_neutral_eye(eye)) {
+        return;
+    }
+    neutral.x = eye[0];
+    neutral.y = eye[1];
+    neutral.z = eye[2];
+    HSD_CObjGetEyePosition(cobj, &turned);
+    for (i = 0; i < 3; i++) {
+        Vec3 world, a, b;
+        if (rows[i] == NULL) {
+            return;
+        }
+        lb_8000B1CC(rows[i], NULL, &world);
+        lbVector_WorldToScreen(cobj, &world, &a, 0);
+        HSD_CObjSetEyePosition(cobj, &neutral);
+        lbVector_WorldToScreen(cobj, &world, &b, 0);
+        HSD_CObjSetEyePosition(cobj, &turned);
+        soon_offsets[2 * i] = a.x - b.x;
+        soon_offsets[2 * i + 1] = a.y - b.y;
+        {
+            static int logged;
+            if (!logged && mu_test_getenv("MELEE_TEST_SOON_LOG") != NULL) {
+                logged = 1;
+                OSReport("[soon] row 0 on screen %.1f, %.1f (untilted %.1f, %.1f)\n", a.x, a.y, b.x, b.y);
+            }
+        }
+    }
+    soon_offsets_ok = 1;
 }

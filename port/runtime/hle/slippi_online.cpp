@@ -2026,8 +2026,15 @@ bool handle_command(uint8_t cmd, const uint8_t* payload, uint32_t payload_len, s
       // 3: Start on the older-release offer (start_find_match): the launcher restarts in that release.
       // 0x10 | row: the first page is on screen with YouGame Coming soon (the cursor on `row`): only
       // feeds the stickers over the menu.
-      if (payload_len == 1 && (payload[0] & 0xF0) == 0x10) {
+      // With 24 more bytes: six floats, each YouGame row's offset on screen from where it sits with the
+      // menu camera untilted (the C-stick turns it), so each sticker moves with its row.
+      if ((payload_len == 1 || payload_len == 25) && (payload[0] & 0xF0) == 0x10) {
         coming_soon_overlay::showing();
+        if (payload_len == 25) {
+          float offsets[6];
+          std::memcpy(offsets, payload + 1, sizeof offsets);
+          coming_soon_overlay::set_offsets(offsets);
+        }
       } else if (payload_len == 1 && payload[0] == 3) {
         if (g_older_offer_mode >= 0) {
           std::string why;

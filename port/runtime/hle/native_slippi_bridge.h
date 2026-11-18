@@ -50,8 +50,11 @@ inline bool command_payload_valid(uint8_t cmd, const uint8_t* payload, uint32_t 
     case CMD_GET_ONLINE_STATUS: case CMD_CLEANUP_CONNECTION: case CMD_GET_NEW_SEED:
     case CMD_GET_PLAYER_SETTINGS: case CMD_GET_DELAY: case CMD_GET_RANK:
     case CMD_FETCH_RANK: case CMD_GET_RANK_VISIBILITY: expected = 0; break;
-    // The online menu's YouGame query; one byte when the menu reports its pick (slippi_online.cpp).
-    case CMD_YOUGAME_RANKED: return payload_len == 0 || (payload_len == 1 && payload);
+    // The online menu's YouGame query; one byte when the menu reports its pick (slippi_online.cpp),
+    // or 0x10|row and six floats: the Coming soon page with its rows' offsets on screen.
+    case CMD_YOUGAME_RANKED:
+      return payload_len == 0 || (payload_len == 1 && payload) ||
+             (payload_len == 25 && payload && (payload[0] & 0xF0) == 0x10);
     default: return true;
   }
   if (payload_len != expected || (expected && !payload)) return false;

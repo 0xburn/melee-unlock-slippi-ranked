@@ -59,6 +59,7 @@
 #endif
 #ifdef GX_PC_SETTINGS
 #include "pc_settings.h"
+#include "coming_soon_overlay.h"
 #include "pc_settings_shared.h"
 #include "texture_pack.h"
 #include "imgui.h"
@@ -1577,6 +1578,8 @@ class VulkanBackend final : public Backend {
       settings_set_game_aspect(presented_aspect(opts_, client_w_, client_h_, frame_widenable_));
       settings_set_hud_snapshot(frame);
       const bool old_vsync = opts_.vsync;
+      // With a shader preset the Coming soon stickers go into the picture, under the preset (as Direct3D).
+      coming_soon_overlay::set_in_picture(shader_was_on_ && imgui_picture_pipeline_ != VK_NULL_HANDLE);
       if (settings_frame(settings_state_, opts_)) {
         apply_fullscreen_mode();
         if (opts_.vsync != old_vsync) swapchain_dirty_ = true;
@@ -2447,6 +2450,7 @@ class VulkanBackend final : public Backend {
     // console's picture (640 columns by the lines sent to the display), and the preset's passes draw
     // it onto the window after the bars and border art. Presets are written for that picture.
     const bool shader_on = test_fill < 0 && prepare_shader(c);
+    shader_was_on_ = shader_on;
     if (shader_on) draw_shader_source(c, w, h);
     vkCmdBeginRendering(f.cmd, &info);
     if (test_fill < 0) {
@@ -2836,6 +2840,14 @@ class VulkanBackend final : public Backend {
     vkCmdSetScissor(f.cmd, 0, 1, &sc);
     const VkExtent2D into{shader_source_.width, shader_source_.height};
     present_picture(c, w, h, &into);
+#ifdef GX_PC_SETTINGS
+    // The Coming soon stickers, into the picture before the preset draws it (coming_soon_overlay.h).
+    if (settings_ui_ready() && imgui_picture_pipeline_ != VK_NULL_HANDLE) {
+      ImDrawData data;
+      if (coming_soon_overlay::picture_draw_data(&data, (float)shader_source_.width, (float)shader_source_.height))
+        ImGui_ImplVulkan_RenderDrawData(&data, f.cmd, imgui_picture_pipeline_);
+    }
+#endif
     vkCmdEndRendering(f.cmd);
     barrier(f.cmd, shader_source_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   }
@@ -3131,22 +3143,32 @@ class VulkanBackend final : public Backend {
     ImGui_ImplVulkan_InitInfo info{};
     info.ApiVersion = VK_API_VERSION_1_3; info.Instance = instance_; info.PhysicalDevice = physical_; info.Device = device_;
     info.QueueFamily = queue_family_; info.Queue = queue_; info.DescriptorPoolSize = 64;
-    info.MinImageCount = 2; info.ImageCount = (uint32_t)std::max<size_t>(swap_images_.size(), 2);
+    // Buffers for three overlay draws per swap image: the panel each frame, and the Coming soon
+    // stickers drawn into a shader preset's picture as well, with frames in flight.
+    info.MinImageCount = 2; info.ImageCount = (uint32_t)std::max<size_t>(swap_images_.size(), 2) * 3;
     info.UseDynamicRendering = true;
     info.PipelineInfoMain.PipelineRenderingCreateInfo = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
     info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swap_format_;
     settings_ready_ = ImGui_ImplVulkan_Init(&info);
-    if (!settings_ready_) { host::log("vulkan: settings panel unavailable"); settings_context_destroy(); }
+    if (!settings_ready_) { host::log("vulkan: settings panel unavailable"); settings_context_destroy(); return; }
+    // The overlay pipeline again for the shader preset's picture texture (R8G8B8A8, prepare_shader).
+    static const VkFormat kPictureFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    ImGui_ImplVulkan_PipelineInfo picture = info.PipelineInfoMain;
+    picture.PipelineRenderingCreateInfo.pColorAttachmentFormats = &kPictureFormat;
+    imgui_picture_pipeline_ = ImGui_ImplVulkan_CreateExtraPipeline(&picture);
+    if (imgui_picture_pipeline_ == VK_NULL_HANDLE) host::log("vulkan: no overlay pipeline for the preset picture; Coming soon stays over the window");
   }
   void destroy_settings_ui() {
     if (!settings_ready_) return;
+    if (imgui_picture_pipeline_ != VK_NULL_HANDLE) { vkDestroyPipeline(device_, imgui_picture_pipeline_, nullptr); imgui_picture_pipeline_ = VK_NULL_HANDLE; }
     ImGui_ImplVulkan_Shutdown();
     settings_context_destroy();
     settings_ready_ = false;
   }
   SettingsState settings_state_;
   bool settings_ready_ = false;
+  VkPipeline imgui_picture_pipeline_ = VK_NULL_HANDLE;   // the overlay for the preset's picture texture
 #endif
 
   VulkanWindow window_;
@@ -3189,6 +3211,7 @@ class VulkanBackend final : public Backend {
   VkDescriptorSetLayout present_set_layout_ = VK_NULL_HANDLE;
   VkPipelineLayout present_layout_ = VK_NULL_HANDLE;
   VkPipeline present_plain_ = VK_NULL_HANDLE, present_crt_ = VK_NULL_HANDLE, present_plain_rgba_ = VK_NULL_HANDLE;
+  bool shader_was_on_ = false;   // last frame drew through a shader preset (the Coming soon stickers go into it)
   Image shader_source_;   // the picture at the console's own size, for a shader preset (user_shader.h)
   std::unordered_map<uint64_t, VkShaderModule> modules_;
   std::unordered_map<PipelineKey, VkPipeline, PipelineKeyHash> pipelines_;

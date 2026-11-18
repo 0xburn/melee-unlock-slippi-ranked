@@ -71,6 +71,7 @@
 #include "gecko_data.h"
 #ifdef GX_PC_SETTINGS
 #include "pc_settings.h"
+#include "coming_soon_overlay.h"
 #include "lab_view.h"
 #endif
 
@@ -1841,6 +1842,15 @@ void D3D11Backend::present_efb(const EfbCopy& c) {
     rect[9] = (float)std::clamp((int)std::lround((double)c.src_h * scale_ / shader_h), 1, 4);
   }
   blit(efb_srv_.Get(), rect, efb_depth_srv_.Get(), crt_on ? crt : nullptr);
+#ifdef GX_PC_SETTINGS
+  // The Coming soon stickers go into the picture under a preset, so its lines and curve cover them.
+  coming_soon_overlay::set_in_picture(shader_on && settings_ui_);
+  if (shader_on && settings_ui_) {
+    settings_ui_->draw_picture_overlay(shader_w, shader_h);
+    reset_bound();
+    context_->IASetInputLayout(layout_.Get());
+  }
+#endif
   if (shader_on) {
     context_->OMSetRenderTargets(1, &rtv, nullptr);
     const user_shader::Target where{vp.TopLeftX, vp.TopLeftY, (uint32_t)std::max(vw, 1.0f), (uint32_t)std::max(vh, 1.0f)};

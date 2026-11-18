@@ -80,6 +80,7 @@ static_assert(MU_RTX_PASS_PARTICLES == 1, "remix_effect_draw (gx_core.h) tests t
 #include "gecko_data.h"
 #ifdef GX_PC_SETTINGS
 #include "pc_settings.h"
+#include "coming_soon_overlay.h"
 #include "lab_view.h"
 #endif
 
@@ -4981,6 +4982,16 @@ void D3D12Backend::present_pass(const EfbCopy& c, bool upscaled, ID3D12Resource*
       list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
     }
   }
+#ifdef GX_PC_SETTINGS
+  {   // The Coming soon stickers go into the picture under a preset (same target format as the overlay's pipeline)
+    const bool soon_in_picture = shader_on && settings_ui_ && backbuffer_format_ == DXGI_FORMAT_R8G8B8A8_UNORM;
+    coming_soon_overlay::set_in_picture(soon_in_picture);
+    if (soon_in_picture) {
+      list_->OMSetRenderTargets(1, &shader_rtv, FALSE, nullptr);
+      settings_ui_->draw_picture_overlay(list_.Get(), shader_w, shader_h);
+    }
+  }
+#endif
   if (shader_on) {
     D3D12_RESOURCE_BARRIER to_source{};
     to_source.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -5163,7 +5174,13 @@ void D3D12Backend::update_hdr() {
         if (desc.MaxLuminance > 100.0f) hdr_display_peak_ = desc.MaxLuminance;
       }
     }
-    g_hdr_display.store(display_hdr, std::memory_order_relaxed);
+    // Windows HDR on with the game's HDR output off: Windows maps the game's SDR picture itself,
+    // which on some screens looks washed out. Logged on every change so a colour report shows it.
+    static bool hdr_state_logged = false;
+    if (g_hdr_display.exchange(display_hdr, std::memory_order_relaxed) != display_hdr || !hdr_state_logged)
+      host::log("display: Windows HDR %s for this screen%s", display_hdr ? "on" : "off",
+                display_hdr && !opts_.hdr_output ? "; the game's HDR output is off, so Windows maps its SDR picture" : "");
+    hdr_state_logged = true;
   }
   // A RetroArch shader preset draws SDR into the swap chain itself: HDR waits until it is off.
   const bool want = opts_.hdr_output && hdr_display_available() && blit_hdr_pso_ && opts_.shader_preset.empty();
