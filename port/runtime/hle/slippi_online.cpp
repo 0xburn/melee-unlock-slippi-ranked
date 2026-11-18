@@ -1071,26 +1071,6 @@ int build_verdict(uint8_t remote_count, std::string* why) {
       if (rb.mod_view) { *why = "Your opponent is on a mod build; this mode plays the retail game"; return -1; }
       continue;
     }
-    // Builds that differ no longer end a Direct match before it starts (owner 11-17): each side whose
-    // mod is not shared plays the standard game, as against Slippi Dolphin, with a notice. The Source
-    // Port switches its files before the match loads them; a Static Recomp booted from a mod disc
-    // cannot, so a mismatch involving one is still refused with the reason.
-    const bool builds_differ = g_local_build.mod_view
-        ? !native_direct_builds_match(true, g_local_build.fingerprint, rb.mod_view, rb.fingerprint)
-        : rb.mod_view;
-    if (builds_differ && !(rb.mod_view && rb.static_engine) && !(g_local_build.mod_view && !g_plain_opponent_handler)) {
-      static uint64_t warned_for = 0;
-      const uint64_t since = g_netplay->ConnectedAtMs();
-      if (warned_for != since) {
-        warned_for = since;
-        host::log("slippi: Direct builds differ (%s against %s); this match plays the standard game",
-                  g_local_build.mod_view ? g_local_build.name.c_str() : "the standard game",
-                  rb.mod_view ? (rb.name.empty() ? "a mod build" : rb.name.c_str()) : "the standard game");
-      }
-      if (g_plain_opponent_handler)
-        g_plain_opponent_handler(true, "Your mods are not the same: this match plays the standard game");
-      continue;
-    }
     if (g_local_build.mod_view) {
       if (!native_direct_builds_match(true, g_local_build.fingerprint, rb.mod_view, rb.fingerprint)) {
         const int port = i < g_netplay->LocalPlayerPort() ? i + 1 : i + 2;

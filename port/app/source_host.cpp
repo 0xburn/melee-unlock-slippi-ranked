@@ -653,6 +653,7 @@ void load_mod_overlay() {
   // they are left out of what decides how this session plays online (owner 11-17): Animelee with
   // Training Mode CE on is still a look, and Training Mode CE alone plays anyone.
   auto training_disc = [](const mods::Layer& layer) {
+    if (layer.training) return true;   // marked by the Mods folder scan
     if (layer.kind != mods::LayerKind::Iso) return false;
     return std::any_of(g_mod_overlay.files().begin(), g_mod_overlay.files().end(), [&](const ModOverlay::File& f) {
       if (f.path != "/tm/eventmenu.dat") return false;
@@ -2212,7 +2213,7 @@ void apply_content_mode(int mode) {
   if (retail != g_retail_view)
     host::log("content: %s view (%s)", retail ? "retail" : "mod",
               mode < 0 ? "offline" : g_cosmetic_pack ? "online cosmetic look" :
-              mode == 2 && retail ? "Direct, the builds differ or the opponent is on Slippi Dolphin" :
+              mode == 2 && retail ? "Direct, the opponent is on Slippi Dolphin" :
               mode == 2 ? "Direct" : mode == 0 && build.mod_view ? "YouGame Ranked, same verified build" :
               mode == 1 && build.mod_view ? "YouGame Unranked, same verified build" :
               "online mode that plays the retail game");
