@@ -94,7 +94,7 @@ bool yougame_online_mod_content(int mode) {
 // Vanilla character select kinds are 0-25 and the stage kinds end with the heal stage (0x55); an id
 // past those comes from a build with more content (m-ex adds its fighters and stages after them).
 constexpr uint64_t kBuildWaitMs = 3000;   // how long a mod build waits for the opponent's build message
-static void (*g_plain_opponent_handler)(bool) = nullptr;   // see set_plain_opponent_handler
+static void (*g_plain_opponent_handler)(bool, const char*) = nullptr;   // see set_plain_opponent_handler
 
 // Command ids live in native_slippi_bridge.h, shared with the native game's call path.
 
@@ -897,7 +897,7 @@ void start_find_match(const uint8_t* payload, const std::string& friend_room = {
   search.friend_room = friend_room;
   g_last_search = search;
   // A new search: whoever answers may be on this build with the same mod, so the mod shows again.
-  if (g_plain_opponent_handler) g_plain_opponent_handler(false);
+  if (g_plain_opponent_handler) g_plain_opponent_handler(false, nullptr);
   // Restoring the mod view may change the pool since CSS requested its random stage.
   if (use_ranked_rules(search.mode) && g_local_selections.is_stage_selected && g_local_random_stage)
     g_local_selections.stage_id = random_stage(search.mode);
@@ -1071,6 +1071,26 @@ int build_verdict(uint8_t remote_count, std::string* why) {
       if (rb.mod_view) { *why = "Your opponent is on a mod build; this mode plays the retail game"; return -1; }
       continue;
     }
+    // Builds that differ no longer end a Direct match before it starts (owner 11-17): each side whose
+    // mod is not shared plays the standard game, as against Slippi Dolphin, with a notice. The Source
+    // Port switches its files before the match loads them; a Static Recomp booted from a mod disc
+    // cannot, so a mismatch involving one is still refused with the reason.
+    const bool builds_differ = g_local_build.mod_view
+        ? !native_direct_builds_match(true, g_local_build.fingerprint, rb.mod_view, rb.fingerprint)
+        : rb.mod_view;
+    if (builds_differ && !(rb.mod_view && rb.static_engine) && !(g_local_build.mod_view && !g_plain_opponent_handler)) {
+      static uint64_t warned_for = 0;
+      const uint64_t since = g_netplay->ConnectedAtMs();
+      if (warned_for != since) {
+        warned_for = since;
+        host::log("slippi: Direct builds differ (%s against %s); this match plays the standard game",
+                  g_local_build.mod_view ? g_local_build.name.c_str() : "the standard game",
+                  rb.mod_view ? (rb.name.empty() ? "a mod build" : rb.name.c_str()) : "the standard game");
+      }
+      if (g_plain_opponent_handler)
+        g_plain_opponent_handler(true, "Your mods are not the same: this match plays the standard game");
+      continue;
+    }
     if (g_local_build.mod_view) {
       if (!native_direct_builds_match(true, g_local_build.fingerprint, rb.mod_view, rb.fingerprint)) {
         const int port = i < g_netplay->LocalPlayerPort() ? i + 1 : i + 2;
@@ -1109,7 +1129,7 @@ int build_verdict(uint8_t remote_count, std::string* why) {
     logged_for = since;
     host::log("slippi: the opponent sent no build (Slippi Dolphin); this Direct match plays the retail game without %s",
               g_local_build.name.c_str());
-    if (g_plain_opponent_handler) g_plain_opponent_handler(true);
+    if (g_plain_opponent_handler) g_plain_opponent_handler(true, "Opponent is on Slippi Dolphin: this match plays the standard game");
   }
   return 1;
 }
@@ -1569,7 +1589,7 @@ void handle_get_player_settings(std::vector<uint8_t>& q) {
 }  // namespace
 
 Config& config() { return g_config; }
-void set_plain_opponent_handler(void (*handler)(bool plain)) { g_plain_opponent_handler = handler; }
+void set_plain_opponent_handler(void (*handler)(bool plain, const char* why)) { g_plain_opponent_handler = handler; }
 
 void set_local_build(const LocalBuild& build) {
   if (build.mod_view != g_local_build.mod_view || build.fingerprint != g_local_build.fingerprint ||
