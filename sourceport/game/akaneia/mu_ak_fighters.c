@@ -19,6 +19,7 @@
  * past the retail ones) are served to the item code from the same registry.
  *
  * INTEGRATION.md (this folder) maps every field to its decomp site. */
+#include <dolphin/dvd.h>
 #include <dolphin/os.h>
 #include <melee/ft/forward.h>
 #include <melee/ft/ftdata.h>
@@ -33,6 +34,7 @@
 #include <melee/ft/types.h>
 #include <melee/it/forward.h>
 #include <melee/it/kinds/types.h>
+#include <melee/lb/lbfile.h>
 #include <melee/pl/player.h>
 
 #include <stddef.h>
@@ -226,6 +228,7 @@ static signed char ak_ext[MU_AK_CKIND_SLOTS];              /* first m-ex externa
 #endif
 static void* ak_hooks[MU_AK_KIND_SLOTS][MU_AK_HOOK_COUNT];
 static unsigned char ak_locked_logged[MU_AK_KIND_SLOTS];   /* the "locked" line was written */
+static unsigned int ak_file_size[MU_AK_KIND_SLOTS];          /* the fighter file's size on this disc */
 static int ak_shift;                                      /* m-ex special fighter shift, 0 = off */
 
 /* Akaneia 1.0.1 has 33 article kinds, ACE 2.0.0 has 104. */
@@ -469,6 +472,12 @@ HSD_GObjEvent mu_ak_colanim_reset_inline_event(int kind)
         OSReport("[ak] color reset: m-ex internal id %d reads past ftKindCalcIndiviParamTable; no call\n", id);
     }
     return NULL;
+}
+
+unsigned int mu_ak_file_size(int kind)
+{
+    const int slot = kind - MU_AK_KIND_BASE;
+    return slot >= 0 && slot < MU_AK_KIND_SLOTS ? ak_file_size[slot] : 0;
 }
 
 const MuAkFighter* mu_ak_fighter(int kind)
@@ -849,6 +858,7 @@ static void clear_slots(void)
     for (slot = 0; slot < MU_AK_KIND_SLOTS; slot++) {
         ak_fighter[slot] = NULL;
         ak_mex[slot] = -1;
+        ak_file_size[slot] = 0;
         __builtin_memset(ak_hooks[slot], 0, sizeof ak_hooks[slot]);
 #ifdef MU_AKANEIA_FIGHTERS
         ak_ext[slot] = -1;
@@ -948,6 +958,14 @@ void mu_ak_apply(void)
             continue;
         }
         fill_fighter(slot, ft);
+        {
+            DVDFileInfo info;
+            const s32 entry = DVDConvertPathToEntrynum(lbFileGetFullName((char*) file));
+            if (entry >= 0 && DVDFastOpen(entry, &info)) {
+                ak_file_size[slot] = info.length;
+                DVDClose(&info);
+            }
+        }
 #ifdef MU_AKANEIA_FIGHTERS
         /* The character kind maps to the fighter only when its files are all there: a kind
          * without them must not reach Fighter_Create. */
