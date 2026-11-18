@@ -363,6 +363,7 @@ static void ftSc_Init_OnFrame(HSD_GObj* gobj)
     Fighter* fp = GET_FIGHTER(gobj);
     FtMotionId msid;
 
+    mu_ak_test_motion(fp);
     if (fp->cur_anim_frame >= 2.0f) {
         ftSc_Appeal_CheckInput(gobj);
         return;

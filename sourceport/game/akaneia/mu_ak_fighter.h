@@ -103,6 +103,8 @@ const MuAkFighter* mu_ak_fighter(int kind);
 /* The size of a native fighter kind's file on the player's disc, 0 when unknown. A fighter whose
  * code differs between two releases of the same disc (ACE 2.0.0 and 2.0.1) tells them apart by it. */
 unsigned int mu_ak_file_size(int kind);
+/* Tests only: MELEE_TEST_AK_MOTION logs the fighter's motion changes (called from an onframe). */
+void mu_ak_test_motion(Fighter* fp);
 /* The m-ex internal id of a native fighter kind (retail kinds are their own ids), -1 when none. */
 int mu_ak_mex_internal(int kind);
 /* The event the console's inlined color reset in ftCo_800C0200 calls for a fighter kind. */

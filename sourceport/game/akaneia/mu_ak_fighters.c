@@ -40,6 +40,7 @@
 #include <stddef.h>
 
 #include "mu_ak_fighter.h"
+#include "mu_test_env.h"
 
 _Static_assert(MU_AK_KIND_BASE == Ft_Kind_Max + 1, "added fighter kinds start right after Ft_Kind_None");
 _Static_assert(FT_KIND_TABLE_MAX == MU_FT_KIND_CAP, "the per-kind tables are widened for the added fighters");
@@ -478,6 +479,24 @@ unsigned int mu_ak_file_size(int kind)
 {
     const int slot = kind - MU_AK_KIND_BASE;
     return slot >= 0 && slot < MU_AK_KIND_SLOTS ? ak_file_size[slot] : 0;
+}
+
+/* MELEE_TEST_AK_MOTION (tests only): an added fighter's onframe logs each motion change of its
+ * player, with the animation frame and x speed, so a hidden run can show a move's states. */
+void mu_ak_test_motion(Fighter* fp)
+{
+    static int on = -1;
+    static int last[6] = { -1, -1, -1, -1, -1, -1 };
+    const int port = fp->player_idx < 6 ? (int) fp->player_idx : 5;
+    if (on < 0) {
+        on = mu_test_getenv("MELEE_TEST_AK_MOTION") != NULL;
+    }
+    if (!on || last[port] == (int) fp->motion_id) {
+        return;
+    }
+    OSReport("[ak] motion P%d kind %d: %d -> %d (frame %.1f, x speed %.3f)\n", port + 1, fp->kind,
+             last[port], (int) fp->motion_id, fp->cur_anim_frame, fp->self_vel.x);
+    last[port] = (int) fp->motion_id;
 }
 
 const MuAkFighter* mu_ak_fighter(int kind)
