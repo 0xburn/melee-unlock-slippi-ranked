@@ -5568,7 +5568,7 @@ void D3D12Backend::submit_frame(const Frame& frame, const DrawMatrices* override
     static bool trace_opened = false;
     if (!trace_opened) {
       trace_opened = true;
-      if (const char* p = std::getenv("MELEE_TEST_SHOWN_TRACE"); p && *p && (shown_trace_ = std::fopen(p, "w"))) {
+      if (const char* p = host::test_env::getenv("MELEE_TEST_SHOWN_TRACE"); p && *p && (shown_trace_ = std::fopen(p, "w"))) {
         std::setvbuf(shown_trace_, nullptr, _IOFBF, 1 << 20);
         std::fputs("cpu_start,gpu_end,moment\n", shown_trace_);
       }
