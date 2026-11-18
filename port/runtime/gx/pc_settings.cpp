@@ -4154,6 +4154,9 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     if (have_pad) { f.buttons = pad.button; f.stick_x = pad.stick_x; f.stick_y = pad.stick_y; }
     // Only in Training: a VS match with friends or a training mod's exercise stays clean.
     f.hint = show_hint && practice.in_practice && practice.tab_available && practice.phase == Phase::Idle;
+    // MELEE_TEST_PRACTICE_HINT=1 (tests only): the hint in any Training match, for captures of its look.
+    static const bool test_hint = host::test_env::getenv("MELEE_TEST_PRACTICE_HINT") != nullptr;
+    if (test_hint && practice.in_practice) f.hint = show_hint;
     f.search.available = practice.tab_available;
     f.search.can_start = practice.can_start;
     f.search.searching = practice.phase == Phase::Searching;
@@ -5363,6 +5366,15 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     state.clean_detail_open = state.dashboard_detail_open = page;
     state.gd_detail_open = state.radial_detail_open = state.wide_detail_open = page;
   };
+  {   // settings open at startup (Auto-open, --pc-settings-open) also come back where they were left
+    static bool start_view = false;
+    if (!start_view) {
+      start_view = true;
+      if (state.open && !settings_fills_window() && g_initial_tab.load(std::memory_order_relaxed) < 0 &&
+          !host::test_env::getenv("MELEE_TEST_SETTINGS_TAB") && !std::getenv("MELEE_SETTINGS_TAB"))
+        reset_settings_home("open at startup");
+    }
+  }
   if (g_guest_options_open_request.exchange(false, std::memory_order_acq_rel)) {
     state.open = true;
     state.practice_open = false;

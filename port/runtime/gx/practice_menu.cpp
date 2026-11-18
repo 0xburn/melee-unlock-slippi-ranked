@@ -1119,7 +1119,8 @@ float hints(ImDrawList* dl, float x, float cy, float u, const char* spec, float 
     if (draw) button_glyph(dl, pen, cy, u, which, a);
     pen += glyph_width(which, u) + 6.0f * u;
     if (draw) text(dl, pen, text_y_centered(cy, 17.0f * u), 17.0f * u, with_alpha(IM_COL32(255, 255, 255, 255), a), word.c_str());
-    pen += text_width(17.0f * u, word.c_str()) + 16.0f * u;
+    // A "+" between two buttons sits evenly between them; a phrase gets the wider gap.
+    pen += text_width(17.0f * u, word.c_str()) + (word == "+" ? 6.0f : 16.0f) * u;
   }
   return pen - x;
 }
