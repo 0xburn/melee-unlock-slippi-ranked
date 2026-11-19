@@ -849,7 +849,7 @@ int mu_test_css_char(int port)
             n = -1;
         } else if (*p >= '0' && *p <= '9') {
             n = (n < 0 ? 0 : n * 10) + (*p - '0');
-            if (n > 40) {
+            if (n > 127) {   /* m-ex discs add external ids past 32 */
                 return -1;
             }
         } else {
