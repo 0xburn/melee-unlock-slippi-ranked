@@ -224899,7 +224899,7 @@ index 3327fe42c..726d5650e 100644
                                     HSD_TExp** result, HSD_TExpRes* resource);
  /* 386470 */ int SimplifySrc(HSD_TExp*);
 diff --git a/src/sysdolphin/baselib/tobj.c b/src/sysdolphin/baselib/tobj.c
-index 8cccdf681..5b1650fd7 100644
+index 8cccdf681..0fb97810a 100644
 --- a/src/sysdolphin/baselib/tobj.c
 +++ b/src/sysdolphin/baselib/tobj.c
 @@ -48,7 +48,7 @@ void HSD_TObjRemoveAnimAll(HSD_TObj* tobj)
@@ -224936,7 +224936,7 @@ index 8cccdf681..5b1650fd7 100644
                  }
                  tobj->tluttbl[i] = NULL;
              } else {
-@@ -139,14 +139,47 @@ static void TObjUpdateFunc(void* obj, enum_t type, HSD_ObjData* val)
+@@ -139,19 +139,56 @@ static void TObjUpdateFunc(void* obj, enum_t type, HSD_ObjData* val)
      if (tobj == NULL) {
          return;
      }
@@ -224986,7 +224986,16 @@ index 8cccdf681..5b1650fd7 100644
          }
      } break;
      case HSD_A_T_TCLT: {
-@@ -250,15 +283,19 @@ void HSD_TObjAnimAll(HSD_TObj* tobj)
+         if (tobj->tluttbl) {
++#ifdef MU_NATIVE
++            tobj->tlut_no = (u16) val->fv;
++#else
+             tobj->tlut_no = (u8) val->fv;
++#endif
+         }
+     } break;
+     case HSD_A_T_BLEND:
+@@ -250,15 +287,19 @@ void HSD_TObjAnimAll(HSD_TObj* tobj)
  
  static int TObjLoad(HSD_TObj* tobj, HSD_TObjDesc* td)
  {
@@ -225009,7 +225018,7 @@ index 8cccdf681..5b1650fd7 100644
      tobj->wrap_s = td->wrap_s;
      tobj->wrap_t = td->wrap_t;
      tobj->repeat_s = td->repeat_s;
-@@ -266,13 +303,13 @@ static int TObjLoad(HSD_TObj* tobj, HSD_TObjDesc* td)
+@@ -266,13 +307,17 @@ static int TObjLoad(HSD_TObj* tobj, HSD_TObjDesc* td)
      tobj->flags = td->blend_flags;
      tobj->blending = td->blending;
      tobj->magFilt = td->magFilt;
@@ -225021,13 +225030,17 @@ index 8cccdf681..5b1650fd7 100644
 +    tobj->lod = DP(td->lod);
      tobj->aobj = NULL;
      tobj->flags |= TEX_MTX_DIRTY;
++#ifdef MU_NATIVE
++    tobj->tlut_no = (u16) -1;
++#else
      tobj->tlut_no = (u8) -1;
 -    tobj->tev = HSD_TObjTevLoadDesc(td->tev);
++#endif
 +    tobj->tev = HSD_TObjTevLoadDesc(DP(td->tev));
  
      return 0;
  }
-@@ -283,7 +320,9 @@ HSD_TObj* HSD_TObjLoadDesc(HSD_TObjDesc* td)
+@@ -283,7 +328,9 @@ HSD_TObj* HSD_TObjLoadDesc(HSD_TObjDesc* td)
          HSD_TObj* tobj;
          HSD_ClassInfo* info;
  
@@ -225038,7 +225051,7 @@ index 8cccdf681..5b1650fd7 100644
              tobj = HSD_TObjAlloc();
          } else {
              tobj = hsdNew(info);
-@@ -300,7 +339,10 @@ HSD_Tlut* HSD_TlutLoadDesc(HSD_TlutDesc* tlutdesc)
+@@ -300,7 +347,10 @@ HSD_Tlut* HSD_TlutLoadDesc(HSD_TlutDesc* tlutdesc)
  {
      if (tlutdesc != NULL) {
          HSD_Tlut* tlut = HSD_TlutAlloc();
@@ -225050,7 +225063,7 @@ index 8cccdf681..5b1650fd7 100644
          return tlut;
      }
      return NULL;
-@@ -310,7 +352,8 @@ HSD_TObjTev* HSD_TObjTevLoadDesc(HSD_TObjTevDesc* tevdesc)
+@@ -310,7 +360,8 @@ HSD_TObjTev* HSD_TObjTevLoadDesc(HSD_TObjTevDesc* tevdesc)
  {
      if (tevdesc != NULL) {
          HSD_TObjTev* new = HSD_TObjTevAlloc();
@@ -225060,7 +225073,7 @@ index 8cccdf681..5b1650fd7 100644
          return new;
      }
      return NULL;
-@@ -1134,7 +1177,45 @@ static int DifferentTluts(HSD_Tlut* t0, HSD_Tlut* t1)
+@@ -1134,7 +1185,45 @@ static int DifferentTluts(HSD_Tlut* t0, HSD_Tlut* t1)
          (t0->n_entries != t1->n_entries);
  }
  
@@ -225107,7 +225120,7 @@ index 8cccdf681..5b1650fd7 100644
  {
      GXTlutObj tlutobj;
      GXTexObj texobj;
-@@ -1155,6 +1236,9 @@ void HSD_TObjSetup(HSD_TObj* tobj)
+@@ -1155,6 +1244,9 @@ void HSD_TObjSetup(HSD_TObj* tobj)
      if (num > 0) {
          HSD_StateRegisterTexGen(HSD_Index2TexCoord(num - 1));
      }
@@ -225117,7 +225130,7 @@ index 8cccdf681..5b1650fd7 100644
  
      for (; tobj; tobj = tobj->next) {
          static HSD_TexLODDesc default_lod = {
-@@ -1170,7 +1254,7 @@ void HSD_TObjSetup(HSD_TObj* tobj)
+@@ -1170,7 +1262,7 @@ void HSD_TObjSetup(HSD_TObj* tobj)
  
          TObjSetupMtx(tobj);
          HSD_ASSERT(1578, imagedesc);
@@ -225126,7 +225139,19 @@ index 8cccdf681..5b1650fd7 100644
  
          lod = tobj->lod != NULL ? tobj->lod : &default_lod;
          min_filter = lod->minFilt;
-@@ -1209,7 +1293,7 @@ void HSD_TObjSetup(HSD_TObj* tobj)
+@@ -1181,7 +1273,11 @@ void HSD_TObjSetup(HSD_TObj* tobj)
+         case GX_TF_C14X2: {
+             HSD_Tlut* tlut;
+ 
++#ifdef MU_NATIVE
++            if (tobj->tlut_no != (u16) -1) {
++#else
+             if (tobj->tlut_no != (u8) -1) {
++#endif
+                 tlut = tobj->tluttbl[tobj->tlut_no];
+             } else {
+                 tlut = tobj->tlut;
+@@ -1209,7 +1305,7 @@ void HSD_TObjSetup(HSD_TObj* tobj)
                  tlut->tlut_name = GX_TLUT0;
              }
  
@@ -225135,7 +225160,7 @@ index 8cccdf681..5b1650fd7 100644
                             imagedesc->height, imagedesc->format, tobj->wrap_s,
                             tobj->wrap_t,
                             imagedesc->mipmap ? GX_TRUE : GX_FALSE,
-@@ -1227,7 +1311,7 @@ void HSD_TObjSetup(HSD_TObj* tobj)
+@@ -1227,7 +1323,7 @@ void HSD_TObjSetup(HSD_TObj* tobj)
          case GX_TF_RGB5A3:
          case GX_TF_RGBA8:
          case GX_TF_CMPR:
@@ -225144,7 +225169,7 @@ index 8cccdf681..5b1650fd7 100644
                           imagedesc->height, imagedesc->format, tobj->wrap_s,
                           tobj->wrap_t, imagedesc->mipmap ? GX_TRUE : GX_FALSE);
              break;
-@@ -1497,7 +1581,7 @@ HSD_TObjInfo* HSD_TObjGetDefaultClass(void)
+@@ -1497,7 +1593,7 @@ HSD_TObjInfo* HSD_TObjGetDefaultClass(void)
  
  HSD_TObj* HSD_TObjAlloc(void)
  {
@@ -225153,7 +225178,7 @@ index 8cccdf681..5b1650fd7 100644
      HSD_ASSERT(2040, new);
      return new;
  }
-@@ -1575,7 +1659,7 @@ void HSD_ImageDescCopyFromEFB(HSD_ImageDesc* idesc, u16 origx, u16 origy,
+@@ -1575,7 +1671,7 @@ void HSD_ImageDescCopyFromEFB(HSD_ImageDesc* idesc, u16 origx, u16 origy,
      if (clear) {
          HSD_StateSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
      }
@@ -225163,10 +225188,23 @@ index 8cccdf681..5b1650fd7 100644
          GXPixModeSync();
          GXInvalidateTexAll();
 diff --git a/src/sysdolphin/baselib/tobj.h b/src/sysdolphin/baselib/tobj.h
-index a77c19a36..9dd9abf92 100644
+index a77c19a36..a0d4bd7e8 100644
 --- a/src/sysdolphin/baselib/tobj.h
 +++ b/src/sysdolphin/baselib/tobj.h
-@@ -158,13 +158,13 @@ struct HSD_TObj {
+@@ -151,20 +151,26 @@ struct HSD_TObj {
+     HSD_AObj* aobj;
+     struct HSD_ImageDesc** imagetbl;
+     struct _HSD_Tlut** tluttbl;
++#ifdef MU_NATIVE
++    /* A palette animation's index. The console's byte holds 255 palettes; m-ex discs go past
++     * that (ACE 2.0.1's character portraits), and a byte sent those to another one's palette. */
++    u16 tlut_no;
++#else
+     u8 tlut_no;
++#endif
+     Mtx mtx;
+     GXTexCoordID coord;
+     struct _HSD_TObjTev* tev;
  };
  
  typedef struct _HSD_TObjDesc {
@@ -225185,7 +225223,7 @@ index a77c19a36..9dd9abf92 100644
      GXTexWrapMode wrap_s;
      GXTexWrapMode wrap_t;
      u8 repeat_s;
-@@ -172,11 +172,11 @@ typedef struct _HSD_TObjDesc {
+@@ -172,11 +178,11 @@ typedef struct _HSD_TObjDesc {
      u32 blend_flags;
      f32 blending;
      GXTexFilter magFilt;
@@ -225202,7 +225240,7 @@ index a77c19a36..9dd9abf92 100644
  
  typedef struct _HSD_Tlut {
      void* lut;
-@@ -186,11 +186,11 @@ typedef struct _HSD_Tlut {
+@@ -186,11 +192,11 @@ typedef struct _HSD_Tlut {
  } HSD_Tlut;
  
  typedef struct _HSD_TlutDesc {
@@ -225216,7 +225254,7 @@ index a77c19a36..9dd9abf92 100644
  
  typedef struct _HSD_TexLODDesc {
      GXTexFilter minFilt;
-@@ -198,17 +198,17 @@ typedef struct _HSD_TexLODDesc {
+@@ -198,17 +204,17 @@ typedef struct _HSD_TexLODDesc {
      GXBool bias_clamp;
      GXBool edgeLODEnable;
      GXAnisotropy max_anisotropy;
@@ -225237,7 +225275,7 @@ index a77c19a36..9dd9abf92 100644
  
  typedef struct _HSD_TObjTev {
      u8 color_op;
-@@ -238,7 +238,7 @@ typedef struct _HSD_TObjTevDesc {
+@@ -238,7 +244,7 @@ typedef struct _HSD_TObjTevDesc {
      u8 alpha_a, alpha_b, alpha_c, alpha_d;
      GXColor konst, tev0, tev1;
      u32 active;
@@ -225246,7 +225284,7 @@ index a77c19a36..9dd9abf92 100644
  
  typedef struct _HSD_TObjInfo {
      HSD_ClassInfo parent;
-@@ -249,14 +249,14 @@ typedef struct _HSD_TObjInfo {
+@@ -249,14 +255,14 @@ typedef struct _HSD_TObjInfo {
  } HSD_TObjInfo;
  
  typedef struct _HSD_TexAnim {
