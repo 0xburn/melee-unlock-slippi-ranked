@@ -20,8 +20,8 @@ static void ftSd_LwStartAir(HSD_GObj* gobj)
 /* ACE 2.0.1 (its PlSd.dat is 445601 bytes): the IASA callbacks of 367 (+2790) and 372 (+2B0C),
  * empty on 2.0.0, clear take_dmg_2_cb and, from frame 10 to 35, set it to switch to 369 or 374
  * (+3F14, +3F38) when he is hit. */
-static void ftSd_LwHitTo369(HSD_GObj* gobj) { ftSd_Change(gobj,369,0,0,1,0); }
-static void ftSd_LwHitTo374(HSD_GObj* gobj) { ftSd_Change(gobj,374,0,0,1,0); }
+static void ftSd_LwHitTo369(HSD_GObj* gobj) { ftSd_Change(gobj,369,0,0,1,0); mu_ak_test_motion(GET_FIGHTER(gobj)); }
+static void ftSd_LwHitTo374(HSD_GObj* gobj) { ftSd_Change(gobj,374,0,0,1,0); mu_ak_test_motion(GET_FIGHTER(gobj)); }
 static void ftSd_LwHitWindow(HSD_GObj* gobj, HSD_GObjEvent cb)
 {
     Fighter* fp = GET_FIGHTER(gobj);

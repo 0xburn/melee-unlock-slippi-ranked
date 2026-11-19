@@ -5624,6 +5624,10 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         reset_settings_home("open at startup");
     }
   }
+  if (static bool esc_hook = false; !esc_hook) {   // screenshot hook: MELEE_TEST_ESC_MENU opens the Esc menu
+    esc_hook = true;
+    if (host::test_env::getenv("MELEE_TEST_ESC_MENU")) { state.menu_open = true; state.menu_quit = false; }
+  }
   if (g_guest_options_open_request.exchange(false, std::memory_order_acq_rel)) {
     state.open = true;
     state.practice_open = false;
@@ -11462,14 +11466,18 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   // ---- the Esc menu ----
   if (state.menu_open && !state.open) {
     const ImVec2 screen = ImGui::GetIO().DisplaySize;
-    const float width = std::min(760.0f, screen.x - 24.0f);
-    const float height = 172.0f;
-    ImGui::SetNextWindowPos(ImVec2((screen.x - width) * 0.5f, screen.y - height - 18.0f), ImGuiCond_Always);
+    // The bar shrinks with a small window: full size from 1100x620 up, down to 0.6 of it
+    // (it was a fixed 760x172 and filled a small window).
+    const float k = std::clamp(std::min(screen.x / 1100.0f, screen.y / 620.0f), 0.6f, 1.0f);
+    const float width = std::min(760.0f * k, screen.x - 24.0f);
+    const float height = 172.0f * k;
+    ImGui::SetNextWindowPos(ImVec2((screen.x - width) * 0.5f, screen.y - height - 18.0f * k), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.0f);
     ImGui::Begin("##esc_menu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
                                          ImGuiWindowFlags_NoBackground);
+    ImGui::SetWindowFontScale(k);
     const ImVec2 p = ImGui::GetWindowPos();
     ImDrawList* draw = ImGui::GetWindowDrawList();
     g_settings_palette = options.overlay_palettes[0];
@@ -11480,22 +11488,22 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     const ImVec4 accent_f = ImGui::ColorConvertU32ToFloat4(accent);
     const ImU32 accent_dark = ImGui::ColorConvertFloat4ToU32(
         ImVec4(accent_f.x * .48f, accent_f.y * .48f, accent_f.z * .48f, 1.0f));
-    draw->AddRectFilled(p, ImVec2(p.x + width, p.y + height), IM_COL32(8, 10, 20, 226), 8.0f);
-    draw->AddRectFilled(p, ImVec2(p.x + width, p.y + 4), accent);
+    draw->AddRectFilled(p, ImVec2(p.x + width, p.y + height), IM_COL32(8, 10, 20, 226), 8.0f * k);
+    draw->AddRectFilled(p, ImVec2(p.x + width, p.y + 4 * k), accent);
     // Under the YouGame app, quitting is going back to YouGame: its page is right behind this window.
     const bool app = yougame::stdio_bridge();
-    draw->AddText(ImVec2(p.x + 20, p.y + 17), IM_COL32(250, 244, 248, 255),
+    draw->AddText(ImVec2(p.x + 20 * k, p.y + 17 * k), IM_COL32(250, 244, 248, 255),
                   state.menu_quit ? (app ? "BACK TO YOUGAME?" : "QUIT MELEE UNLOCKED?") : "MELEE UNLOCKED");
     if (state.menu_quit)
-      draw->AddText(ImVec2(p.x + 20, p.y + 41), IM_COL32(183, 174, 190, 255),
+      draw->AddText(ImVec2(p.x + 20 * k, p.y + 41 * k), IM_COL32(183, 174, 190, 255),
                     !app || g_hud_match ? "The current match will end." : "Melee closes and your YouGame page is right behind it.");
-    const float gap = 10.0f;
+    const float gap = 10.0f * k;
     const int count = state.menu_quit ? 2 : 3;
-    const float button_w = (width - 40.0f - gap * (count - 1)) / count;
+    const float button_w = (width - 40.0f * k - gap * (count - 1)) / count;
     auto action = [&](const char* id, const char* label, int index) {
-      const float x = 20.0f + index * (button_w + gap), y = 66.0f;
+      const float x = 20.0f * k + index * (button_w + gap), y = 66.0f * k;
       ImGui::SetCursorPos(ImVec2(x, y));
-      const bool pressed = ImGui::InvisibleButton(id, ImVec2(button_w, 58.0f), ImGuiButtonFlags_EnableNav);
+      const bool pressed = ImGui::InvisibleButton(id, ImVec2(button_w, 58.0f * k), ImGuiButtonFlags_EnableNav);
       if (state.menu_quit && index == 0 && state.menu_quit_focus_pending) {
         // The window stays open across views, so SetItemDefaultFocus cannot replace the old ID.
         // Focus the submitted confirm item immediately, without activating it on the opening A.
@@ -11514,15 +11522,15 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         host::log("[yougame] agent test: menu activated %s (%s)", label, id);
 #endif
       const bool hot = ImGui::IsItemHovered() || ImGui::IsItemFocused();
-      const ImVec2 q(p.x + x, p.y + y - (hot ? 4.0f : 0.0f));
-      const ImVec2 shadow[] = {ImVec2(q.x + 9, q.y + 7), ImVec2(q.x + button_w, q.y + 7),
-                               ImVec2(q.x + button_w - 9, q.y + 62), ImVec2(q.x, q.y + 62)};
-      const ImVec2 face[] = {ImVec2(q.x + 9, q.y), ImVec2(q.x + button_w, q.y),
-                             ImVec2(q.x + button_w - 9, q.y + 54), ImVec2(q.x, q.y + 54)};
+      const ImVec2 q(p.x + x, p.y + y - (hot ? 4.0f * k : 0.0f));
+      const ImVec2 shadow[] = {ImVec2(q.x + 9 * k, q.y + 7 * k), ImVec2(q.x + button_w, q.y + 7 * k),
+                               ImVec2(q.x + button_w - 9 * k, q.y + 62 * k), ImVec2(q.x, q.y + 62 * k)};
+      const ImVec2 face[] = {ImVec2(q.x + 9 * k, q.y), ImVec2(q.x + button_w, q.y),
+                             ImVec2(q.x + button_w - 9 * k, q.y + 54 * k), ImVec2(q.x, q.y + 54 * k)};
       draw->AddConvexPolyFilled(shadow, 4, hot ? accent_dark : IM_COL32(24, 13, 34, 245));
       draw->AddConvexPolyFilled(face, 4, hot ? accent : IM_COL32(31, 20, 42, 245));
       const ImVec2 text_size = ImGui::CalcTextSize(label);
-      draw->AddText(ImVec2(q.x + (button_w - text_size.x) * .5f, q.y + (54.0f - text_size.y) * .5f),
+      draw->AddText(ImVec2(q.x + (button_w - text_size.x) * .5f, q.y + (54.0f * k - text_size.y) * .5f),
                     IM_COL32(255, 250, 253, 255), label);
       return pressed;
     };
@@ -11538,14 +11546,14 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         state.menu_quit = true;
         state.menu_quit_focus_pending = true;
       }
-      draw->AddText(ImVec2(p.x + 20, p.y + 144), IM_COL32(167, 162, 178, 255),
+      draw->AddText(ImVec2(p.x + 20 * k, p.y + 144 * k), IM_COL32(167, 162, 178, 255),
                     app ? yougame::parity::kMenuHint : "ESC  BACK TO GAME     F1  SETTINGS");
     } else {
       const bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
       if (action("##confirm_quit", app ? "BACK TO YOUGAME" : "QUIT", 0) || enter) { state.menu_open = false; host::request_user_exit(); }
       ImGui::SetItemDefaultFocus();
       if (action("##cancel_quit", "CANCEL", 1)) { state.menu_open = false; state.menu_quit = false; }
-      draw->AddText(ImVec2(p.x + 20, p.y + 144), IM_COL32(167, 162, 178, 255),
+      draw->AddText(ImVec2(p.x + 20 * k, p.y + 144 * k), IM_COL32(167, 162, 178, 255),
                     app ? yougame::parity::kMenuHint : "QUIT MELEE UNLOCKED?     ENTER  QUIT     ESC  CANCEL");
     }
     ImGui::End();
