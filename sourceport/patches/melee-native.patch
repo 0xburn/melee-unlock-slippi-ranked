@@ -144316,7 +144316,7 @@ index 6d7000275..d67b9cf18 100644
  /* 2FC3BC */ void ifMagnify_802FC3BC(void);
  /* 2FC3C0 */ void ifMagnify_802FC3C0(s32 slot);
 diff --git a/src/melee/if/ifnametag.c b/src/melee/if/ifnametag.c
-index f8c4573e8..b2b6b0f03 100644
+index f8c4573e8..df6a288d0 100644
 --- a/src/melee/if/ifnametag.c
 +++ b/src/melee/if/ifnametag.c
 @@ -100,8 +100,8 @@
@@ -144385,7 +144385,7 @@ index f8c4573e8..b2b6b0f03 100644
  {
      if (ifAll_IsHUDHidden() || un_804D6D6C) {
          int i;
-@@ -182,35 +180,37 @@ void fn_802FCAC4(HSD_GObj* gobj, int pass)
+@@ -182,35 +180,38 @@ void fn_802FCAC4(HSD_GObj* gobj, int pass)
      }
  }
  
@@ -144429,6 +144429,7 @@ index f8c4573e8..b2b6b0f03 100644
 +#ifdef MU_NATIVE
 +const char* mu_pro_tag_text(int slot);   /* shim/mu_practice_cpu.c: a pro AI's name, or NULL */
 +int mu_pro_tag_port_plate(int slot);      /* shim: draw that name on the port's coloured plate */
++static float mu_pro_tag_shift(int slot);   /* below: the name moves left for the robot */
 +#endif
  static inline bool has_nametag(int slot)
  {
@@ -144440,7 +144441,7 @@ index f8c4573e8..b2b6b0f03 100644
      if (Player_GetPlayerSlotType(slot) != Gm_PKind_Human ||
          Player_GetNametagSlotID(slot) == NAMETAG_DISABLED)
      {
-@@ -220,6 +220,32 @@ static inline bool has_nametag(int slot)
+@@ -220,6 +221,32 @@ static inline bool has_nametag(int slot)
      }
  }
  
@@ -144473,7 +144474,7 @@ index f8c4573e8..b2b6b0f03 100644
  void fn_802FCC44(HSD_GObj* gobj)
  {
      Vec3 vec;
-@@ -230,7 +256,16 @@ void fn_802FCC44(HSD_GObj* gobj)
+@@ -230,7 +257,16 @@ void fn_802FCC44(HSD_GObj* gobj)
      if (Player_GetPlayerSlotType(*slot) != Gm_PKind_NA &&
          Player_GetPlayerState(*slot) && Player_GetStocks(*slot) &&
          (un_804D6D70[*slot] || Player_GetNametagSlotID(*slot) != 'x' ||
@@ -144491,7 +144492,7 @@ index f8c4573e8..b2b6b0f03 100644
      {
          HSD_JObjClearFlags(HSD_JObjGetChild(jobj), JOBJ_HIDDEN);
      } else {
-@@ -244,6 +279,21 @@ void fn_802FCC44(HSD_GObj* gobj)
+@@ -244,12 +280,32 @@ void fn_802FCC44(HSD_GObj* gobj)
      Player_LoadPlayerCoords(*slot, &vec);
      vec.y += Player_800360D8(*slot);
      vec.y -= 2.5f;
@@ -144513,7 +144514,18 @@ index f8c4573e8..b2b6b0f03 100644
      lbVector_WorldToScreen(Camera_80030A50()->hsd_obj, &vec, &vec2, 0);
      HSD_JObjSetTranslateX(jobj, vec2.x);
      HSD_JObjSetTranslateY(jobj, -vec2.y);
-@@ -263,31 +313,62 @@ static inline float inlineA1(float var_f31)
+     if (has_nametag(*slot)) {
++#ifdef MU_NATIVE
++        HSD_SisLib_803A746C(un_804D6D78, un_804A1EF8[*slot], vec2.x - mu_pro_tag_shift(*slot),
++                            vec2.y - 56.0f);
++#else
+         HSD_SisLib_803A746C(un_804D6D78, un_804A1EF8[*slot], vec2.x,
+                             vec2.y - 56.0f);
++#endif
+     }
+ }
+ 
+@@ -263,31 +319,106 @@ static inline float inlineA1(float var_f31)
      }
  }
  
@@ -144540,11 +144552,55 @@ index f8c4573e8..b2b6b0f03 100644
 +    }
 +    return chars > 4 ? 4.0f / (float) chars : 1.0f;
 +}
-+#define NAMETAG_TEXT_FIT(text) (NAMETAG_TEXT_SCALE_X * mu_nametag_fit(text))
++
 +#define MU_TAG_TEXT(slot) (mu_pro_tag_text(slot) != NULL ? (char*) mu_pro_tag_text(slot) : GetNameText(Player_GetNametagSlotID(slot)))
++/* A pro AI's tag (owner 11-19): the host draws a small white robot after the name, inside the plate.
++ * The name makes room for it: it counts the robot as MU_PRO_ICON_CHARS more characters when fitting
++ * and moves left by half of that. Widths are the font's character advance at scale 0.4 (640x480 units). */
++#define MU_PRO_ICON_CHARS 1.6f
++#define MU_TAG_ADVANCE 11.5f
++static int mu_nametag_chars(const char* text)
++{
++    int chars = 0;
++    const unsigned char* p = (const unsigned char*) text;
++    while (p != NULL && *p != 0) {
++        p += (*p >= 0x81 && *p <= 0x9F) || (*p >= 0xE0 && *p <= 0xEF) ? 2 : 1;
++        chars++;
++    }
++    return chars;
++}
++static float mu_nametag_fit_slot(int slot)
++{
++    const char* pro = mu_pro_tag_text(slot);
++    if (pro != NULL) {
++        const float n = (float) mu_nametag_chars(pro) + MU_PRO_ICON_CHARS;
++        return n > 4.0f ? 4.0f / n : 1.0f;
++    }
++    return mu_nametag_fit(MU_TAG_TEXT(slot));
++}
++/* How far left the name moves for the robot (640x480 units), 0 without one. */
++static float mu_pro_tag_shift(int slot)
++{
++    if (mu_pro_tag_text(slot) == NULL) return 0.0f;
++    return MU_PRO_ICON_CHARS * MU_TAG_ADVANCE * mu_nametag_fit_slot(slot) * (NAMETAG_TEXT_SCALE_X / 0.4f) * 0.5f;
++}
++/* For the host's robot: its centre's distance right of the tag and its room's width, 640x480 units.
++ * 0 when this tag has none. Display only. */
++int mu_pro_tag_icon(int slot, float* dx, float* width)
++{
++    const char* pro;
++    float f, ws;
++    if (slot < 0 || slot >= Gm_Player_NumMax || (pro = mu_pro_tag_text(slot)) == NULL) return 0;
++    f = mu_nametag_fit_slot(slot);
++    ws = NAMETAG_TEXT_SCALE_X / 0.4f;
++    *dx = (float) mu_nametag_chars(pro) * MU_TAG_ADVANCE * f * ws * 0.5f;
++    *width = MU_PRO_ICON_CHARS * MU_TAG_ADVANCE * f * ws;
++    return 1;
++}
++#define NAMETAG_TEXT_FIT_SLOT(slot) (NAMETAG_TEXT_SCALE_X * mu_nametag_fit_slot(slot))
 +#else
 +#define MU_TAG_TEXT(slot) GetNameText(Player_GetNametagSlotID(slot))
-+#define NAMETAG_TEXT_FIT(text) NAMETAG_TEXT_SCALE_X
++#define NAMETAG_TEXT_FIT_SLOT(slot) NAMETAG_TEXT_SCALE_X
 +#endif
 +
  void NameTag_Create(int slot)
@@ -144583,11 +144639,11 @@ index f8c4573e8..b2b6b0f03 100644
 -                                    0.55f);
 +                    un_804D6D78, -5000.0f, 0.0f, MU_TAG_TEXT(slot));
 +                HSD_SisLib_803A7548(un_804D6D78, un_804A1EF8[slot],
-+                                    NAMETAG_TEXT_FIT(MU_TAG_TEXT(slot)), 0.55f);
++                                    NAMETAG_TEXT_FIT_SLOT(slot), 0.55f);
              }
              HSD_JObjReqAnimAll(jobj, f);
          }
-@@ -301,20 +382,105 @@ void NameTag_Create(int slot)
+@@ -301,20 +432,105 @@ void NameTag_Create(int slot)
      HSD_GObj_SetupProc(gobj, fn_802FCC44, 17);
  }
  
@@ -144694,11 +144750,11 @@ index f8c4573e8..b2b6b0f03 100644
 -        HSD_SisLib_803A7548(un_804D6D78, un_804A1EF8[slot], 0.4f, 0.55f);
 +            HSD_SisLib_803A6B98(un_804D6D78, -5000.0f, 0.0f, MU_TAG_TEXT(slot));
 +        HSD_SisLib_803A7548(un_804D6D78, un_804A1EF8[slot],
-+                            NAMETAG_TEXT_FIT(MU_TAG_TEXT(slot)), 0.55f);
++                            NAMETAG_TEXT_FIT_SLOT(slot), 0.55f);
      }
      HSD_JObjReqAnimAll(jobj, f);
      HSD_JObjAnimAll(jobj);
-@@ -361,10 +527,21 @@ static inline HSD_GObj* un_802FD4C8_inline(int arg0)
+@@ -361,10 +577,21 @@ static inline HSD_GObj* un_802FD4C8_inline(int arg0)
      return GObj_Create(0xE, arg0, 0);
  }
  
@@ -144721,7 +144777,7 @@ index f8c4573e8..b2b6b0f03 100644
      int i;
      PAD_STACK(0x10);
      for (i = 0; i < Gm_Player_NumMax; i++) {
-@@ -374,18 +551,20 @@ void un_802FD4C8(void)
+@@ -374,18 +601,20 @@ void un_802FD4C8(void)
      un_804D6D6C = 0;
      memzero(un_804D6D70, i = sizeof(un_804D6D70));
      un_804D6D68 = (gobj = un_802FD4C8_inline(15));

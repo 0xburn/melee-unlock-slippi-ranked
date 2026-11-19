@@ -1345,6 +1345,7 @@ void h_hud_combo(int32_t slot, int32_t link_slot, float percent, int32_t stunned
   gx::set_native_hud_combo(slot, link_slot, percent, stunned != 0);
 }
 void h_hud_extras(int32_t slot, int32_t nana_damage, int32_t team) { gx::set_native_hud_extras(slot, nana_damage, team); }
+void h_hud_pro_tag(int32_t slot, float dx, float width) { gx::set_native_hud_pro_tag(slot, dx, width); }
 void h_hud_player(int32_t slot, int32_t present, int32_t damage, int32_t stocks, float tag_x, float tag_y,
                   int32_t tag_visible) {
   gx::set_native_hud_player(slot, present != 0, damage, stocks, tag_x, tag_y, tag_visible != 0);
@@ -3831,6 +3832,7 @@ MuHostApi make_host() {
   h.card_boot_confirm = h_card_boot_confirm;
   h.hud_extras = h_hud_extras;
   h.native_rtx_semantics = h_native_rtx_semantics;
+  h.hud_pro_tag = h_hud_pro_tag;
   return h;
 }
 
