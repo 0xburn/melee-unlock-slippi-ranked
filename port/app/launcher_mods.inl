@@ -123,7 +123,7 @@ std::vector<CatalogMod> default_catalog() {
       "url": "https://github.com/Chri222k/ACE-BUILD-PUBLIC-/releases/download/v2.0.1/ACE.Builder.2.0.1.zip",
       "sha256": "1560d157334ea7cd1e2ef4ed7720f3f8aba846f245482e05a6d1d21d744b18cf",
       "policy": "permission_granted",
-      "tool_sha256": "847f811f51bbbf31f25962169e552a09cb0751678c62c198bd9da8db86474361",
+      "tool_sha256": "d81f59b2fe5e8589c0ee9782e231c805084f4d23dfade413903a4cad63b4e342",
       "patch_sha256": "8e7bdefa178462f0630982754ce9b35e1bc95f4ac88bc7cface84726f6bb206d",
       "output_sha256": "34e3c3db4eceb4a4adbdfb904b88ec4a0b5717b5b732de465b9faf48d6a74f4e",
       "note": "Runs on the Static Recomp."
