@@ -6525,6 +6525,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     const float gd_list_height =
         std::floor((kGdHintTop - kGdHintGap - kGdListTop + kGdRowSpacing) / kGdRowPitch) * kGdRowPitch - kGdRowSpacing;
     ImVec2 settings_content_size = gd_page ? ImVec2(532.0f * gd_scale, gd_list_height * gd_scale) : ImVec2(0, -48);
+    // Clean puts its Quit game button above the Back and Return chips (settings_page_footer, 44 px
+    // over them): the page ends above it, or a long page drew over the button and hid it.
+    if (options.overlay_style == 0 && !gd_page && !state.fill_window) settings_content_size.y = -84.0f;
     if (options.overlay_style == 3) {
       const ImVec2 window_pos = ImGui::GetWindowPos(), window_size = ImGui::GetWindowSize();
       constexpr float kRadialDetailSideInset = 64.0f;
