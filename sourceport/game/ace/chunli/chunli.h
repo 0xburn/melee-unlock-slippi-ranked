@@ -262,5 +262,7 @@ void ftCn_Empty(HSD_GObj* gobj);
 /* +325C */ void itCn_Shot_Spawn(HSD_GObj* owner_gobj, Vec3* pos, ItemKind kind,
                                  float facing_dir);
 extern ItemLogicTable* const itCn_ArticleTables[ftCn_Article_Count];
+/* Article 2's table (the neutral special's shot). */
+extern ItemLogicTable itCn_Shot_Logic;
 
 #endif

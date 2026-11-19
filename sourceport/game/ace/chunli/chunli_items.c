@@ -222,7 +222,9 @@ static ItemStateTable itCn_ShotAlt_States[] = {
 };
 
 /* Article 2 (348): slots 0 to 10, 12 and 13 exported; 11 (absorbed) and 14 not. */
-static ItemLogicTable itCn_Shot_Logic = {
+/* Not static: ACE 2.0.1's Liu Kang and Sub-Zero carry this block byte for byte as their article 0
+ * (ace/liukang, ace/subzero). */
+ItemLogicTable itCn_Shot_Logic = {
     .states = itCn_Shot_States,
     .spawned = itCn_Shot_Spawned,          /* +0010 */
     .destroyed = itCn_Shot_Nothing,        /* +0088 */
