@@ -30,6 +30,9 @@
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/random.h>
 
+/* The ability Kirby copies (liukang_kirby.c). */
+extern const struct MuAkKirbyCopy ftKbKg_Copy;
+
 /* A plain state change: flags 0, frame 0, rate 1, no blend (the form of every change he makes
  * from frame 0). */
 static inline void ftKg_Change(HSD_GObj* gobj, FtMotionId msid)
@@ -627,4 +630,5 @@ const MuAkFighter mu_ak_liukang = {
     .flags = MU_AK_READY,
     .article_tables = itKg_ArticleTables,
     .article_count = ftKg_Article_Count,
+    .kirby = &ftKbKg_Copy,
 };
