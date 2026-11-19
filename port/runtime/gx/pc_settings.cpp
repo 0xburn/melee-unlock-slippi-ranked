@@ -4923,7 +4923,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
                                      std::to_string(g_custom_preset.aniso) + " " + std::to_string(g_custom_preset.dlss) + " " +
                                      std::to_string(g_custom_preset.fps) + " " + std::to_string(g_custom_preset.sub)
                                : std::string())
-       << "\ndiscord " << (options.discord_presence ? 1 : 0);
+       << "\ndiscordon " << (options.discord_presence ? 1 : 0);   // the key the load reads ("discord" was never read back)
   // Only when set: "key value" parsing would swallow the next line on an empty value.
   if (!options.discord_app_id.empty()) file << "\ndiscord_app_id " << options.discord_app_id;
   if (!options.mod_profile.empty()) file << "\nmod_profile " << options.mod_profile;
