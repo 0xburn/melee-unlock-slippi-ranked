@@ -961,7 +961,7 @@ void press(Do what, const View& v) {
     }
     case Do::Leave: leave_panel(); break;
     case Do::Pip:
-      host::log("arena panel: %s pressed", ar::watch_layout() == 2 ? kPipSmall : kPipBig);
+      host::log("arena panel: %s pressed", ar::watch_layout() == 1 ? kPipBig : kPipSmall);
       ar::toggle_watch_layout();
       break;
     case Do::Warmup:
@@ -1324,7 +1324,7 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
   std::vector<std::pair<char, std::string>> right = {x_action(v)};
   const Role role = ar::role(r, v.self);
   // Watching with the room's match window up: A on this makes it small (picture in picture) or full size.
-  if (role != Role::Fighter && ar::watch_layout() != 0) right.insert(right.begin(), {'A', ar::watch_layout() == 2 ? kPipSmall : kPipBig});
+  if (role != Role::Fighter && ar::watch_layout() != 0) right.insert(right.begin(), {'A', ar::watch_layout() == 1 ? kPipBig : kPipSmall});
   if (g.side == 2 && role != Role::Fighter && r.asker == ar::kNone) right.push_back({'A', "Ask to play next"});
   if (g.side == 2 && r.members.size() >= 4 && !r.switch_pending) right.push_back({'R', r.doubles ? "Back to singles" : "Doubles"});
   if (g.side == 2) right.push_back({'B', "Close"});

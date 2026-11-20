@@ -526,9 +526,11 @@ struct Pip {
 };
 Pip g_pip;
 std::atomic<int> g_pip_adjust_req{0};   // 1 pick the small window with the controller, 2 let it go
-// Watching on the room's character select: the match big (2) by default, small (1) once the player
-// asks (PICTURE IN PICTURE on it, or the side bar's button); big again for each new wait.
-std::atomic<int> g_watch_layout{2};
+// Watching on the room's character select: the match as the setting says (room_watch: 0 its own
+// window, 1 small, 2 big), or as the player asked for this wait (PICTURE IN PICTURE on it, or the
+// side bar's button). -1: the setting; the setting again for each new wait.
+std::atomic<int> g_watch_layout{-1};
+std::atomic<bool> g_watch_open{false};  // the room's match window is up while this player watches
 std::atomic<int> g_watch_toggle{0};     // the side bar's button pressed (any thread): 1 toggle
 // The right side bar's top card on the select (arena_panel): its bottom as a share of the window's
 // height, and when it was said (ms); the small window sits under it there.
@@ -609,18 +611,27 @@ void pip_tick() {
     event("WARM UP pressed on the match window");
     native_practice::submit_warmup();
   }
+  // On the select: the setting, or this wait's own choice. "Full size" there is what the setting calls
+  // it: the match's own window (0, the default), or big with this game small (2).
+  const int room = std::clamp(gx::RenderOptions::live_room_watch(), 0, 2);
+  const int full = g_warming ? 2 : room == 2 ? 2 : 0;
+  int on_select_layout = g_watch_layout.load();
+  if (on_select_layout < 0) on_select_layout = room;
   if (action == 2 || action == 3 || g_watch_toggle.exchange(0)) {
-    const int to = action == 2 ? 1 : action == 3 ? 2 : (g_warming ? gx::RenderOptions::live_warmup_watch() : g_watch_layout.load()) == 2 ? 1 : 2;
+    const int now = g_warming ? gx::RenderOptions::live_warmup_watch() : on_select_layout;
+    const int to = action == 2 ? 1 : action == 3 ? full : now == 1 ? full : 1;
     // Away (warming up, another mode) the setting says how it shows, so the choice is the setting's;
     // on the select it is this wait's own.
     if (g_warming) gx::RenderOptions::live_warmup_watch() = to;
-    else g_watch_layout.store(to);
-    event("the room's match %s (%s)", to == 1 ? "small: picture in picture" : "full size", g_warming ? "while away" : "on the select");
+    else { g_watch_layout.store(to); on_select_layout = to; }
+    event("the room's match %s (%s)", to == 1 ? "small: picture in picture" : to == 2 ? "full size" : "in its own window",
+          g_warming ? "while away" : "on the select");
   }
   // Called for the turn: the windows go back at once, so the countdown shows full size; and the next
   // wait starts big again.
   const int setting = std::clamp(gx::RenderOptions::live_warmup_watch(), 0, 2);
-  if (turn_called()) g_watch_layout.store(2);
+  if (turn_called()) g_watch_layout.store(-1);
+  g_watch_open.store(viewer_running() && !turn_called() && setting != 0);
   if (!setting && viewer_running()) {   // turned to "Not shown": the window goes (it opens again when turned back on)
     pip_restore("the match window is off");
     close_viewer();
@@ -628,8 +639,12 @@ void pip_tick() {
     event("viewer closed: the room's match is not shown");
     return;
   }
-  const int want = viewer_running() && !turn_called() && setting ? (g_warming ? setting : g_watch_layout.load()) : 0;
-  if (!want) { pip_restore(!viewer_running() ? "no match window now" : turn_called() ? "this player's turn" : "the match window is off"); return; }
+  const int want = viewer_running() && !turn_called() && setting ? (g_warming ? setting : on_select_layout) : 0;
+  if (!want) {
+    pip_restore(!viewer_running() ? "no match window now" : turn_called() ? "this player's turn"
+                : setting ? "the match in its own window" : "the match window is off");
+    return;
+  }
   // The viewer's game window, found by its process (it takes a moment to open). A new one (the
   // room's next game) gets the layout afresh.
   if (!g_pip.viewer || !IsWindow((HWND)g_pip.viewer)) {
@@ -1724,7 +1739,7 @@ bool warmup_ok(std::string* why) {
 void pip_adjust(bool on) { g_pip_adjust_req.store(on ? 1 : 2); }
 bool pip_active() { return g_pip_up.load(); }
 void toggle_watch_layout() { g_watch_toggle.store(1); }
-int watch_layout() { return g_pip_up.load() ? g_pip.applied : 0; }
+int watch_layout() { return g_pip_up.load() ? g_pip.applied : g_watch_open.load() ? 3 : 0; }
 void note_side_card_bottom(float share) {
   g_card_bottom.store(share);
   g_card_bottom_ms.store(now_ms());
