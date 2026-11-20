@@ -1317,7 +1317,7 @@ void mu_slippi_online_menu_think(HSD_GObj* gp)
                !(yg_flags & YG_ROWS_OPEN)) {
         mn_804D6BC8.cooldown = 5;
         sfxBack();
-        pages_notice_show("Sign in to YouGame to play online.");
+        pages_notice_show("Connect YouGame in the launcher first.");
         OSReport("online menu: row %d refused: YouGame is not signed in\n", mn_804A04F0.hovered_selection);
 #ifdef MELEE_DOUBLES
     } else if ((buttons & MenuInput_Confirm) && split_layout() && !slippi_submenu && !yougame_soon() &&

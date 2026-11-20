@@ -50,7 +50,7 @@ endif()
 set(SDK "${D}/libs/dolphin/src/dolphin")
 # ---- how game code is compiled: one definition, shared by the game and by the parity library ----
 add_library(game_flags INTERFACE)
-option(MELEE_DOUBLES "Experimental console Doubles" OFF)
+option(MELEE_DOUBLES "Console Doubles (on in every release since 0.9.990)" ON)
 if(MELEE_DOUBLES)
   target_compile_definitions(game_flags INTERFACE MELEE_DOUBLES=1)
   # Only this translation unit is renamed; the existing entry still calls main.
@@ -306,7 +306,7 @@ if(NOT MELEE_DOUBLES)
     "${CMAKE_CURRENT_SOURCE_DIR}/shim/mu_doubles_bootstrap.c")
 endif()
 # Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
-option(MELEE_SQUAD_STRIKE "Build Squad Strike for offline VS and Friends" OFF)
+option(MELEE_SQUAD_STRIKE "Build Squad Strike for offline VS and Friends (on in every release since 0.9.990)" ON)
 # CSS accesses mncharsel's private state through one include, never a second TU.
 list(REMOVE_ITEM SHIM_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/shim/mu_squad_css.c")
 if(MELEE_SQUAD_STRIKE)

@@ -838,6 +838,9 @@ uint32_t gcadapter_poll(PadState out[4]) {
 #else
     if (!read_mirror(rep)) return 0;
 #endif
+    // The PhobGCC settings (calibration, trigger modes, filters) run on every report, as they do on
+    // the adapter's own reports below; without this a YouGame launch ignored the whole PhobGCC menu.
+    phob_process(rep, std::chrono::steady_clock::now());
   } else {
     ensure_scanner_started();
     auto now = std::chrono::steady_clock::now();
