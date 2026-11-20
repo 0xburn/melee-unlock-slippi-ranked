@@ -438,9 +438,26 @@ static void seats_without_links() {
   CHECK(!any_seat_without_links(json::object({{"links",false}})) && !any_seat_without_links(json()));
   CHECK(seat_without_links(json{{"links",false}}) && !seat_without_links(json{{"links",nullptr}}) && !seat_without_links(json(false)));
 }
+static void links_flag() {
+  // Windows copies say they can share a match with a links:false seat; other systems never do.
+  json ticket = {{"type","mpTicket"},{"players",2}};
+  CHECK(with_links_flag(ticket, true).value("links_flag", 0) == 1 && ticket["links_flag"].is_number_integer());
+  json other = {{"type","mpTicket"},{"players",2}};
+  CHECK(!with_links_flag(other, false).count("links_flag"));
+  json hold = {{"type","mpFriend"},{"hold",true}};
+  CHECK(!with_links_flag(hold, true).count("links_flag"));
+  json odd = json::array(); json typeless = {{"type",1}};
+  CHECK(with_links_flag(odd, true).is_array() && !with_links_flag(typeless, true).count("links_flag"));
+  json here = {{"type","mpTicket"}};
+#ifdef _WIN32
+  CHECK(kLinksFlag && with_links_flag(here).value("links_flag", 0) == 1);
+#else
+  CHECK(!kLinksFlag && !with_links_flag(here).count("links_flag"));
+#endif
+}
 int main() {
   mixed_version_reasons(); answer_after_deadline(); full_room_refusal(); kind_code_refusal();
   closed_during_event_wait(); closed_state_transitions();
-  mode_and_candidates(); broker_ordering(); unranked_recovery(); link_budget(); recovery_and_ranked(); leave_reasons(); lobby_match_links(); seats_without_links();
+  mode_and_candidates(); broker_ordering(); unranked_recovery(); link_budget(); recovery_and_ranked(); leave_reasons(); lobby_match_links(); seats_without_links(); links_flag();
   std::puts("yougame_transport: mode, candidates, broker ordering, link timeout/retry, leave reasons, lobby/match links, seats without links, seat recovery and ranked resume passed");
 }
