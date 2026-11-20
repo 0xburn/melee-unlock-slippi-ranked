@@ -491,7 +491,7 @@ class Matchmaking {
  public:
   enum OnlinePlayMode { RANKED, UNRANKED, DIRECT, TEAMS, PARTY };
   enum State { INITIALIZING, MATCHMAKING, OPPONENT_CONNECTING, ERROR_ENCOUNTERED };
-  struct Settings { OnlinePlayMode mode; std::string connect_code, friend_room; bool friends_lobby = false, slippi_gameplay = false; } search_settings_;
+  struct Settings { OnlinePlayMode mode; std::string connect_code, friend_room; bool friends_lobby = false, slippi_gameplay = false; std::vector<std::string> arena_fighters; } search_settings_;
   struct Local { bool enabled = false; int local_port = 1; } local_peer;
   User* user_;
   std::unique_ptr<User> slippi_user_;
@@ -1154,6 +1154,7 @@ static Match run() {
   const auto epoch = g_search_generation.begin();
   const bool blend = true, friends_mode = false, team_code = false, lobby_route = false;
   const bool doubles_home = false, doubles_room = false;   // the Doubles home and its match room (G2)
+  const bool arena = false;   // an arena game under YouGame (PR 86): not this search
   const void* parked = nullptr;   // a parked Friends lobby room (none here)
   const std::string url = "fake", direct_code;
   std::string pass = "synthetic";   // 122.31: a "matched" room ticket replaces the queue ticket
