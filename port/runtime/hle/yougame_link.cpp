@@ -4833,6 +4833,8 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
       if (!room || !*room || !(*room)->arena) return;
       std::unique_ptr<Room> back = std::move(*room);
       back->size = friends::kArenaSeats; back->mode = -2;
+      // A search that failed after opening links: close them here, or the next game's links hit the cap of three.
+      transport::close_links(back->links, [](const json& q, int ms) { return bridge(q, ms); });
       std::lock_guard<std::mutex> lock(g_mutex);
       if (g_arena_open && !g_arena && back->socket && !back->socket->closed()) {
         Room* raw = back.get();
