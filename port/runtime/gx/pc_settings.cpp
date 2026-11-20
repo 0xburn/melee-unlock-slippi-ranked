@@ -11752,7 +11752,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                         "(H shows it; every key still works). For tournament VODs and clips.");
     changed |= settings_toggle("Show player nicknames above fighters", &options.show_player_nicknames);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shows each online player's name at Melee's player-tag anchor. Local display only.");
-    changed |= settings_toggle("Show the \"Settings: F1\" reminder", &options.settings_hint);
+    changed |= settings_toggle("Show the \"Settings: F1\" reminder in menus", &options.settings_hint);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", yougame::stdio_bridge() ? yougame::parity::kSettingsHint : "F1, or Start + D-pad Down + Z on a GameCube controller, opens settings.");
     changed |= settings_toggle("Show the note when skins are off online", &options.skin_online_notice);
     if (ImGui::IsItemHovered())
@@ -12303,7 +12303,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // Hidden on request; F1 still opens the panel. This must not return early: ImGui::Render() is
     // at the end of this function, and skipping it left draw() handing the renderer draw data that
     // was never built for this frame, which crashed on the next F1.
-    if (options.settings_hint && !gx::clean_replay_active()) {
+    // Menus only: in a match (or Training, or a replay) it is clutter over the game (player report, 0.9.992).
+    if (options.settings_hint && !g_hud_match && !gx::clean_replay_active()) {
       const OverlayBounds bounds = overlay_bounds();
       ImGui::SetNextWindowPos(ImVec2(bounds.right - 12, bounds.top + 12), ImGuiCond_Always, ImVec2(1, 0));
       ImGui::SetNextWindowBgAlpha(ImGui::GetTime() < 20.0 ? 0.8f : 0.35f);
