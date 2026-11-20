@@ -68,7 +68,7 @@ struct State {
   Look look = Look::Combined;
   bool tabs = false;            // folded into tabs at the edges
   int button = 0;               // the Arena card out of a room: 0 briefly, 1 always, 2 never
-  double first_shown = -1;      // this session's first Direct character select (the brief showing)
+  double first_shown = -1;      // this session's first Direct (under YouGame: YouGame Friends) character select
   float card_pop = 0;           // the Arena card out of a room: how far it has slid in (0..1)
   bool focus = false;           // the room menu has the controller
   Page page = Page::None;
@@ -1297,7 +1297,7 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
     } else if (const std::string said = next_sentence(v); !said.empty()) {
       // The plain line every other look shows (the link to the room lost, a doubles vote, your own
       // ask, your place in line), at the foot of the red corner.
-      const Ink dk{Face::Body, 11, kDimText};
+      const Ink dk{Face::Body, 11, v.notice.empty() ? kDimText : kWhite};   // a notice stands out
       const std::vector<std::string> lines = wrap(dk, said, lw - pad * 2);
       float sy = fy - px(8) - lines.size() * px(15);
       for (const std::string& l : lines) { text(dk, b.lx0 + pad, line_top(dk, sy, 15), l); sy += px(15); }
@@ -1350,7 +1350,7 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
     const float h = prompt_height(w, v, prompt, &l, &o);
     prompt_box(b.lx0 + pad, lfoot - px(7) - h, w, v, prompt);
   } else {
-    const Ink dk{Face::Body, 11, kDimText};
+    const Ink dk{Face::Body, 11, v.notice.empty() ? kDimText : kWhite};   // a notice stands out
     const std::vector<std::string> lines = wrap(dk, next_sentence(v), lw - pad * 2);
     float sy = lfoot - px(8) - lines.size() * px(15);
     for (const std::string& l : lines) { text(dk, b.lx0 + pad, line_top(dk, sy, 15), l); sy += px(15); }
@@ -1480,7 +1480,7 @@ void draw_card(const Bars& b, const View& v, bool ring_box) {
   } else {
     const std::string said = next_sentence(v);
     const std::string line = !v.linked && !v.hosting ? said : !said.empty() && (r.switch_pending || r.asker == v.self) ? said : v.status;
-    const Ink dk{Face::Body, 11, kDimText};
+    const Ink dk{Face::Body, 11, v.notice.empty() ? kDimText : kWhite};   // a notice stands out
     std::vector<std::string> lines = wrap(dk, line, w);
     if (lines.size() > 2) { lines.resize(2); lines[1] = fit(dk, lines[1] + " ...", w); }
     float sy = foot - px(8) - lines.size() * px(15);
@@ -1522,7 +1522,7 @@ void draw_split(const Bars& b, const View& v) {
   {
     const std::string said = next_sentence(v);
     const std::string line = !v.linked && !v.hosting ? said : !said.empty() && (r.switch_pending || r.asker == v.self) ? said : v.status;
-    const Ink dk{Face::Body, 11, kDimText};
+    const Ink dk{Face::Body, 11, v.notice.empty() ? kDimText : kWhite};   // a notice stands out
     std::vector<std::string> lines = wrap(dk, line, w);
     if (lines.size() > 2) { lines.resize(2); lines[1] = fit(dk, lines[1] + " ...", w); }
     float sy = lfoot - px(8) - lines.size() * px(15);
@@ -1651,10 +1651,10 @@ void draw_not_in_room(const Bars& b, const View& v) {
   struct EndUnder { ~EndUnder() { end_under(); } } end_under_at_return;
   const bool sharp_enough = g_under.efb_width <= 0.0f || g_under.efb_width >= 0.6f * (b.px1 - b.px0);
   if (g_under.wanted && sharp_enough && x < b.px1 && x + tw > b.px0) begin_under(b.px0, b.y0, b.px1, b.y1);
-  if (!v.notice.empty()) {   // a full room said no: the reason, above the card
+  if (!v.notice.empty()) {   // a room that said no or did not open: the reason, under the card (above it is Young Link)
     const Ink nk{Face::Bold, 11, kWhite};
     std::vector<std::string> lines = wrap(nk, v.notice, tw);
-    float ny = y - px(10) - lines.size() * px(16);
+    float ny = y + th + px(10);
     dl()->AddRectFilled(ImVec2(x - px(4), ny - px(6)), ImVec2(x + tw + px(4), ny + lines.size() * px(16) + px(4)), IM_COL32(0, 0, 0, 190), px(5));
     for (const std::string& l : lines) { text(nk, x, line_top(nk, ny, 16), l); ny += px(16); }
   }
@@ -1800,6 +1800,15 @@ void frame(const Frame& f) {
   float bar = f.game_x0;
   const bool overlay = bar < 90.0f;
   if (overlay) bar = std::min(f.display_w * 0.17f, 220.0f);
+  // In a room those panels open over the picture: no wider than the room beside the select's outer icons
+  // (Dr. Mario and Falco on the left, Ganondorf and Young Link on the right, their frames about 31 of the
+  // select's units from its middle), so an open panel never covers a character (1280x960 two-seat walk:
+  // 217 wide over all four). Never narrower than the layouts hold (g_k 0.6, below).
+  if (overlay && v.active) {
+    const float unit = (f.game_y1 - f.game_y0) / 57.3f, mid = (f.game_x0 + f.game_x1) * .5f, icons = 31.2f * unit;
+    const float beside = std::min(mid - icons, f.display_w - (mid + icons)) - 4.0f;
+    bar = std::max(std::min(bar, beside), 152.0f * 0.6f);
+  }
   // Sized by the bar's width, but never past what the bar's height holds: every layout is made for
   // a bar about 540 sheet pixels high (16:9 and 16:10 windows); the wider bars of an ultrawide
   // window are no taller, and at their width's scale the lists, the ask prompt and the foot ran
@@ -1825,7 +1834,10 @@ void frame(const Frame& f) {
     // Over the picture (no bars) only the hand pushed into the edge opens a panel: near the edge the
     // hand is still on the outer icons, which an opening panel would cover.
     static const bool test_open = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_FIXTURE"); return v && std::strstr(v, ":open"); }();
-    const bool near = g.side == s + 1 || (g.page != Page::None && s == 1) || test_open ||
+    // A short line from the room (a failed invite) opens the panel that shows it: the right in the Card and
+    // Ring looks, else the left. Neither covers an icon now (the bars above).
+    const bool notice_here = v.active && !v.notice.empty() && s == (g.look == Look::Card || g.look == Look::Ring ? 1 : 0);
+    const bool near = g.side == s + 1 || (g.page != Page::None && s == 1) || test_open || notice_here ||
                       (!overlay && have_hand && (s == 0 ? hand_x <= -30.0f : hand_x >= 21.0f)) ||
                       (s == 0 ? mouse.x >= 0 && mouse.x < bar : mouse.x > f.display_w - bar && mouse.x <= f.display_w);
     if (near) g.pop_seen[s] = f.time;
@@ -1838,7 +1850,7 @@ void frame(const Frame& f) {
   float shown[2] = {enter, enter};
   if (!v.active) {
     if (g.first_shown < 0) g.first_shown = f.time;
-    const bool near_right = g.side == 2 || g.page != Page::None || test_open_card() ||
+    const bool near_right = g.side == 2 || g.page != Page::None || test_open_card() || !v.notice.empty() ||
                             (have_hand && hand_x >= 15.0f) || (mouse.x > f.display_w - bar && mouse.x <= f.display_w);
     const bool want = g.button == 1 || (g.button == 0 && (f.time - g.first_shown < 10.0 || near_right));
     g.card_pop = std::clamp(g.card_pop + (float)(dt / 0.35) * (want ? 1.f : -1.f), 0.f, 1.f);

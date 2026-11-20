@@ -10676,9 +10676,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         settings_end_combo();
       }
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The Arena card beside the Direct character select, out of a room.\n"
+        ImGui::SetTooltip("The Arena card beside the Direct character select (YouGame Friends under YouGame), out of a room.\n"
                           "Show briefly: for ten seconds the first time, then when your hand or mouse comes near the right side.\n"
-                          "Never: no card. Friends can still add your code and bring you into their room.");
+                          "Never: no card. Friends can still bring you into their room (a code, or a YouGame invite).");
       bool room_tabs = arena_panel::tabs();
       if (settings_toggle("Hide the room panels until the hand comes near", &room_tabs)) arena_panel::set_tabs(room_tabs);
       if (ImGui::IsItemHovered())
