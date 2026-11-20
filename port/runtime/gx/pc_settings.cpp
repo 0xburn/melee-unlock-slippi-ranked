@@ -11002,7 +11002,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("How strongly the camera shakes on hard hits, explosions and stage effects.\n"
-                          "100%% is the game's own. Works online too. Source Port only.");
+                          "100%% is the game's own. Online it can lower the shake, not raise it past 100%%. Source Port only.");
     }
     // The explosion still runs, out of sight (ft_0D31.c, host.cpp apply_ko_explosions): its particles
     // draw random numbers, so leaving it out would change the match.
