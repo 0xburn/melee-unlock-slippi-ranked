@@ -1309,6 +1309,13 @@ void yougame_sign_in_thread(bool use_app) {
     // launcher asks YouGame through that page from then on (remembered: it connects by itself at every start).
     std::string why;
     bool ok = false;
+    // No WebView2 on this computer (a Windows 10 without it): install Microsoft's runtime first, then sign in.
+    if (!launcher::yougame::web_sign_in_available()) {
+      log_line("yougame: Connect: Microsoft Edge WebView2 is missing: installing Microsoft's runtime");
+      std::string step;
+      if (launcher::yougame::install_web_runtime(&step)) log_line("yougame: Connect: WebView2 installed");
+      else log_line("yougame: Connect: WebView2 install failed: %s", step.c_str());
+    }
     if (launcher::yougame::web_sign_in_available()) ok = launcher::yougame::sign_in_web(g_main, &why, {}, again, title);
     else why = no_webview;
     g_yg_connecting = false;

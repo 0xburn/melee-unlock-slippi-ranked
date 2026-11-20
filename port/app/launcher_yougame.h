@@ -63,6 +63,8 @@ bool resume_web();
 // through a page of the site in that view. Windows; elsewhere web_sign_in_available() is false.
 void set_web_folder(const std::wstring& base);   // before anything else; each YouGame site gets a folder under it
 bool web_sign_in_available();
+// No WebView2: installs Microsoft's runtime (launcher_yougame_web.h install_runtime). Blocking.
+bool install_web_runtime(std::string* why);
 // Blocking (call off the window thread): shows the page, returns once the site reports the player
 // signed in (true) or the window was closed (false, *error empty). test_script: hidden test runs only.
 // again: the window's title says the earlier sign-in ended. title: the window's title instead (why it opens).

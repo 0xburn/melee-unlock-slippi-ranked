@@ -495,6 +495,7 @@ void set_web_folder(const std::wstring& base) {
 }
 
 bool web_sign_in_available() { return web::supported(); }
+bool install_web_runtime(std::string* why) { return web::install_runtime(why); }
 
 bool take_expired() { return g_expired.exchange(false); }
 

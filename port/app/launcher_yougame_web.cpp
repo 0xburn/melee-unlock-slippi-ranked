@@ -19,11 +19,18 @@
 #include <thread>
 #include <vector>
 #include "WebView2.h"
+#include <softpub.h>
+#include <wincrypt.h>
+#include <wintrust.h>
+#include <urlmon.h>
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "wintrust.lib")
+#pragma comment(lib, "crypt32.lib")
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -493,14 +500,86 @@ Reply run(std::unique_ptr<Job> job, int wait_ms) {
 
 }  // namespace
 
+static bool runtime_present() {
+  LPWSTR version = nullptr;
+  const bool ok = SUCCEEDED(GetAvailableCoreWebView2BrowserVersionString(nullptr, &version)) && version && *version;
+  CoTaskMemFree(version);
+  return ok;
+}
+// Asked again until it answers yes: an install made while the launcher runs counts at once.
 bool supported() {
-  static const bool yes = [] {
-    LPWSTR version = nullptr;
-    const bool ok = SUCCEEDED(GetAvailableCoreWebView2BrowserVersionString(nullptr, &version)) && version && *version;
-    CoTaskMemFree(version);
-    return ok;
-  }();
+  static std::atomic<bool> yes{false};
+  if (!yes && runtime_present()) yes = true;
   return yes;
+}
+
+// The file's Authenticode signature is valid (WinVerifyTrust) and its signer is Microsoft Corporation.
+static bool signed_by_microsoft(const std::wstring& file) {
+  WINTRUST_FILE_INFO info{sizeof info};
+  info.pcwszFilePath = file.c_str();
+  WINTRUST_DATA data{sizeof data};
+  data.dwUIChoice = WTD_UI_NONE;
+  data.fdwRevocationChecks = WTD_REVOKE_NONE;
+  data.dwUnionChoice = WTD_CHOICE_FILE;
+  data.pFile = &info;
+  data.dwStateAction = WTD_STATEACTION_VERIFY;
+  GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+  const LONG trust = WinVerifyTrust(nullptr, &action, &data);
+  data.dwStateAction = WTD_STATEACTION_CLOSE;
+  WinVerifyTrust(nullptr, &action, &data);
+  if (trust != ERROR_SUCCESS) return false;
+  HCERTSTORE store = nullptr;
+  HCRYPTMSG msg = nullptr;
+  if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, file.c_str(), CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED,
+                        CERT_QUERY_FORMAT_FLAG_BINARY, 0, nullptr, nullptr, nullptr, &store, &msg, nullptr))
+    return false;
+  bool microsoft = false;
+  DWORD size = 0;
+  if (CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, nullptr, &size) && size) {
+    std::vector<BYTE> buf(size);
+    if (CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, buf.data(), &size)) {
+      const auto* signer = reinterpret_cast<CMSG_SIGNER_INFO*>(buf.data());
+      CERT_INFO ci{};
+      ci.Issuer = signer->Issuer;
+      ci.SerialNumber = signer->SerialNumber;
+      if (PCCERT_CONTEXT cert = CertFindCertificateInStore(store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
+                                                           CERT_FIND_SUBJECT_CERT, &ci, nullptr)) {
+        wchar_t name[256] = {};
+        CertGetNameStringW(cert, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nullptr, name, 256);
+        microsoft = std::wstring(name) == L"Microsoft Corporation";
+        CertFreeCertificateContext(cert);
+      }
+    }
+  }
+  CryptMsgClose(msg);
+  CertCloseStore(store, 0);
+  return microsoft;
+}
+
+bool install_runtime(std::string* why) {
+  const auto fail = [&](const char* step) { if (why) *why = step; return false; };
+  if (supported()) return true;
+  wchar_t tmp[MAX_PATH] = {};
+  if (!GetTempPathW(MAX_PATH, tmp)) return fail("no temporary folder");
+  const std::wstring file = std::wstring(tmp) + L"MeleeUnlocked-MicrosoftEdgeWebview2Setup.exe";
+  DeleteFileW(file.c_str());
+  // Microsoft's own link to the WebView2 Evergreen bootstrapper (learn.microsoft.com, "Download the WebView2 Runtime").
+  if (FAILED(URLDownloadToFileW(nullptr, L"https://go.microsoft.com/fwlink/p/?LinkId=2124703", file.c_str(), 0, nullptr)))
+    return fail("the download from Microsoft failed");
+  if (!signed_by_microsoft(file)) { DeleteFileW(file.c_str()); return fail("the downloaded installer is not signed by Microsoft"); }
+  std::wstring cmd = L"\"" + file + L"\" /silent /install";
+  STARTUPINFOW si{sizeof si};
+  PROCESS_INFORMATION pi{};
+  if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+    DeleteFileW(file.c_str());
+    return fail("the installer did not start");
+  }
+  WaitForSingleObject(pi.hProcess, 5 * 60 * 1000);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  DeleteFileW(file.c_str());
+  for (int i = 0; i < 20 && !supported(); ++i) Sleep(500);
+  return supported() || fail("the installer finished but WebView2 is still missing");
 }
 
 void set_folder(const std::wstring& folder) {
