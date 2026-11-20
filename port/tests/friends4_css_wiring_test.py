@@ -248,6 +248,14 @@ class Screen(unittest.TestCase):
         self.assertLess(lock.index('if (m.local_ready && m.remote_ready) {'),
                         lock.index('mu_lobby_css_exit(MU_LOBBY_EXIT_SPLASH);'))
 
+    def test_own_door_is_drawn_hmn_once_it_can_be(self):
+        # The host's own door turned HMN before the screen could draw it and kept Melee's N/A.
+        own = body(self.inc, 'static void mu_f4_own_drawn(int mine)')
+        self.assertIn('if (mu_friends_css_frames < 2 || mine < 0 || mine > 3 || mu_f4.own_drawn == mine + 1 ||', own)
+        self.assertIn('mnCharSel_8025DB34((u8) mine);', own)
+        frame = self.inc[self.inc.index('mu_f4_own_drawn(mine);\n'):]
+        self.assertLess(frame.index('mu_f4_own_drawn(mine);'), frame.index('mu_f4_texts(mine);'))
+
     def test_labels_stay_in_the_menu_font(self):
         line = body(self.inc, 'static void mu_f4_line(int line, const char* s)')
         self.assertIn("c == '.' || (((mu_f4.view.mode & MU_LOBBY_M_SQUAD) || mu_f4.note >= MU_LOBBY_HINT_SQUAD_TWO) &&", line)
