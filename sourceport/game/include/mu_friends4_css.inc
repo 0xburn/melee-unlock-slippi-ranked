@@ -115,6 +115,7 @@ static struct {
     float caption_box[4];           /* the plate: left, top, right, bottom, in world units (mu_f4_caption_draw) */
     unsigned char stopped_seen;     /* last frame's block_hint was SEARCH_STOPPED: its 2 s note shows once */
     unsigned char route_logged[4];  /* Doubles: each seat's link route + 1 as last logged, 0: not yet */
+    unsigned char own_drawn;        /* this player's door + 1 once drawn as HMN this visit, 0: not yet */
 } mu_f4;
 
 static void mu_f4_marks_off(int freed);
@@ -730,6 +731,18 @@ static unsigned char mu_f4_door_color(int i, unsigned ch, unsigned costume)
     return c;
 }
 
+/* This player's own door turns HMN in the first frames, before the screen can draw it, so it already says HMN
+ * when drawing is possible and nothing draws it again: Melee's N/A stayed on it. Draw it once, when it can be. */
+static void mu_f4_own_drawn(int mine)
+{
+    if (mu_friends_css_frames < 2 || mine < 0 || mine > 3 || mu_f4.own_drawn == mine + 1 ||
+        mnCharSel_803F0DFC.doors[mine].p_kind != Gm_PKind_Human)
+        return;
+    mu_f4.own_drawn = (unsigned char) (mine + 1);
+    OSReport("friends lobby: own door %d drawn as HMN\n", mine);
+    mnCharSel_8025DB34((u8) mine);
+}
+
 /* This player's own door: a person, and its hover / pick / unpick go to the room when they change. */
 static void mu_f4_local(CSSData* css, int mine)
 {
@@ -1212,6 +1225,23 @@ static int mu_f4_over_door(int i, float x, float y)
     if (width <= 0) width = 15.0f;
     if (!(x > left - 1.0f && x < left + width - 2.0f)) return 0;
     return y > -22.0f && y < -4.6f ? 1 : y >= -4.6f && y < 0.2f ? 2 : 0;
+}
+
+/* A pressed on any port in the lobby: what the invite needs, so a press that does nothing says why.
+ * Once per press (trigger), so it never floods the log. */
+static void mu_f4_log_a(int mine)
+{
+    int c, i;
+    for (c = 0; c < 4; ++c) {
+        struct CSSCursorData* hand = mnCharSel_804A0BC0[c];
+        if (!(HSD_PadCopyStatus[c].trigger & HSD_PAD_A)) continue;
+        OSReport("friends lobby: A on port %d, mine %d, my seat %d, view %d, flags 0x%02x, hand %s %.1f,%.1f held %d/%d\n",
+                 c, mine, (int) mu_f4.view.my_seat, mu_f4.view_ok, (unsigned) mu_f4.view.flags, hand ? "at" : "none",
+                 hand ? hand->xC : 0.0f, hand ? hand->x10 : 0.0f, hand ? (int) hand->x5 : -1, hand ? (int) hand->x6 : -1);
+        for (i = 0; hand && i < MU_LOBBY_SEATS; ++i)
+            OSReport("friends lobby:   door %d kind %d switch %.1f..%.1f hit %d\n", i + 1, (int) mu_f4.view.seats[i].kind,
+                     mu_f4.toggle[i][0], mu_f4.toggle[i][1], mu_f4_over_door(i, hand->xC, hand->x10));
+    }
 }
 
 /* A on an open door's body opens YouGame's multi-invite picker for this room; seats fill as friends
@@ -2159,6 +2189,7 @@ static void mu_friends4_css_frame(void)
         gm_801A4B60();
     }
     mine = mu_f4_mine();
+    mu_f4_log_a(mine);
     mu_f4_sync_mode(css, mine);
     mu_f4_bounds(mine);
     if (mu_f4.view_ok && (mu_f4.view.flags & MU_LOBBY_F_KNOWN) && mu_f4.view.my_seat < MU_LOBBY_SEATS) {
@@ -2187,6 +2218,7 @@ static void mu_friends4_css_frame(void)
             if (mu_friends_css_frames >= 2) mnCharSel_8025DB34((u8) mine);
         }
     }
+    mu_f4_own_drawn(mine);
     if (mu_friends_css_frames >= 1) mu_f4_texts(mine);
     if (mu_friends_css_frames >= 1) mu_f4_partner_marks(mine);   /* after the portrait (mu_f4.art) */
     {

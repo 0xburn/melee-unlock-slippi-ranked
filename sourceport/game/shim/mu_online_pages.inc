@@ -472,7 +472,8 @@ static const char* pages_row_words(int option)
     }
     if (ranked_supported || slippi_submenu) return NULL;
     switch (option) {
-    case MU_SLP_OPT_FRIENDS: return "Play a friend by code.";
+    /* Over the local channel (split_friends) Friends is the app's friend flow, with the app's words. */
+    case MU_SLP_OPT_FRIENDS: return split_friends() ? "Invite a friend to play." : "Play a friend by code.";
 #ifdef MELEE_DOUBLES
     case MU_SLP_OPT_DOUBLES: return "Play 2v2 in the YouGame app.";
 #endif

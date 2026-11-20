@@ -466,11 +466,12 @@ namespace display { enum class Provider { Unknown, YouGame, Slippi }; }
 namespace yougame {
 bool active() { return ::active; }
 bool session() { return active(); }   // no launcher in these fixtures: the app's session
+bool friends_flow() { return active(); }   // no local channel in these fixtures
 int menu_service() { return -1; }      // no row picked through the launcher's pages
 void slippi_link(bool, const std::string&) {}
 static int ranked_visits, friend_publications;
 void ranked_screen_enter() { ++ranked_visits; }
-namespace friends { struct Events { void online_menu(bool, bool) { ++friend_publications; } } events; }
+namespace friends { struct Events { void online_menu(bool, bool) { ++friend_publications; } void request_host() {} } events; }
 namespace agent_test {
 bool agent_script;
 struct InputPolicy { template<class F> void allowed(int, int, F) {} } input_policy;

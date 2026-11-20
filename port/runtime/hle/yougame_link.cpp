@@ -3449,6 +3449,7 @@ bool coming_soon_build() {
 }
 bool available() { return active() || launcher(); }
 bool session() { return active() || (launcher() && g_launcher_session.load()); }
+bool friends_flow() { return active() || (launcher() && g_channel_up.load()); }
 std::string build_version() {
 #ifdef MELEE_PORT_VERSION
   return MELEE_PORT_VERSION;
@@ -5185,6 +5186,7 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
   std::shared_ptr<const lobby::Plan> lobby_plan;
   json lobby_view = json::array();
   std::string lobby_me;
+  bool lobby_me_missing_logged = false, lobby_seat_missing_logged = false;
   int lobby_reported = -1;
   // Every machine of one build has the same key; the card digest has no native source yet (phase 2).
   const std::string lobby_settings = lobby::settings_digest(lobby_key), lobby_card = lobby::kCardDigestNative;
@@ -5383,7 +5385,19 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
         if (!lobby_session && !room->me.empty()) {
           for (const auto& p : participants)
             if (p.value("connectionId", "") == room->me && p.value("localIndex", 0) == 0) lobby_me = p.value("id", "");
-          if (!lobby_me.empty()) {
+          if (lobby_me.empty()) {
+            if (!lobby_me_missing_logged) {
+              lobby_me_missing_logged = true;
+              host::log("friends lobby: this connection (%s) has no participant row yet (%zu rows)",
+                        ranked::log_text(room->me, 12).c_str(), participants.size());
+              for (const auto& p : participants)
+                host::log("friends lobby:   participant %s connection %s local %d",
+                          ranked::log_text(p.value("id", ""), 12).c_str(),
+                          ranked::log_text(p.value("connectionId", ""), 12).c_str(), p.value("localIndex", 0));
+            }
+          } else {
+            host::log("friends lobby: the session is %s on connection %s",
+                      ranked::log_text(lobby_me, 12).c_str(), ranked::log_text(room->me, 12).c_str());
             lobby::Session::Options o;
             o.me = lobby_me; o.connection_id = room->me; o.profile = lobby_profile;
             // The Doubles match room takes only the setup: no hello (the home sent it), nothing to call off.
@@ -5397,6 +5411,13 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
         if (lobby_session) {
           lobby_session->receive(m);
           if (const char* bad = lobby_session->take_bad_frame()) host::log("friends lobby: unusable room frame (%s)", bad);
+          if (lobby_session->known() && lobby_session->my_seat() < 0 && !lobby_seat_missing_logged) {
+            lobby_seat_missing_logged = true;
+            host::log("friends lobby: no seat is %s's", ranked::log_text(lobby_me, 12).c_str());
+            for (const auto& seat : lobby_session->state().seats)
+              host::log("friends lobby:   seat %d kind %d id %s connection %s", seat.seat, (int) seat.kind,
+                        ranked::log_text(seat.id, 12).c_str(), ranked::log_text(seat.connection_id, 12).c_str());
+          }
           if (lobby_session->unsupported() && lobby_route) {
             if (!kind_heard) { kind_heard = true; return reroute(friends::kRoom1v1, true, "the room has no Friends lobby"); }
             return fail(lobby::kUnsupported);
