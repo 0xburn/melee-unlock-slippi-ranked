@@ -4689,8 +4689,8 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
       } else host::log("friends lobby: next match in the same room");
     }
   }
-  // Every ticket this search asks for says whether this copy can share a match with a links:false seat
-  // (transport::with_links_flag): decide_transport below is that path. Other requests go out as they are.
+  // Every ticket and room hold this search asks for says whether this copy can share a match with a links:false
+  // seat (transport::with_links_flag): decide_transport below is that path. Other requests go out as they are.
   const auto ticket_bridge = [&](json q, int ms) { return bridge(transport::with_links_flag(q), ms, cancelled); };
   json ticket;
   g_bridge_refusal.clear();   // read in the catch below: only this ticket's refusal counts
@@ -4706,7 +4706,7 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
       // Renewals ask for the same room again, never a new hold.
       // The Doubles home holds a 2-seat teams home (doubles_hold) and its partner joins by code.
       if (lobby_room.empty()) {
-        ticket = bridge(doubles_home ? friends::doubles_hold(lobby_key) : friends::lobby_hold(lobby_key), 30000, cancelled);
+        ticket = ticket_bridge(doubles_home ? friends::doubles_hold(lobby_key) : friends::lobby_hold(lobby_key), 30000);
         const std::string held = ticket.is_object() && ticket.count("room") && ticket["room"].is_string()
                                      ? ticket["room"].get<std::string>() : std::string();
         if (held.empty()) throw std::runtime_error("YouGame did not return a Friends lobby room");
