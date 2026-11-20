@@ -86,6 +86,19 @@ extern char** environ;
 
 using json = nlohmann::json;
 
+// An ask for YouGame (a YouGame row pressed with no YouGame connected) whose place was left before it
+// was answered: the Online menu backed out of, a character select entered, a search cancelled
+// (yougame::withdraw_ask). Set until the next ask starts.
+static std::atomic<bool> g_yg_ask_left{false};
+#ifdef _WIN32
+// YouGame's small window runs its own loop on the asking thread and is topmost, so it stays up over
+// whatever the game moves on to. Its window is kept here as it shows (the header's YG__START_ON_SHOWN
+// hook) so leaving the place that asked can close it.
+static std::atomic<void*> g_yg_start_window{nullptr};
+static void yg_link_start_shown(void* hwnd);
+#define YG__START_ON_SHOWN(u) yg_link_start_shown((void*)(u)->hwnd)
+#endif
+
 // YouGame's native headers (MIT, engines/native, claude/v2 0b5798f46). The start hook is enabled on
 // Windows and macOS; Linux keeps its existing UNAVAILABLE behaviour.
 #if defined(_WIN32) || defined(__APPLE__)
@@ -95,6 +108,26 @@ using json = nlohmann::json;
 #include "../../third_party/yougame_start/yougame.h"
 #if !defined(_WIN32) && !defined(__APPLE__)
 extern "C" yg_start_result yg_start(const yg_start_options*) { return YG_START_UNAVAILABLE; }
+#endif
+#ifdef _WIN32
+// Closes YouGame's small window as its own X does (Play offline; an ask on use never remembers it),
+// unless Get YouGame is downloading or installing in it: the player asked for YouGame, so that carries on.
+// Only our own process's window of that class; a stale handle is refused. True when the close was sent.
+static bool yg_link_start_close() {
+  HWND w = (HWND)g_yg_start_window.load();
+  if (!w || !IsWindow(w)) return false;
+  DWORD pid = 0;
+  GetWindowThreadProcessId(w, &pid);
+  wchar_t cls[64] = {};
+  if (pid != GetCurrentProcessId() || !GetClassNameW(w, cls, 64) || wcscmp(cls, L"YouGameStartWindow") != 0) return false;
+  if (*(volatile int*)&yg__start_u.getting) return false;   // written on the window's thread; a plain flag
+  return PostMessageW(w, WM_CLOSE, 0, 0) != 0;
+}
+static void yg_link_start_shown(void* hwnd) {
+  g_yg_start_window = hwnd;
+  // The place that asked was left while YouGame was being looked for: close it as soon as it shows.
+  if (g_yg_ask_left.load() && yg_link_start_close()) host::log("yougame: asked from a place since left: YouGame's window closed");
+}
 #endif
 
 namespace yougame {
@@ -997,6 +1030,12 @@ class Socket {
   }
   int connection() const { return broker_ ? broker_->conn() : 0; }
   bool recoverable() const { return broker_ && broker_->close_code() == 1006; }
+  // Both close codes read 1006 from open until a close names another, so a live connection also "reads" 1006:
+  // ask this before treating 1006 as a drop.
+  bool connection_closed() const {
+    if (broker_) return broker_->closed();
+    return closed_.load();
+  }
   // Our own socket's connection died: no close frame from the room (code stays 1006) and not our close().
   bool own_dropped() const { return !broker_ && !stopping_ && close_code_ == 1006; }
   // Own socket: when it last heard anything, and last heard a relay frame (a match is passing through it).
@@ -3657,10 +3696,18 @@ void reach_ask_on_use() {
   bool idle = false;
   if (!g_reach_busy.compare_exchange_strong(idle, true)) return;
   { std::lock_guard<std::mutex> lock(g_reach_mutex); if (g_reach.is_open()) { g_reach_busy = false; return; } }
+  g_yg_ask_left = false;   // a new ask: its place is where the player is now
   host::log("yougame: online row picked, no YouGame connected: asking (on use)");
   std::thread([] {
     const int r = run_start_hook("YouGame row pressed", false, YG_START_ASK_ON_USE);
     if (r == YG_START_RUNNING || r == YG_START_OPENED || r == YG_START_UPDATING) {
+      if (g_yg_ask_left.load()) {
+        // The player left the place that asked (withdraw_ask): YouGame carries on starting, its rows open
+        // on the next visit, and no "Opening YouGame..." panel covers the menu they went to.
+        host::log("yougame: YouGame row: the place that asked was left; no panel");
+        g_reach_busy = false;
+        return;
+      }
       {
         std::lock_guard<std::mutex> lock(g_reach_mutex);
         g_reach.open(false);
@@ -3688,6 +3735,7 @@ void reach_open_app() {
   bool idle = false;
   if (!g_reach_busy.compare_exchange_strong(idle, true)) return;
   { std::lock_guard<std::mutex> lock(g_reach_mutex); g_reach.opening(); }
+  g_yg_ask_left = false;   // asked from the panel, which holds the controllers: nothing to leave
   std::thread([] {
 #if defined(_WIN32) || defined(__APPLE__)
     g_app_opening = true;
@@ -3738,6 +3786,18 @@ bool reach_showing() {
   std::lock_guard<std::mutex> lock(g_reach_mutex);
   return g_reach.is_open();
 }
+}  // namespace
+
+void withdraw_ask(const char* why) {
+  // Only an ask in flight (YouGame's window up, or still being looked for) has anything to withdraw.
+  if (!g_reach_busy.load()) return;
+  g_yg_ask_left = true;
+#ifdef _WIN32
+  if (yg_link_start_close()) host::log("yougame: %s: YouGame's window closed", why ? why : "asked from a place since left");
+#endif
+}
+
+namespace {
 // The panel's view, or false when it is closed (closing it once YouGame answered).
 bool reach_view(signin::View& out) {
   if (!reach_showing()) return false;
@@ -4203,6 +4263,10 @@ bool channel_menu_key(const char* kind) {
   last = now;
   // Pressed again with one of the game's YouGame boxes up: closes it (Back).
   if (sign_in_showing()) { sign_in_press(signin::Button::Back); return true; }
+#ifdef _WIN32
+  // Pressed again with YouGame's own small window up (the ask below): closes it, as it does the game's boxes.
+  if (!g_channel_up.load() && yg_link_start_close()) { host::log("yougame: Shift+Tab: YouGame's window closed"); return true; }
+#endif
   // No YouGame connected (Shift+Tab only): the same ask as a YouGame row picked first.
   if (!g_channel_up.load()) { host::log("yougame: Shift+Tab, no YouGame connected"); first_row_picked(); return true; }
   if (sign_in_needed()) { host::log("yougame: Shift+Tab, signed out"); sign_in_open(); return true; }
@@ -6186,7 +6250,11 @@ bool ranked_room_retired() {
 
 bool own_room_dropped() {
   std::lock_guard<std::mutex> lock(g_mutex);
-  return g_room && g_room->socket && (g_room->socket->own_dropped() || g_room->socket->recoverable());
+  // Only a CLOSED connection with 1006 is our own drop: an open one reads 1006 too, and counting it
+  // turned every Unranked opponent's mid-match quit into "we dropped" (no Opponent left note).
+  return g_room && g_room->socket &&
+         g_room->socket->connection_closed() &&
+         (g_room->socket->own_dropped() || g_room->socket->recoverable());
 }
 
 void ranked_screen_enter() {

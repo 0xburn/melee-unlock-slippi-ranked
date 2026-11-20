@@ -148,7 +148,11 @@ static int auto_slot = -1;
  * start hook (CMD_YOUGAME_MENU 0x20) and the menu confirms this row by itself once the rows open.
  * Menu-only, like auto_slot. -1: none. */
 static int yg_wait_slot = -1;
+/* A 0x20 asked for YouGame on this menu (YouGame's own small window may be up over it, Windows): leaving
+ * the menu tells the host (0x21, yougame_ask_withdraw) so the window goes with it. */
+static int yg_asked;
 static unsigned yg_wait_frames;
+static unsigned yg_closed_frames;  /* frames on the Online menu with YouGame's rows still closed */
 static int yg_open;           /* YG_OPEN_* from the first answer that carried it (the host answers it once) */
 enum { SPLIT_SLIPPI = 3, SPLIT_FIRST_SLIPPI = 4 };
 /* The split layout's rows as Slippi mode ids; rows 0-2 are YouGame's, row 3 opens Slippi's page. */
@@ -414,6 +418,20 @@ static int yougame_query(int pick, char* out, unsigned int cap)
         out[n] = 0;
     }
     return r[0];
+}
+
+/* Leaving the Online menu (Back to 1-P Mode, or into a character select) after a YouGame row asked for
+ * YouGame: the host closes YouGame's small window if it is still up from that ask (EF 0x21). Its
+ * window is topmost and the game keeps reading the pads, so without this it stayed drawn over every
+ * menu the player backed into. Choosing in the window (Play offline, Get YouGame) works as before. */
+static void yougame_ask_withdraw(void)
+{
+    if (!yg_asked) {
+        return;
+    }
+    yg_asked = 0;
+    yg_wait_slot = -1;
+    yougame_query(0x21, NULL, 0);
 }
 
 int mu_slippi_ranked_available(void) { return ranked_supported; }
@@ -1127,6 +1145,19 @@ void mu_slippi_online_menu_think(HSD_GObj* gp)
                 OSReport("online menu: YouGame is connected; continuing into row %d\n", auto_slot);
             }
         }
+    } else if (mn_804A04F0.cur_menu == MENU_KIND_8 && split_layout() &&
+               !(yg_flags & (YG_ROWS_OPEN | YG_COMING_SOON))) {
+        /* The menu opened before YouGame knew the player (its first answer can come a second after the
+         * launcher's restart): look again about once a second and open the rows as soon as it does,
+         * rather than only on the next visit to this menu. */
+        if (++yg_closed_frames % 60u == 0) {
+            int flags = yougame_query(-1, NULL, 0);
+            if (flags & YG_ROWS_OPEN) {
+                yg_flags = flags;
+                yg_open |= flags & (YG_OPEN_RANKED | YG_OPEN_DIRECT);
+                OSReport("online menu: YouGame is connected; its rows open\n");
+            }
+        }
     }
     if (auto_slot >= 0 && accepts_input) {
         /* Once: confirm the YouGame row the launcher started this game for. */
@@ -1341,6 +1372,7 @@ void mu_slippi_online_menu_think(HSD_GObj* gp)
          * and continues into it once YouGame is connected and the rows open. */
         yg_wait_slot = mn_804A04F0.hovered_selection;
         yg_wait_frames = 0;
+        yg_asked = 1;
         yougame_query(0x20, NULL, 0);
         mn_804D6BC8.cooldown = 30;
         sfxForward();
@@ -1404,6 +1436,7 @@ void mu_slippi_online_menu_think(HSD_GObj* gp)
              * the player uses it there (mu_content.c). Asked before the online major loads. */
             mu_content_mode(slp.mode);
             sfxForward();
+            yougame_ask_withdraw();
             data = gm_GetCurrentSceneExitData();
             data->pending_mode = GM_HANYU_CSS;
             gm_801A4B60();
@@ -1438,6 +1471,7 @@ void mu_slippi_online_menu_think(HSD_GObj* gp)
         sfxBack();
         mn_804A04F0.entering_menu = 0;
         mn_80229894(MENU_KIND_1P, SEL_1P_2, 3);
+        yougame_ask_withdraw();
     } else if (buttons & MenuInput_Up) {
         steps = mu_slippi_menu_count();
         direction = PAD_ANY_UP;
