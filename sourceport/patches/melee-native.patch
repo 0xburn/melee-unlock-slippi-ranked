@@ -129835,20 +129835,26 @@ index da910d997..fbdf85610 100644
  /* 1FE1E4 */ void grKraid_801FE1E4(Ground_GObj*);
  /* 1FE1E8 */ void grKraid_801FE1E8(Ground_GObj*);
 diff --git a/src/melee/gr/grlast.c b/src/melee/gr/grlast.c
-index 3404d0fd5..d98b03b29 100644
+index 3404d0fd5..97ded9431 100644
 --- a/src/melee/gr/grlast.c
 +++ b/src/melee/gr/grlast.c
-@@ -1,5 +1,9 @@
+@@ -1,5 +1,15 @@
  #include "grlast.h"
  
 +#ifdef MU_NATIVE
 +#include <mu_hp.h>
++#include "grdatfiles.h"
++/* A Final Destination skin installed as it is whose background models carry fewer animations than
++ * the original's: see grLast_AnimsShort. */
++static bool grLast_anims_short;
++static int grLast_AnimCount(int model);
++static bool grLast_AnimsShort(void);
 +#endif
 +
  #include <math.h>
  
  #include "granime.h"
-@@ -10,6 +14,9 @@
+@@ -10,6 +20,9 @@
  #include "grzakogenerator.h"
  #include "inlines.h"
  #include "stage.h"
@@ -129858,7 +129864,7 @@ index 3404d0fd5..d98b03b29 100644
  #include <melee/cm/camera.h>
  #include <melee/gm/gm_unsplit.h>
  #include <melee/lb/lb_00B0.h>
-@@ -28,7 +35,7 @@
+@@ -28,7 +41,7 @@
  /* 21A7C8 */ static void grLast_OnStart(void);
  /* 21A7EC */ static bool grLast_8021A7EC(void);
  /* 21A7F4 */ static Ground_GObj* grLast_8021A7F4(int);
@@ -129867,7 +129873,7 @@ index 3404d0fd5..d98b03b29 100644
  /* 21A90C */ static bool grLast_8021A90C(Ground_GObj*);
  /* 21A914 */ static void grLast_8021A914(Ground_GObj*);
  /* 21A918 */ static void grLast_8021A918(Ground_GObj*);
-@@ -36,7 +43,7 @@
+@@ -36,7 +49,7 @@
  /* 21A960 */ static bool grLast_8021A960(Ground_GObj*);
  /* 21A968 */ static void grLast_8021A968(Ground_GObj*);
  /* 21A96C */ static void grLast_8021A96C(Ground_GObj*);
@@ -129876,7 +129882,7 @@ index 3404d0fd5..d98b03b29 100644
  /* 21A99C */ static bool grLast_8021A99C(Ground_GObj*);
  /* 21A9A4 */ static void grLast_8021A9A4(Ground_GObj*);
  /* 21A9A8 */ static void grLast_8021A9A8(Ground_GObj*);
-@@ -70,7 +77,7 @@
+@@ -70,7 +83,7 @@
  /* 21B2E0 */ static void grLast_8021B2E0(Ground_GObj*);
  /* 21B2E4 */ static void grLast_8021B2E4(Ground_GObj*);
  /* 21B2E8 */ static void grLast_8021B2E8(Ground_GObj*);
@@ -129885,7 +129891,7 @@ index 3404d0fd5..d98b03b29 100644
  /* 21B920 */ static void grLast_8021B920(Ground_GObj*, int);
  /* 21C40C */ static void grLast_8021C40C(Ground_GObj*, GXColor, float);
  /* 21C500 */ static void grLast_8021C500(Ground_GObj*);
-@@ -90,8 +97,12 @@ Vec3 const grLast_803B8480 = { 1.0f, 1.0f, 1.0f };
+@@ -90,8 +103,12 @@ Vec3 const grLast_803B8480 = { 1.0f, 1.0f, 1.0f };
  Vec3 const grLast_803B848C = { 0.0f, 1.0f, 0.0f };
  Vec3 const grLast_803B8498 = { 0.0f, 0.0f, 1.0f };
  
@@ -129900,7 +129906,7 @@ index 3404d0fd5..d98b03b29 100644
  
  static void grLast_OnDemoInit(enum_t arg0)
  {
-@@ -139,7 +150,7 @@ static void grLast_OnDemoInit(enum_t arg0)
+@@ -139,7 +156,7 @@ static void grLast_OnDemoInit(enum_t arg0)
  static StageCallbacks grLast_StageCallbacks[] = {
      {
          // 0 generic anime gobj
@@ -129909,7 +129915,7 @@ index 3404d0fd5..d98b03b29 100644
          grLast_8021A90C,
          grLast_8021A914,
          grLast_8021A918,
-@@ -153,7 +164,7 @@ static StageCallbacks grLast_StageCallbacks[] = {
+@@ -153,7 +170,7 @@ static StageCallbacks grLast_StageCallbacks[] = {
      },
      {
          // 2 generic anime gobj
@@ -129918,7 +129924,7 @@ index 3404d0fd5..d98b03b29 100644
          grLast_8021A99C,
          grLast_8021A9A4,
          grLast_8021A9A8,
-@@ -282,10 +293,9 @@ static Ground_GObj* grLast_8021A7F4(int id)
+@@ -282,10 +299,9 @@ static Ground_GObj* grLast_8021A7F4(int id)
      return gobj;
  }
  
@@ -129931,7 +129937,7 @@ index 3404d0fd5..d98b03b29 100644
  }
  
  static bool grLast_8021A90C(Ground_GObj* gobj)
-@@ -313,10 +323,9 @@ static void grLast_8021A968(Ground_GObj* gobj) {}
+@@ -313,10 +329,9 @@ static void grLast_8021A968(Ground_GObj* gobj) {}
  
  static void grLast_8021A96C(Ground_GObj* gobj) {}
  
@@ -129944,7 +129950,7 @@ index 3404d0fd5..d98b03b29 100644
  }
  
  static bool grLast_8021A99C(Ground_GObj* gobj)
-@@ -339,7 +348,7 @@ static void grLast_8021A9C4(Ground_GObj* gobj)
+@@ -339,7 +354,7 @@ static void grLast_8021A9C4(Ground_GObj* gobj)
      Ground* gp = gobj->user_data;
      u32 i;
  
@@ -129953,14 +129959,27 @@ index 3404d0fd5..d98b03b29 100644
      grAnime_801C8138(gobj, gp->map_id, 0);
      gp->u.map.xC4_b0 = true;
      for (i = 0; i < ARRAY_SIZE(gp->u.map.lv_gobj); i++) {
-@@ -363,6 +372,22 @@ static void grLast_8021AAB0(Ground_GObj* gobj)
+@@ -348,6 +363,12 @@ static void grLast_8021A9C4(Ground_GObj* gobj)
+     gp->u.map.xC4_b2_25 = 0;
+     gp->u.map.xC4_b26 = false;
+     gp->u.map.xC4_b27 = true;
++#ifdef MU_NATIVE
++    grLast_anims_short = grLast_AnimsShort();
++    if (grLast_anims_short) {
++        OSReport("stage: Final Destination's background models lack the original's animations; the background stays still\n");
++    }
++#endif
+     grLast_8021B920(gobj, 1);
+     gp->x11_flags.b012 = 1;
+     gp->u.map.xC4_b1 = false;
+@@ -363,6 +384,22 @@ static void grLast_8021AAB0(Ground_GObj* gobj)
  {
      Ground* gp = GET_GROUND(gobj);
      if (!gp->u.map.xC4_b1 && !gp->u.map.xC4_b0) {
 +#ifdef MU_NATIVE
 +        /* 20XX TE Frozen stages, or "Freeze Final Destination" (Stages, both engines): the
 +         * background never transforms. */
-+        if (mu_te(MU_TE_FROZEN_STAGES) || mu_freeze_fd()) {
++        if (mu_te(MU_TE_FROZEN_STAGES) || mu_freeze_fd() || grLast_anims_short) {
 +        } else
 +        /* 20XX Hack Pack "Final Destination - No BG Trans with Custom Flag" (8021AAE0) */
 +        if (mu_hp_stage_flags() & MU_HP_FLAG_OFF) {
@@ -129976,7 +129995,7 @@ index 3404d0fd5..d98b03b29 100644
          grLast_8021B2E8(gobj);
          if (gp->u.map.xC4_b26) {
              int tmp = grLast_8021B5C4(gobj);
-@@ -371,7 +396,7 @@ static void grLast_8021AAB0(Ground_GObj* gobj)
+@@ -371,7 +408,7 @@ static void grLast_8021AAB0(Ground_GObj* gobj)
              }
          }
      }
@@ -129985,7 +130004,7 @@ index 3404d0fd5..d98b03b29 100644
      lb_800115F4();
  }
  
-@@ -566,6 +591,16 @@ static bool grLast_8021B2D8(Ground_GObj* gobj)
+@@ -566,6 +603,16 @@ static bool grLast_8021B2D8(Ground_GObj* gobj)
      return false;
  }
  
@@ -130002,7 +130021,75 @@ index 3404d0fd5..d98b03b29 100644
  static void grLast_8021B2E0(Ground_GObj* gobj) {}
  
  static void grLast_8021B2E4(Ground_GObj* gobj) {}
-@@ -898,7 +933,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
+@@ -575,6 +622,49 @@ static s16 grNLa_803E8010[][4] = {
+     { 7, 1, 2, 8 }, { 8, 1, 2, 10 }, { 9, 0, -1, 0 },
+ };
+ 
++#ifdef MU_NATIVE
++/* How many joint and material animations a stage model's lists hold (the smaller), counted to the
++ * list's end and at most 11. grAnime_801C7C1C indexes these lists with no bound. */
++static int grLast_AnimCount(int model)
++{
++    UnkArchiveStruct* archive = grDatFiles_801C6330(model);
++    HSD_AnimJointSlot* ajp;
++    HSD_MatAnimJointSlot* mjp;
++    int a = 0, m = 0;
++    if (archive == NULL || archive->unk4 == NULL || DP(archive->unk4->unk8) == NULL) {
++        return 0;
++    }
++    ajp = DP(DP(archive->unk4->unk8)[model].unk4);
++    mjp = DP(DP(archive->unk4->unk8)[model].unk8);
++    if (ajp == NULL || mjp == NULL) {
++        return 0;
++    }
++    while (a < 11 && DP(ajp[a]) != NULL) {
++        a++;
++    }
++    while (m < 11 && DP(mjp[m]) != NULL) {
++        m++;
++    }
++    return a < m ? a : m;
++}
++
++/* The background transformation plays animations 0 to 10 of models 4 to 8 and animation 0 of model 9,
++ * and waits for each to end before its next step. The original holds 11 on each of 4 to 8 and 1 on 9.
++ * A skin installed as it is with fewer (one has 1 on model 4) made the transformation read past the
++ * list's end and stop the game (0.9.991 crash report). Such a file keeps its background still, as
++ * Freeze Final Destination does. Online games play the original's animations (stage_graft.h). */
++static bool grLast_AnimsShort(void)
++{
++    int i;
++    for (i = 0; i < 6; i++) {
++        if (grLast_AnimCount(grNLa_803E8010[i][0]) < (i < 5 ? 11 : 1)) {
++            return true;
++        }
++    }
++    return false;
++}
++#endif
++
+ static void grLast_8021B2E8(Ground_GObj* gobj)
+ {
+     GXColor sp30;
+@@ -806,6 +896,17 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
+                 gp->u.map.lv_gobj[i] = grLast_8021A7F4(grNLa_803E8010[i][0]);
+                 HSD_ASSERT(1099, gp->u.map.lv_gobj[i]);
+                 HSD_GObjGXLink_803909D8(gp->u.map.lv_gobj[i], gobj_);
++#ifdef MU_NATIVE
++                /* Only the animations such a file has (grLast_AnimsShort). */
++                if (grLast_anims_short &&
++                    grLast_AnimCount(grNLa_803E8010[i][0]) <= grNLa_803E8010[i][3])
++                {
++                    if (grLast_AnimCount(grNLa_803E8010[i][0]) > 0) {
++                        do_anime(gp->u.map.lv_gobj[i], i, 0);
++                    }
++                    continue;
++                }
++#endif
+                 if (grNLa_803E8010[i][2] != -1) {
+                     grAnime_801C7FF8(gp->u.map.lv_gobj[i],
+                                      grNLa_803E8010[i][2], 7,
+@@ -898,7 +999,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
      case 13:
          grLast_8021C40C(gobj, grNLa_804DBBD8, 120.0F);
          for (i = 0; i < 5; i++) {
@@ -130011,7 +130098,7 @@ index 3404d0fd5..d98b03b29 100644
              grMaterial_801C9698(gp->u.map.lv_gobj[i]);
          }
          gp->u.map.xC4_b26 = true;
-@@ -913,7 +948,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
+@@ -913,7 +1014,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
          HSD_ASSERT(0x4D2, gp->u.map.lv_gobj[5]);
          HSD_GObjGXLink_803909D8(gp->u.map.lv_gobj[5], gobj);
          do_anime(gp->u.map.lv_gobj[5], 5, 0);
@@ -130020,7 +130107,7 @@ index 3404d0fd5..d98b03b29 100644
          grMaterial_801C9698(gp->u.map.lv_gobj[5]);
          Ground_801C1E00(0);
          gp->u.map.xC4_b26 = true;
-@@ -924,7 +959,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
+@@ -924,7 +1025,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
          break;
      case 16:
          grLast_8021C40C(gobj, grNLa_804DBBE0, 60.0F);
@@ -130029,7 +130116,7 @@ index 3404d0fd5..d98b03b29 100644
          grMaterial_801C9698(gp->u.map.lv_gobj[5]);
          gp->u.map.xC4_b26 = true;
          break;
-@@ -938,7 +973,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
+@@ -938,7 +1039,7 @@ static void grLast_8021B920(Ground_GObj* gobj_, int arg1)
                                   grNLa_803E8010[i][3], 0.0F, 1.0F);
              }
              do_anime(gp->u.map.lv_gobj[i], i, 0);
