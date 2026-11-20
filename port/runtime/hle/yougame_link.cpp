@@ -3377,6 +3377,9 @@ void first_row_picked() {
   // Linux, where the hook has no window: the "Play online with YouGame" panel (reach_open). The menu
   // still continues into the row once YouGame answers.
   if (g_channel_up.load()) return;
+  // Started by our launcher (extension ticked or not): YouGame's sign-in is the launcher's, and the menu says
+  // so; the app opens only from an Open YouGame button, never from a row (owner 11-20).
+  if (g_launcher || g_match_bridge) return;
 #if defined(_WIN32) || defined(__APPLE__)
   reach_ask_on_use();
 #else

@@ -200,11 +200,13 @@ _Static_assert(MU_DISPLAY_BOOT_TO_CSS == MU_DISPLAY_OPTION_BOOT_TO_CSS, "display
 
 int mu_console_active(void);
 
-/* Camera state participates in rollback snapshots: local strength must not change it online. */
+/* The camera's shake is the viewer's own, online as offline, as "Disable screen shake" (MU_GAME_OPTION_NO_SCREEN_SHAKE)
+ * always was: rollback restores each side's camera from its own snapshots and no checksum reads it. A YouGame
+ * console session keeps the game's own camera, as it keeps the game's own options (h_game_options). */
 float mu_screen_shake_scale(void)
 {
     if (!mu_host || mu_host->version < 27 || !mu_host->screen_shake_scale) return 1.0f;
-    if (mu_console_active() || mu_online_active() || mu_online_pending()) return 1.0f;
+    if (mu_console_active()) return 1.0f;
     const float scale = mu_host->screen_shake_scale();
     return scale >= 0.0f && scale <= 4.0f ? scale : 1.0f;
 }

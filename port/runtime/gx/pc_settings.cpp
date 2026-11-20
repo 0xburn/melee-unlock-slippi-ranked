@@ -803,7 +803,8 @@ static std::string active_pad_buttons_label(uint16_t button) {
 // it shows what the game acted on and device polling stays on one thread at one rate.
 // `row` stacks several overlays upward so two to four players can be shown at once. `editable` is on
 // while the settings panel is open, which is when the overlay may be dragged and resized.
-static void draw_input_overlay(int port, int row, bool lone, bool editable, bool borderless, bool values, int knob) {
+static void draw_input_overlay(int port, int row, bool lone, bool editable, bool borderless, bool values, int knob,
+                               float (*rects)[4], bool* moved) {
   host::PadState pads[4]{};
   host::input_last_pads(pads);
   int slot = port < 0 || port > 3 ? 0 : port;
@@ -829,8 +830,14 @@ static void draw_input_overlay(int port, int row, bool lone, bool editable, bool
   if (!editable) flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize;
   if (borderless) flags |= ImGuiWindowFlags_NoBackground;
   const OverlayBounds bounds = overlay_bounds();
-  ImGui::SetNextWindowPos(ImVec2(bounds.left + 16, bounds.bottom - 16 - row * (pad_h + 6)), ImGuiCond_FirstUseEver, ImVec2(0, 1));
-  ImGui::SetNextWindowSize(ImVec2(pad_w, pad_h), ImGuiCond_FirstUseEver);
+  float* saved = rects[slot];
+  if (saved[2] > 0.0f) {   // where it was left last time (settings file), once per run
+    ImGui::SetNextWindowPos(ImVec2(saved[0], saved[1]), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(saved[2], saved[3]), ImGuiCond_Once);
+  } else {
+    ImGui::SetNextWindowPos(ImVec2(bounds.left + 16, bounds.bottom - 16 - row * (pad_h + 6)), ImGuiCond_FirstUseEver, ImVec2(0, 1));
+    ImGui::SetNextWindowSize(ImVec2(pad_w, pad_h), ImGuiCond_FirstUseEver);
+  }
   ImGui::SetNextWindowBgAlpha(borderless ? 0.0f : 0.30f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, borderless ? 0.0f : 1.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -842,7 +849,18 @@ static void draw_input_overlay(int port, int row, bool lone, bool editable, bool
     ImGui::PushStyleColor(ImGuiCol_ResizeGripActive, IM_COL32(255, 255, 255, 70));
   }
   ImGui::Begin(title, nullptr, flags);
-  clamp_overlay_window();
+  {   // Anywhere in the window, the side borders beside the picture included (player request 11-20).
+    const ImVec2 display = ImGui::GetIO().DisplaySize, pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+    const ImVec2 clamped(std::clamp(pos.x, 0.0f, std::max(0.0f, display.x - size.x)),
+                         std::clamp(pos.y, 0.0f, std::max(0.0f, display.y - size.y)));
+    if (clamped.x != pos.x || clamped.y != pos.y) ImGui::SetWindowPos(clamped);
+  }
+  if (editable) {   // moved or resized while the panel is open: remembered in the settings file
+    const ImVec2 pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+    const float now[4] = {pos.x, pos.y, size.x, size.y};
+    for (int i = 0; i < 4; ++i)
+      if (std::fabs(now[i] - saved[i]) > 0.5f) { std::copy(now, now + 4, saved); *moved = true; break; }
+  }
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const ImVec2 o = ImGui::GetCursorScreenPos();
   // Everything below is authored against a 300x132 controller and scaled to the current size.
@@ -2496,6 +2514,12 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       // The chain goes on in a second one: MSVC stops at about 128 nested else-ifs (C1061).
       if (!matched) {
       if (key == "inputoverlaystick") options.input_overlay_stick = std::clamp(std::atoi(value.c_str()), 1, 10);
+      else if (key.rfind("inputoverlayrect", 0) == 0 && key.size() == 17 && key[16] >= '0' && key[16] <= '3') {
+        float r[4] = {};
+        if (std::sscanf(value.c_str(), "%f %f %f %f", &r[0], &r[1], &r[2], &r[3]) == 4 && r[2] >= 40 && r[3] >= 20 &&
+            r[2] <= 4000 && r[3] <= 4000 && std::isfinite(r[0]) && std::isfinite(r[1]))
+          std::copy(r, r + 4, options.input_overlay_rect[key[16] - '0']);
+      }
       else if (key == "lcancelindicator") lcancel::set_indicator(value == "1");
       else if (key == "lcancel_flash_mode") saved_lcancel_flash = std::clamp(std::stoi(value), 0, 6);
       else if (key == "lcancel_success_flash") saved_lcancel_success = std::clamp(std::stoi(value), 0, 2);
@@ -5135,8 +5159,12 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nlabview " << options.lab_view << "\nlabskipscene " << options.lab_skip_scene
        << "\ninputoverlayhideborder " << options.input_overlay_hide_border
        << "\ninputoverlayvalues " << options.input_overlay_values
-       << "\ninputoverlaystick " << options.input_overlay_stick
-       << "\neffects " << options.effects_level
+       << "\ninputoverlaystick " << options.input_overlay_stick;
+  for (int i = 0; i < 4; ++i)
+    if (options.input_overlay_rect[i][2] > 0.0f)
+      file << "\ninputoverlayrect" << i << " " << options.input_overlay_rect[i][0] << " " << options.input_overlay_rect[i][1]
+           << " " << options.input_overlay_rect[i][2] << " " << options.input_overlay_rect[i][3];
+  file << "\neffects " << options.effects_level
        << "\nlightweight " << options.lightweight << "\nlowspec_look 1"
        << "\nretro " << (options.retro ? 1 : 0)
        << "\nlook_fighter " << options.look_fighter << "\nlook_stage " << options.look_stage
@@ -5665,6 +5693,44 @@ void save(const RenderOptions& options, int tab, bool page) {
 }  // namespace settings_view
 
 bool settings_frame(SettingsState& state, RenderOptions& options) {
+  // The Quit/Restart confirmation, drawn wherever the panel is (a category page or the first page, whose own
+  // Quit game button asks it too).
+  const auto confirm_popup = [&]() {
+    if (state.confirm != SettingsState::Confirm::None) {
+      const bool restart = state.confirm == SettingsState::Confirm::Restart;
+      ImGui::OpenPopup(restart ? "Restart game?" : "Quit game?");
+      const ImVec2 screen = ImGui::GetIO().DisplaySize;
+      ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+      if (ImGui::BeginPopupModal(restart ? "Restart game?" : "Quit game?", nullptr,
+                                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+        const bool engine_switch = restart && g_settings_engine_switch;
+        ImGui::TextUnformatted(engine_switch ? "Restart on the Static Recomp? The current match will end."
+                               : restart     ? "Restart now? The current match will end."
+                                             : "Quit now? The current match will end.");
+        if (!state.saved && !engine_switch) ImGui::TextDisabled("Unsaved changes in this panel will be lost.");
+        ImGui::Separator();
+        if (settings_widgets::Button(restart ? "Restart" : "Quit", ImVec2(110, 0))) {
+          state.confirm = SettingsState::Confirm::None;
+          ImGui::CloseCurrentPopup();
+          // The new process reads its settings from the file: an unsaved choice (the look or audio
+          // driver this restart is for, the code switched on for the Static Recomp) is written first.
+          if (restart && (state.dirty || engine_switch)) { state.dirty = false; state.saved = write_settings_file(state, options); }
+          g_settings_engine_switch = false;
+          if (engine_switch) {
+            if (!host::request_engine_switch()) g_settings_save_error = "Could not ask the launcher to switch engines. Pick the Static Recomp there and press Play.";
+          } else if (restart) host::request_restart();
+          else host::request_exit(0);
+        }
+        ImGui::SameLine();
+        if (settings_widgets::Button("Cancel", ImVec2(110, 0))) {
+          state.confirm = SettingsState::Confirm::None;
+          g_settings_engine_switch = false;
+          ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+      }
+    }
+  };
   const auto fullscreen_clock = [] {
     return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -6579,14 +6645,18 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     if (clean_home) {
       settings_clean_home(state);
       settings_home_quit(state, 0);
+      confirm_popup();
     } else if (dashboard_home) {
       settings_dashboard_home(state);
       settings_home_quit(state, 1);
+      confirm_popup();
     } else if (gd_home) {
       settings_gd_home(state);
       settings_home_quit(state, 2);
+      confirm_popup();
     } else if (radial_home) {
       settings_home_quit(state, 3);
+      confirm_popup();
       ImDrawList* draw = ImGui::GetWindowDrawList();
       const ImVec2 window_pos = ImGui::GetWindowPos();
       const ImVec2 window_size = ImGui::GetWindowSize();
@@ -10932,7 +11002,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("How strongly the camera shakes on hard hits, explosions and stage effects.\n"
-                          "100%% is the game's own. Offline only; network sessions use 100%%. Source Port only.");
+                          "100%% is the game's own. Works online too. Source Port only.");
     }
     // The explosion still runs, out of sight (ft_0D31.c, host.cpp apply_ko_explosions): its particles
     // draw random numbers, so leaving it out would change the match.
@@ -12007,40 +12077,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::PopStyleColor();
     }
 
-    if (state.confirm != SettingsState::Confirm::None) {
-      const bool restart = state.confirm == SettingsState::Confirm::Restart;
-      ImGui::OpenPopup(restart ? "Restart game?" : "Quit game?");
-      const ImVec2 screen = ImGui::GetIO().DisplaySize;
-      ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-      if (ImGui::BeginPopupModal(restart ? "Restart game?" : "Quit game?", nullptr,
-                                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
-        const bool engine_switch = restart && g_settings_engine_switch;
-        ImGui::TextUnformatted(engine_switch ? "Restart on the Static Recomp? The current match will end."
-                               : restart     ? "Restart now? The current match will end."
-                                             : "Quit now? The current match will end.");
-        if (!state.saved && !engine_switch) ImGui::TextDisabled("Unsaved changes in this panel will be lost.");
-        ImGui::Separator();
-        if (settings_widgets::Button(restart ? "Restart" : "Quit", ImVec2(110, 0))) {
-          state.confirm = SettingsState::Confirm::None;
-          ImGui::CloseCurrentPopup();
-          // The new process reads its settings from the file: an unsaved choice (the look or audio
-          // driver this restart is for, the code switched on for the Static Recomp) is written first.
-          if (restart && (state.dirty || engine_switch)) { state.dirty = false; state.saved = write_settings_file(state, options); }
-          g_settings_engine_switch = false;
-          if (engine_switch) {
-            if (!host::request_engine_switch()) g_settings_save_error = "Could not ask the launcher to switch engines. Pick the Static Recomp there and press Play.";
-          } else if (restart) host::request_restart();
-          else host::request_exit(0);
-        }
-        ImGui::SameLine();
-        if (settings_widgets::Button("Cancel", ImVec2(110, 0))) {
-          state.confirm = SettingsState::Confirm::None;
-          g_settings_engine_switch = false;
-          ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-      }
-    }
+    confirm_popup();
     ImGui::EndDisabled();
     if (gd_detail_theme) {
       ImGui::PopStyleVar();
@@ -12288,8 +12325,11 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     const ImGuiStyle menu_style = live_style;
     live_style = g_input_overlay_style;
     if (g_settings_old_font) ImGui::PushFont(settings_old_font());
+    bool overlay_moved = false;
     for (int i = 0; i < 4; ++i)
-      if (mask & (1 << i)) draw_input_overlay(i, row++, lone, state.open, options.input_overlay_hide_border, options.input_overlay_values, options.input_overlay_stick);
+      if (mask & (1 << i)) draw_input_overlay(i, row++, lone, state.open, options.input_overlay_hide_border, options.input_overlay_values,
+                                              options.input_overlay_stick, options.input_overlay_rect, &overlay_moved);
+    if (overlay_moved && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) state.dirty = true;   // saved once the drag ends
     if (g_settings_old_font) ImGui::PopFont();
     live_style = menu_style;
   }

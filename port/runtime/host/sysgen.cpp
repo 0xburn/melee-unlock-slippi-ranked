@@ -224,6 +224,10 @@ bool Assets::prepare(const Config& config, const Disc& disc, std::string& error)
         if (!std::filesystem::exists(folder) && sys == "SysPlayback" &&
             std::filesystem::exists(config.build_dir / "slippi_sys_playback")) folder = config.build_dir / "slippi_sys_playback";
         if (!shipped(folder, file.target).empty()) continue;
+        // A Sys folder this install does not have at all (slippi_sys_general is a source-tree name, never in a
+        // release) needs nothing generated: only the active one and the ones that exist are read. A Linux
+        // release keeps its data inside the install folder, so generating for it failed the start (0.9.990).
+        if (sys != active && !std::filesystem::exists(folder)) continue;
         if (config.data_dir.empty()) return fail(error, file.target + ": generation needs --user-dir or --sysgen-data-dir");
         const auto generated = config.data_dir / "SysGenerated" / sys / file.target;
         std::error_code path_error;
