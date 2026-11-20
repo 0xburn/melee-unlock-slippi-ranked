@@ -236,6 +236,12 @@ class Screen(unittest.TestCase):
         self.assertIn('else if (mu_f4.view.flags & MU_LOBBY_F_STARTED) why = "a match is being set up";', invite)
         self.assertIn('else if (mu_f4.view.flags & MU_LOBBY_F_INVITING) why = "the invite picker is already open";', invite)
         self.assertIn('for (i = 0; why == NULL && i < MU_LOBBY_SEATS; ++i) {', invite)
+        # Only the door whose card opened the picker says "Inviting..."; the other open doors keep "Invite".
+        self.assertIn('mu_f4.invite_door = (unsigned char) (i + 1);', invite)
+        self.assertIn('i == mu_f4_inviting_door(v, mine) ? "Inviting..." : "Invite"', texts)
+        door = body(self.inc, 'static int mu_f4_inviting_door(const MuLobbyView* v, int mine)')
+        self.assertIn('if (!v || !(v->flags & MU_LOBBY_F_INVITING)) return -1;', door)
+        self.assertIn("if (d >= 0 && d < 4 && d != mine && v->seats[d].kind == MU_LOBBY_KIND_OPEN) return d;", door)
 
     def test_a_started_match_is_never_followed_back_to_the_stage_select(self):
         self.assertIn('!(mu_f4.view.flags & (MU_LOBBY_F_HOST | MU_LOBBY_F_STARTED)) && mu_f4.view.my_seat < MU_LOBBY_SEATS', self.inc)

@@ -113,6 +113,7 @@ static struct {
     char tag_drawn[8], caption_drawn[16];     /* the words each text holds */
     char tag_logged[8], caption_logged[16];   /* the words last logged ("-": none) */
     float caption_box[4];           /* the plate: left, top, right, bottom, in world units (mu_f4_caption_draw) */
+    unsigned char invite_door;      /* the door whose card opened the invite picker + 1, 0: none */
     unsigned char stopped_seen;     /* last frame's block_hint was SEARCH_STOPPED: its 2 s note shows once */
     unsigned char route_logged[4];  /* Doubles: each seat's link route + 1 as last logged, 0: not yet */
 } mu_f4;
@@ -1232,6 +1233,7 @@ static void mu_f4_invite(int mine)
         if (i == mine || mu_f4.view.seats[i].kind != MU_LOBBY_KIND_OPEN || mu_f4_over_door(i, hand->xC, hand->x10) != 1)
             continue;
         if (mu_f4_send(&req, 1)) {
+            mu_f4.invite_door = (unsigned char) (i + 1);
             OSReport("friends lobby: invite picker for door %d\n", i + 1);
             sfxForward();
         } else {
@@ -1240,6 +1242,19 @@ static void mu_f4_invite(int mine)
         }
         return;
     }
+}
+
+/* While the invite picker is open, the one door that says "Inviting...": the door whose card opened it,
+ * while it is still open, else the first open door (the picker opened another way, or that door filled).
+ * The other open doors keep "Invite". -1: none. */
+static int mu_f4_inviting_door(const MuLobbyView* v, int mine)
+{
+    int i, d = (int) mu_f4.invite_door - 1;
+    if (!v || !(v->flags & MU_LOBBY_F_INVITING)) return -1;
+    if (d >= 0 && d < 4 && d != mine && v->seats[d].kind == MU_LOBBY_KIND_OPEN) return d;
+    for (i = 0; i < 4; ++i)
+        if (i != mine && v->seats[i].kind == MU_LOBBY_KIND_OPEN) return i;
+    return -1;
 }
 
 /* The host's Start froze a setup: once the links are up, this player locks in its pick (the selections
@@ -1888,7 +1903,7 @@ static void mu_f4_texts(int mine)
         }
         if (s && i != mine && (v->flags & MU_LOBBY_F_KNOWN) && !doubles) {
             if (s->kind == MU_LOBBY_KIND_OPEN)
-                sprintf(buf, "%s", (v->flags & MU_LOBBY_F_INVITING) ? "Inviting..." : "Invite");
+                sprintf(buf, "%s", i == mu_f4_inviting_door(v, mine) ? "Inviting..." : "Invite");
             else if (s->kind == MU_LOBBY_KIND_CPU)
                 sprintf(buf, "CPU Lv %u", (unsigned) s->level);
             else if (s->route != MU_LOBBY_ROUTE_NONE)   /* a person's link, only once it is up */
