@@ -1030,6 +1030,12 @@ class Socket {
   }
   int connection() const { return broker_ ? broker_->conn() : 0; }
   bool recoverable() const { return broker_ && broker_->close_code() == 1006; }
+  // Both close codes read 1006 from open until a close names another, so a live connection also "reads" 1006:
+  // ask this before treating 1006 as a drop.
+  bool connection_closed() const {
+    if (broker_) return broker_->closed();
+    return closed_.load();
+  }
   // Our own socket's connection died: no close frame from the room (code stays 1006) and not our close().
   bool own_dropped() const { return !broker_ && !stopping_ && close_code_ == 1006; }
   // Own socket: when it last heard anything, and last heard a relay frame (a match is passing through it).
@@ -6241,7 +6247,11 @@ bool ranked_room_retired() {
 
 bool own_room_dropped() {
   std::lock_guard<std::mutex> lock(g_mutex);
-  return g_room && g_room->socket && (g_room->socket->own_dropped() || g_room->socket->recoverable());
+  // Only a CLOSED connection with 1006 is our own drop: an open one reads 1006 too, and counting it
+  // turned every Unranked opponent's mid-match quit into "we dropped" (no Opponent left note).
+  return g_room && g_room->socket &&
+         g_room->socket->connection_closed() &&
+         (g_room->socket->own_dropped() || g_room->socket->recoverable());
 }
 
 void ranked_screen_enter() {
