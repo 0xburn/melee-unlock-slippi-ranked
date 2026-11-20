@@ -28,6 +28,10 @@ get_filename_component(MU_TOOLCHAIN_ROOT "${MU_TOOLCHAIN_ROOT}/.." ABSOLUTE)
 add_compile_options("-ffile-prefix-map=${MU_TOOLCHAIN_ROOT}=toolchain")
 set(MELEE_DECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../extern/melee" CACHE PATH "checkout of the game sources")
 set(D "${MELEE_DECOMP_DIR}")
+# Game sources kept outside the tree get the same short name they have inside it, so no build folder
+# path reaches the game's assertions or a player's crash report.
+get_filename_component(MU_DECOMP_REAL "${D}" ABSOLUTE)
+add_compile_options("-ffile-prefix-map=${MU_DECOMP_REAL}=./sourceport/extern/melee")
 if(NOT EXISTS "${D}/src/melee/gm/gmmain.c")
   message(FATAL_ERROR "melee_game: no game sources at ${D}")
 endif()

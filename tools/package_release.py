@@ -533,6 +533,16 @@ def main():
     if (folder / "SysPlayback").is_dir():
         (folder / "SysPlayback/GC").mkdir(exist_ok=True)
         shutil.copy2(coef, folder / "SysPlayback/GC/dsp_coef.bin")
+    # Slippi's three full menu files are mostly the disc's own assets: they never ship. The game rebuilds
+    # them from the player's disc with the deltas beside it (host/sysgen.cpp, deltas/manifest.json).
+    deltas = json.loads((ROOT / "port/sys_deltas/manifest.json").read_text())
+    for target in {f["target"] for f in deltas["files"]}:
+        for sys_folder in ("Sys", "SysPlayback"):
+            (folder / sys_folder / "GameFiles/GALE01" / target).unlink(missing_ok=True)
+    (folder / "deltas").mkdir()
+    shutil.copy2(ROOT / "port/sys_deltas/manifest.json", folder / "deltas/manifest.json")
+    for f in deltas["files"]:
+        shutil.copy2(ROOT / "port/sys_deltas" / f["delta"], folder / "deltas" / f["delta"])
     # Warmed pipeline recipes: the newest cache namespace that has them (the exe's shader sources
     # decide the namespace, so this must come from the same build).
     recipes = ROOT / "shadercache/recipes.bin"

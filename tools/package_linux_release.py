@@ -411,7 +411,7 @@ def main():
         shutil.copy2(coef, folder / 'SysPlayback/GC/dsp_coef.bin')
     # Two of Slippi's Sys files are mostly Nintendo's own disc assets (compliance review, 10-25): they never ship. The
     # host rebuilds them from the player's disc (host/sysgen.cpp reads deltas/ beside the program), as on the Mac.
-    deltas = {'files': []}   # 0.9.990: kept, as on Windows (was json.loads(port/sys_deltas/manifest.json))
+    deltas = json.loads((ROOT / 'port/sys_deltas/manifest.json').read_text())
     for target in {f['target'] for f in deltas['files']}:
         for sys_folder in ('Sys', 'SysPlayback'):
             (folder / sys_folder / 'GameFiles/GALE01' / target).unlink(missing_ok=True)
