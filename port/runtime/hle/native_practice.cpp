@@ -2103,6 +2103,26 @@ void tick() {
       }
 #endif
       auto room = yougame::friends::events.take_join(true);
+      // An invite into an arena (inviteMode "arena"): the arena joins its YouGame room and the player
+      // waits on Direct's character select, where the arena starts each game it puts them in.
+      if (!room.empty() && yougame::friends::events.join_arena()) {
+        host::log("arena: invite accepted (%s)", yougame::friends::events.trigger().c_str());
+        yougame::friends::events.online_menu(false);
+        slippi::online::disarm_friends_lobby();
+        slippi::online::native_cleanup_match();
+        g_lifecycle = Lifecycle{};
+        clear_search_metadata();
+        set_online_mode(2);
+        g_practice = {};
+        g_practice.valid = true;
+        g_practice.players[0].active = true;
+        g_practice.players[0].character = 0;
+        write_event_backup();
+        if (g_content_bridge) g_content_bridge(2, true);
+        slippi::arena::act(slippi::arena::Act::JoinYouGame, 0, room);
+        request_major(kOnlineMajor);
+        return;
+      }
       // A room from an invite (in the menu, the character select or the results screen) is never
       // the "Play a friend" room: only the picker below can return that one.
       bool picked = false;

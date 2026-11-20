@@ -274,6 +274,9 @@ struct Search {
   struct DoublesMatch {
     std::string url, ticket, room, home;
   } doubles_match;
+  // An arena game (slippi_arena.cpp under YouGame): the room players of this game, in ring order (ring slot n
+  // plays port n+1), found in the arena's own room (arena_room below) instead of a room of their own. 2 or 4.
+  std::vector<std::string> arena_fighters;
 };
 
 struct Player {
@@ -380,6 +383,29 @@ uint8_t local_rank();
 enum class Leave { Quit, Lost, Over, Next };
 // A Friends lobby room is parked (close_room Next or Lost) for the lobby's next search to adopt.
 bool lobby_parked();
+
+// The arena's room under YouGame (slippi_arena.cpp): one private room of friends::kArenaSeats for a whole arena,
+// made by its host and joined from an invite. It carries the arena's own messages; each game between two (or
+// four) of its players is found in the same room (Search::arena_fighters). Any thread.
+namespace arena_room {
+// Opens it in the background: `code` empty makes a new room that this player hosts, else joins that room.
+void open(const std::string& code);
+// 0 closed, 1 opening, 2 open, -1 failed or lost (`error` says why).
+int state(std::string* error = nullptr);
+void close();
+std::string code();
+std::string me();     // this player's connection in the room
+std::string host();   // the connection of the player who made it, as first seen (it never moves)
+struct Seat { std::string id, name, conn; };
+std::vector<Seat> roster();
+// Queues one arena message for one connection (empty: everyone else). Sent in batches within the room's limits.
+void send(const std::string& conn, const std::vector<uint8_t>& bytes);
+bool pop(std::string* from, std::vector<uint8_t>* bytes);
+// Opens the app's invite picker for the room in the background. invite_state: 0 idle, 1 open, 2 sent,
+// -1 refused (`error` says why).
+void invite();
+int invite_state(std::string* error = nullptr);
+}  // namespace arena_room
 // Leaves the room: the session is over (the game's online cleanup). Only Ranked reads `why`.
 void end_session(Leave why);
 

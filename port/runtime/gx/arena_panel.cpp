@@ -875,6 +875,9 @@ void page_box(float x, float y, float w, const View& v) {
   }
 }
 
+// Z's word: under YouGame friends come in through the app's invite.
+const char* add_label() { return yougame::session() ? "Invite a friend" : "Add a friend's code"; }
+
 // ---------------------------------------------------------------- input
 void send_act(Act a, uint8_t arg = 0, const std::string& text = {}) { ar::act(a, arg, text); }
 
@@ -958,7 +961,11 @@ void press(Do what, const View& v) {
   const Role role = v.active ? ar::role(v.room, v.self) : Role::Absent;
   switch (what) {
     case Do::Rules: if (v.active) { g.page = Page::Rules; g.row = 0; } break;
-    case Do::AddCode: open_code_page(); break;
+    case Do::AddCode:
+      // Under YouGame a friend comes in through the app's invite for the room, not a typed code.
+      if (yougame::session()) send_act(Act::AddCode, 0, {});
+      else open_code_page();
+      break;
     case Do::Spot:
       if (!v.active) break;
       if (role == Role::Fighter) send_act(Act::GiveUp, 0);
@@ -1277,7 +1284,7 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
       if (!more.empty()) text(mk, b.rx1 - pad - mw + px(4), line_top(mk, y, 32), more);
     }
     else { const Ink dk{Face::Body, 11, IM_COL32(111, 123, 152, 255)}; text(dk, b.rx0 + pad, line_top(dk, y, 32), "nobody"); }
-    hints_up(b.rx0 + pad, rw - pad * 2, bottom, {{'Y', "Rules"}, {'Z', "Add a friend's code"}}, g.focus ? 1.f : .55f);
+    hints_up(b.rx0 + pad, rw - pad * 2, bottom, {{'Y', "Rules"}, {'Z', add_label()}}, g.focus ? 1.f : .55f);
     if (!g.focus) z_line(b.rx0 + pad, rw - pad * 2, fy - px(4));
     const int prompt = prompt_kind(v);
     if (prompt) {
@@ -1333,7 +1340,7 @@ void draw_combined(const Bars& b, const View& v, bool corners_look) {
   const bool prompt_left = my_slot != 1 || r.doubles;   // the blue corner's player answers on the right
   std::vector<std::pair<char, std::string>> left_items =
       prompt && prompt_left && g.focus ? std::vector<std::pair<char, std::string>>{{'A', "Choose"}}
-                                       : std::vector<std::pair<char, std::string>>{{'Y', "Rules"}, {'Z', "Add a friend's code"}};
+                                       : std::vector<std::pair<char, std::string>>{{'Y', "Rules"}, {'Z', add_label()}};
   if (warmup_row_shown()) left_items.insert(left_items.begin(), {'L', "Warm up"});
   float lfoot = legend(b.lx0 + pad, lw - pad * 2, bottom, left_items);
   lfoot = z_line(b.lx0 + pad, lw - pad * 2, lfoot);
@@ -1460,7 +1467,7 @@ void draw_card(const Bars& b, const View& v, bool ring_box) {
     else { card_row(x, y, w, v, m); y += px(34); }
     if (y > y1 - px(170)) { y = more_row(x, y, w, watchers_after(r, m.id), "watching"); break; }
   }
-  std::vector<std::pair<char, std::string>> items = {x_action(v), {'Y', "Rules"}, {'Z', "Add a friend's code"}};
+  std::vector<std::pair<char, std::string>> items = {x_action(v), {'Y', "Rules"}, {'Z', add_label()}};
   const int prompt = prompt_kind(v);
   if (prompt && g.focus) items = {{'A', "Choose"}};
   if (g.focus) items.push_back({'B', "Close"});
@@ -1510,7 +1517,7 @@ void draw_split(const Bars& b, const View& v) {
     text(dash, sx, line_top(dash, sy, 28), "-"); sx += text_w(dash, "-") + px(6);
     text(sc, sx, line_top(sc, sy, 28), rr);
   }
-  float lfoot = legend(x, w, b.y1 - px(10), {{'Y', "Rules"}, {'Z', "Add a friend's code"}});
+  float lfoot = legend(x, w, b.y1 - px(10), {{'Y', "Rules"}, {'Z', add_label()}});
   lfoot = z_line(x, w, lfoot);
   {
     const std::string said = next_sentence(v);
@@ -1660,7 +1667,7 @@ void draw_not_in_room(const Bars& b, const View& v) {
   const float ry = y + th - px(11) - px(16);
   if (open) {
     Ink hk{Face::Body, 11.5f, IM_COL32(214, 220, 234, 255)};
-    const std::string label = fit_name(hk, "Add a friend's code", tw - px(16) - px(7) - px(16));
+    const std::string label = fit_name(hk, add_label(), tw - px(16) - px(7) - px(16));
     float at = cx - (px(16) + px(7) + text_w(hk, label)) * .5f;
     button_chip(at, ry, 'Z');
     text(hk, at + px(16) + px(7), line_top(hk, ry, 16), label);
@@ -1758,11 +1765,8 @@ bool wants_capture() { return g.page != Page::None; }
 uint16_t withheld_buttons() { return g.side != 0 && g.page == Page::None ? kPanelButtons : g.swallow; }
 
 void frame(const Frame& f) {
-  // Rooms are a Slippi Direct feature. Not on a YouGame row either (YouGame Friends under the launcher,
-  // session() and not only the app's active()): a room's links are Direct searches of their own beside
-  // the game's own, and a YouGame search closes the game's YouGame room (yougame_link begin_search), so
-  // the card there opened a room that never formed (0.9.990).
-  if (yougame::session()) { leave_panel(); g.page = Page::None; return; }
+  // On a YouGame row (session(): the app, or a YouGame row under the launcher) the room is the arena's own
+  // YouGame room (yougame::arena_room), never Direct searches beside the game's own.
   if (!ar::rooms_enabled()) { leave_panel(); g.page = Page::None; return; }   // tests only: rooms off
   load();
   if (const int forced = ar::test_fixture_look(); forced >= 0) {   // tests only: the fixture's cycle
