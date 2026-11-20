@@ -46,6 +46,7 @@ enum class Act : uint8_t {
   SetCharacter = 9,              // arg the character, text[0] the costume (sent by the room itself)
   OpenRoom = 20, AddCode = 21,   // the host's own (AddCode carries a connect code)
   LeaveRoom = 22,                // this player leaves the room (a host's room closes with it)
+  JoinYouGame = 23,              // under YouGame: join the arena whose room code is text (an invite)
 };
 void act(Act a, uint8_t arg = 0, const std::string& text = {});
 

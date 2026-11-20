@@ -330,6 +330,9 @@ std::deque<std::unique_ptr<Savestate>> g_available_savestates;
 PlayerSelections g_local_selections;
 bool g_local_random_stage = false;
 Matchmaking::MatchSearchSettings g_last_search;
+// The next search is an arena game under YouGame (arena_start_yg_search): its fighters and the arena's
+// whole word for the match (a player id, longer than the 18 bytes a typed code gets).
+struct ArenaNext { std::vector<std::string> fighters; std::string code; } g_arena_next;
 // The 4-player Friends lobby (yougame_lobby.h) on the 4-door select: armed by the Friends row (the host
 // holds a room) or an accepted lobby invite (a guest joins its room), until the player leaves it (LEAVE).
 // One Control lasts the whole lobby, across its matches. closed: its search failed or its room closed
@@ -1219,15 +1222,24 @@ void start_find_match(const uint8_t* payload, const std::string& friend_room = {
                            !native_profile_mode_error(effective_profile(), (int)Matchmaking::UNRANKED, false);
   std::string sj((const char*)payload + 1, 18);
   sj.erase(std::find(sj.begin(), sj.end(), '\0'), sj.end());
-  if (search.mode == Matchmaking::DIRECT && discord_join_pending()) {
+  const ArenaNext arena = std::move(g_arena_next);
+  g_arena_next = ArenaNext{};
+  if (!arena.fighters.empty()) {
+    // An arena game under YouGame: the arena's room carries it. Not a code the player typed, so it
+    // stays out of the recent codes, and a pending Discord join is left for the player's own Direct.
+    search.arena_fighters = arena.fighters;
+    sj = arena.code;
+  } else if (search.mode == Matchmaking::DIRECT && discord_join_pending()) {
     // Choosing Direct after accepting a Discord Join means join that sender. Use the queued code
     // even if the game's text field still contains its old value; the user need not retype/paste it.
     const std::string invite_sj = utf8_to_shiftjis(g_discord_join_code);
     sj.assign(invite_sj.begin(), invite_sj.begin() + std::min<size_t>(invite_sj.size(), 18));
     g_discord_join_code.clear();
   }
-  if (search.mode == Matchmaking::DIRECT) g_direct_codes->AddOrUpdateCode(shiftjis_to_utf8(sj));
-  else if (search.mode == Matchmaking::TEAMS && friend_room.empty()) g_teams_codes->AddOrUpdateCode(shiftjis_to_utf8(sj));
+  if (arena.fighters.empty()) {
+    if (search.mode == Matchmaking::DIRECT) g_direct_codes->AddOrUpdateCode(shiftjis_to_utf8(sj));
+    else if (search.mode == Matchmaking::TEAMS && friend_room.empty()) g_teams_codes->AddOrUpdateCode(shiftjis_to_utf8(sj));
+  }
   search.connect_code = sj;
   search.friend_room = friend_room;
 #if MU_SQUAD
@@ -2876,6 +2888,19 @@ bool arena_start_search(int mode, const std::string& code, bool locked, uint8_t 
     return false;
   }
   return g_matchmaking && g_matchmaking->IsSearching();
+}
+
+bool arena_start_yg_search(int mode, const std::vector<std::string>& fighters, const std::string& code, bool locked,
+                           uint8_t character, uint8_t color, uint8_t team, std::string* error) {
+  if (fighters.size() != 2 && fighters.size() != 4) return false;
+  if (!yougame::session()) {
+    if (error) *error = "The arena needs a YouGame sign-in";
+    return false;
+  }
+  g_arena_next = {fighters, utf8_to_shiftjis(code)};
+  const bool ok = arena_start_search(mode, code, locked, character, color, team, error);
+  g_arena_next = ArenaNext{};   // refused before the search read it: never carried to the player's next search
+  return ok;
 }
 
 bool local_identity(std::string* code, std::string* name) {
