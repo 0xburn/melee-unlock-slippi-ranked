@@ -1678,6 +1678,21 @@ void draw_not_in_room(const Bars& b, const View& v) {
   }
 }
 
+// A panel folded narrow over the picture (the hand not in it): a box with the room's name and, when there is
+// one, the room's short line (a failed invite), at the full text size, clear of the select's icons.
+void draw_narrow(const Bars& b, const View& v, int side, float narrow, bool notice) {
+  const float m = px(4), w = narrow - m * 2, pad = px(7), tw = w - pad * 2;
+  const float x = side ? b.rx1 - m - w : b.lx0 + m, y = b.y0 + (b.y1 - b.y0) * .3f;
+  Ink name{Face::Bold, 15, kWhite};
+  Ink nk{Face::Body, 11, kWhite};
+  const std::vector<std::string> lines = notice ? wrap(nk, v.notice, tw) : std::vector<std::string>{};
+  const float h = px(11 + 18 + 11) + (lines.empty() ? 0.f : lines.size() * px(15) + px(4));
+  steel(x, y, x + w, y + h, IM_COL32(154, 166, 192, 200));
+  text_center(name, x + w * .5f, line_top(name, y + px(11), 18), fit_name(name, "ARENA", tw));
+  float ly = y + px(11 + 18 + 4);
+  for (const std::string& l : lines) { text(nk, x + pad, line_top(nk, ly, 15), fit_name(nk, l, tw)); ly += px(15); }
+}
+
 void draw_tabs(const Bars& b, const View& v, const float alpha[2]) {
   // Hidden: a slim red and blue edge where each panel waits; it slides out when the hand comes.
   const float tw = px(10), th = px(96), ty = b.y0 + (b.y1 - b.y0) * .3f;
@@ -1800,14 +1815,15 @@ void frame(const Frame& f) {
   float bar = f.game_x0;
   const bool overlay = bar < 90.0f;
   if (overlay) bar = std::min(f.display_w * 0.17f, 220.0f);
-  // In a room those panels open over the picture: no wider than the room beside the select's outer icons
-  // (Dr. Mario and Falco on the left, Ganondorf and Young Link on the right, their frames about 31 of the
-  // select's units from its middle), so an open panel never covers a character (1280x960 two-seat walk:
-  // 217 wide over all four). Never narrower than the layouts hold (g_k 0.6, below).
+  // In a room those panels open over the picture. One the hand is not in stays narrow, inside the room
+  // beside the select's outer icons (Dr. Mario and Falco on the left, Ganondorf and Young Link on the
+  // right, their frames about 31 of the select's units from its middle), and shows only a box with the
+  // room's name and its short line (draw_narrow): 1280x960 two-seat walk, 217 wide over all four icons.
+  // With the hand in it a panel is its full width at full size: the hand is there, not on an icon.
+  float narrow = bar;
   if (overlay && v.active) {
     const float unit = (f.game_y1 - f.game_y0) / 57.3f, mid = (f.game_x0 + f.game_x1) * .5f, icons = 31.2f * unit;
-    const float beside = std::min(mid - icons, f.display_w - (mid + icons)) - 4.0f;
-    bar = std::max(std::min(bar, beside), 152.0f * 0.6f);
+    narrow = std::min(bar, std::min(mid - icons, f.display_w - (mid + icons)) - 4.0f);
   }
   // Sized by the bar's width, but never past what the bar's height holds: every layout is made for
   // a bar about 540 sheet pixels high (16:9 and 16:10 windows); the wider bars of an ultrawide
@@ -1830,13 +1846,14 @@ void frame(const Frame& f) {
   float hand_x = 0, hand_y = 0;
   const bool have_hand = ar::css_hand(&hand_x, &hand_y);
   const ImVec2 mouse = ImGui::GetIO().MousePos;
+  static const bool test_open = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_FIXTURE"); return v && std::strstr(v, ":open"); }();
+  // A short line from the room (a failed invite) opens the panel that shows it: the right in the Card and
+  // Ring looks, else the left (over the picture, its narrow box unless the hand is in it).
+  const int notice_side = v.active && !v.notice.empty() ? (g.look == Look::Card || g.look == Look::Ring ? 1 : 0) : -1;
   for (int s = 0; s < 2; ++s) {
     // Over the picture (no bars) only the hand pushed into the edge opens a panel: near the edge the
     // hand is still on the outer icons, which an opening panel would cover.
-    static const bool test_open = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_FIXTURE"); return v && std::strstr(v, ":open"); }();
-    // A short line from the room (a failed invite) opens the panel that shows it: the right in the Card and
-    // Ring looks, else the left. Neither covers an icon now (the bars above).
-    const bool notice_here = v.active && !v.notice.empty() && s == (g.look == Look::Card || g.look == Look::Ring ? 1 : 0);
+    const bool notice_here = notice_side == s;
     const bool near = g.side == s + 1 || (g.page != Page::None && s == 1) || test_open || notice_here ||
                       (!overlay && have_hand && (s == 0 ? hand_x <= -30.0f : hand_x >= 21.0f)) ||
                       (s == 0 ? mouse.x >= 0 && mouse.x < bar : mouse.x > f.display_w - bar && mouse.x <= f.display_w);
@@ -1867,14 +1884,27 @@ void frame(const Frame& f) {
   g_text_boxes.clear();
   ImDrawList* draw = dl();
   const int start = draw->VtxBuffer.Size;
+  // Wide: the hand in that panel (or the right's pages open), or the mouse in its narrow box and then
+  // anywhere over the panel. Else, over the picture in a room, narrow.
+  bool wide[2] = {true, true};
+  static bool mouse_wide[2] = {false, false};
+  for (int s = 0; s < 2; ++s) {
+    const float reach = mouse_wide[s] ? bar : narrow;
+    mouse_wide[s] = s == 0 ? mouse.x >= 0 && mouse.x < reach : mouse.x > f.display_w - reach && mouse.x <= f.display_w;
+    if (overlay && v.active && narrow < bar - 0.5f)
+      wide[s] = g.side == s + 1 || (s == 1 && g.page != Page::None) || test_open || mouse_wide[s];
+  }
   if (overlay && v.active) {   // the panels' own ground over the picture, sliding with them
-    if (shown[0] > 0.f) draw->AddRectFilled(ImVec2(b.lx0, b.y0), ImVec2(b.lx1, b.y1), IM_COL32(0, 0, 0, 200));
-    if (shown[1] > 0.f) draw->AddRectFilled(ImVec2(b.rx0, b.y0), ImVec2(b.rx1, b.y1), IM_COL32(0, 0, 0, 200));
+    if (shown[0] > 0.f && wide[0]) draw->AddRectFilled(ImVec2(b.lx0, b.y0), ImVec2(b.lx1, b.y1), IM_COL32(0, 0, 0, 200));
+    if (shown[1] > 0.f && wide[1]) draw->AddRectFilled(ImVec2(b.rx0, b.y0), ImVec2(b.rx1, b.y1), IM_COL32(0, 0, 0, 200));
   }
   if (!v.active) {
     if (g.button != 2 && (shown[1] > 0.f || g.page != Page::None)) draw_not_in_room(b, v);
     if (g.page == Page::None) draw_warmup_card(b);
-  } else if (!folded || shown[0] > 0.f || shown[1] > 0.f) {
+  } else if (!folded || shown[0] > 0.f || shown[1] > 0.f || overlay) {
+    // Over the picture the layout is drawn even with both panels folded away (slid off below): its buttons
+    // are what lets the hand push into a panel (hand_level).
+    const int layout_from = draw->VtxBuffer.Size;
     switch (g.look) {
       case Look::Combined: draw_combined(b, v, false); break;
       case Look::Corners: draw_combined(b, v, true); break;
@@ -1882,6 +1912,14 @@ void frame(const Frame& f) {
       case Look::Ring: draw_card(b, v, true); break;
       case Look::Split: draw_split(b, v); break;
     }
+    // A narrow panel's full layout goes off the window (its buttons still count); its box takes its place.
+    for (int i = layout_from; i < draw->VtxBuffer.Size; ++i) {
+      ImDrawVert& vert = draw->VtxBuffer[i];
+      const int s = vert.pos.x < g_mid ? 0 : 1;
+      if (!wide[s]) vert.pos.x += s ? 100000.0f : -100000.0f;
+    }
+    for (int s = 0; s < 2; ++s)
+      if (!wide[s] && shown[s] > 0.f) draw_narrow(b, v, s, narrow, notice_side == s);
   }
   if (g.page != Page::None) page_box(b.rx0 + px(8), b.y0 + px(10), b.rx1 - b.rx0 - px(16), v);
   // Move what was just drawn: the left half to the left, the right half to the right, each by how
