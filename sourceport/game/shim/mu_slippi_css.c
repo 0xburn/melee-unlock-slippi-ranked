@@ -36,6 +36,7 @@
 #include <sysdolphin/baselib/mobj.h>
 #include <sysdolphin/baselib/sislib.h>
 #include <mu_native.h>
+#include <mu_test_env.h>
 
 extern char mnNameNew_CurrentNameText[];
 
@@ -179,15 +180,17 @@ void mu_slippi_css_poll(void)
 int mu_online_abi_command(unsigned int command, const unsigned char* payload, unsigned int size,
                           unsigned char* response, unsigned int capacity, unsigned int* response_size);
 #define CMD_ARENA_PAIRING 0xED
-static u32 arena_pairing(int* test_room)
+static u32 arena_pairing(int* test_room, int* in_room)
 {
     static unsigned char reply[4096];   /* the host's minimum response capacity */
     unsigned int got = 0;
     *test_room = 0;
+    *in_room = 0;
     if (mu_online_abi_command(CMD_ARENA_PAIRING, NULL, 0, reply, sizeof reply, &got) != 0 || got < 4) {
         return 0;
     }
     *test_room = got >= 5 && (reply[4] & 1) != 0;   /* the host locked in a random stage itself */
+    *in_room = got >= 5 && (reply[4] & 2) != 0;     /* the player is in a room now (the count outlives it) */
     return (u32) reply[0] << 24 | (u32) reply[1] << 16 | (u32) reply[2] << 8 | reply[3];
 }
 
@@ -350,6 +353,8 @@ static int picked_stage(void)
     return (b[0x1E] << 8) | b[0x1F];
 }
 
+static int test_skip_code_entry;   /* tests only: MELEE_TEST_ARENA_PRESS_START below */
+
 /* HandleInputsOnCSS at fn_80262F44's `mnCharSel_804D6CF2 == 0 && START` test (only called when
  * mnCharSel_804D6CF2 == 0). Returns 1 when both players are ready: the caller continues into the
  * vanilla START path. */
@@ -360,6 +365,28 @@ int mu_slippi_css_inputs(unsigned int trigger)
     u8 prev, cur;
 
     mu_slippi_sss_report_pick(*char_chosen != 0);   /* an arena room's portraits */
+
+    /* Tests (MELEE_TEST_ARENA_PRESS_START=1, an arena test room that does not lock its fighters in):
+     * a connected fighter not locked in presses Start once a second, as a player locks in; a member
+     * not connected (watching the room's match) presses Start every five seconds, as a waiting player
+     * does. The connect-code entry that press opens is skipped (test_skip_code_entry). */
+    {
+        static int press = -1;
+        static u32 tick;
+        if (press < 0) {
+            press = mu_test_getenv("MELEE_TEST_ARENA_PRESS_START") != NULL;
+        }
+        tick++;
+        if (press && (st->mode == MU_SLP_MODE_DIRECT || st->mode == MU_SLP_MODE_TEAMS)) {
+            if (m->connection_state == MU_SLP_MM_CONNECTION_SUCCESS && m->local_ready == 0 && tick % 60 == 0) {
+                trigger |= HSD_PAD_START;
+            } else if (m->connection_state == MU_SLP_MM_IDLE && tick % 300 == 0) {
+                trigger |= HSD_PAD_START;
+                test_skip_code_entry = 1;
+                OSReport("arena test: Start pressed while not connected\n");
+            }
+        }
+    }
 
     /* Sounds: lock-in 1 -> 0 "back"; ANY -> ERROR "error"; CONNECTED -> ANY "back". */
     prev = dt.prev_lock_in;
@@ -401,6 +428,10 @@ int mu_slippi_css_inputs(unsigned int trigger)
             break;
         case MU_SLP_MODE_DIRECT:
         case MU_SLP_MODE_TEAMS:
+            if (test_skip_code_entry) {
+                test_skip_code_entry = 0;
+                break;
+            }
             load_code_entry();
             break;
         default:
@@ -447,13 +478,21 @@ int mu_slippi_css_inputs(unsigned int trigger)
     if ((st->mode == MU_SLP_MODE_DIRECT || st->mode == MU_SLP_MODE_TEAMS) &&
         m->connection_state == MU_SLP_MM_CONNECTION_SUCCESS) {
         static u32 arena_seen;
-        int test_room = 0;
-        const u32 pairing = arena_pairing(&test_room);
+        int test_room = 0, in_room = 0;
+        const u32 pairing = arena_pairing(&test_room, &in_room);
         if (pairing != 0 && pairing != arena_seen) {
             arena_seen = pairing;
             st->is_winner = m->local_index == 0 ? MU_SLP_WINNER_LOST : MU_SLP_WINNER_WON;
             st->chose_stage = 0;
             OSReport("arena: new pairing %u, local index %d, %s the first stage\n", (unsigned) pairing, (int) m->local_index,
+                     m->local_index == 0 ? "picks" : "waits for");
+        }
+        if (in_room && st->is_winner == MU_SLP_WINNER_NULL) {
+            /* In a room nobody may be left with neither winner nor loser: Start would do nothing
+             * (the console stalls). Decided as a new pairing is. */
+            st->is_winner = m->local_index == 0 ? MU_SLP_WINNER_LOST : MU_SLP_WINNER_WON;
+            st->chose_stage = 0;
+            OSReport("arena: no winner or loser on record, local index %d %s the stage\n", (int) m->local_index,
                      m->local_index == 0 ? "picks" : "waits for");
         }
         if (test_room && st->is_winner == MU_SLP_WINNER_LOST) {

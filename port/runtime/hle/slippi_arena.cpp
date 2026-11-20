@@ -199,6 +199,7 @@ bool in_ring_of(const std::array<uint8_t, kRingMax>& ring, uint8_t id) {
   return false;
 }            // test rooms: when this member began waiting for its viewer
 std::string g_pair_code;                  // the opponent this game last searched for
+uint32_t g_pair_games = 0;                // the room's finished games when that pairing was counted
 std::array<int, kMaxMembers> g_ping{};
 std::string g_status;
 bool g_live = false;
@@ -1165,6 +1166,13 @@ bool target(Target& t) {
 
 // Tests: MELEE_TEST_ARENA_AUTOLOCK=1 locks a real room's connected pair in at once (test rooms do it
 // always), with the character picked on the select, so hidden games play their matches.
+// Tests: MELEE_TEST_ARENA_PRESS_START=1 keeps a test room from locking its fighters in: each one locks in
+// with Start on the select, as players do (the select presses it, shim/mu_slippi_css.c), so the select's own Start path is covered.
+bool test_press_start() {
+  static const bool on = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_PRESS_START"); return v && *v == '1'; }();
+  return on;
+}
+
 bool test_autolock() {
   static const bool on = [] { const char* v = host::test_env::getenv("MELEE_TEST_ARENA_AUTOLOCK"); return v && *v == '1'; }();
   return on;
@@ -1184,6 +1192,11 @@ void steer_match() {
   const bool ours = st.mode == Matchmaking::DIRECT || st.mode == Matchmaking::TEAMS;
   Target t;
   if (!target(t)) {
+    // Out of the ring: the next pair this member plays is a new one, even against the same opponent
+    // as before. Kept, a member who sat out and came back against their last opponent took it for a
+    // rematch on their side only, and kept the winner and loser of a game long gone (or none at all,
+    // after a Start pressed while watching): their Start then did nothing on the select.
+    g_pair_code.clear();
     g_status = ring_slot(g_room, g_self) >= 0 ? "Waiting for another player" : "Watching";
     if (searching && ours && online::in_online_menus()) {
       event("out of the ring: leaving the match with %s", st.code.c_str());
@@ -1207,7 +1220,8 @@ void steer_match() {
   }
   if (searching) {
     g_status = st.state == (int)Matchmaking::CONNECTION_SUCCESS ? "Ready to fight " + t.label : "Connecting to " + t.label;
-    if (g_test.on && st.state == (int)Matchmaking::CONNECTION_SUCCESS && !st.local_ready && online::arena_lock_in(g_test.character, 0))
+    if (g_test.on && !test_press_start() && st.state == (int)Matchmaking::CONNECTION_SUCCESS && !st.local_ready &&
+        online::arena_lock_in(g_test.character, 0))
       event("locked in for %s", t.code.c_str());
     uint8_t picked = 2, colour = 0;
     if (!g_test.on && test_autolock() && st.state == (int)Matchmaking::CONNECTION_SUCCESS && !st.local_ready) {
@@ -1244,9 +1258,19 @@ void steer_match() {
   }
   std::string pairing = t.code;
   for (uint8_t id : t.others) pairing += "/" + std::to_string(id);
-  if (pairing != g_pair_code) { online::arena_note_new_pairing(); g_pair_code = pairing; }
+  // A new pairing: other opponents than last time, or the same ones with a fighter who came into the
+  // ring since this pairing was counted (tenure 0: no game finished there yet). The room is the same on
+  // every member's PC, so both sides of a pair count it alike. A rematch of fighters who stayed keeps
+  // its winner and loser.
+  bool newcomer = false;
+  for (int s = 0; s < ring_size(g_room); ++s) newcomer |= g_room.ring[s] != kNone && g_room.tenure[s] == 0;
+  if (pairing != g_pair_code || (newcomer && g_room.games != g_pair_games)) {
+    online::arena_note_new_pairing();
+    g_pair_code = pairing;
+    g_pair_games = g_room.games;
+  }
   std::string error;
-  const bool locked = g_test.on;
+  const bool locked = g_test.on && !test_press_start();
   if (online::arena_start_search(t.mode, t.code, locked, g_test.character, 0, t.team, &error)) {
     event("searching for %s (%s)", t.code.c_str(), t.mode == Matchmaking::TEAMS ? "doubles" : "singles");
     g_status = "Connecting to " + t.label;
