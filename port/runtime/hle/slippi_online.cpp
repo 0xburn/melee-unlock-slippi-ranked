@@ -3719,7 +3719,7 @@ bool handle_command(uint8_t cmd, const uint8_t* payload, uint32_t payload_len, s
           if (yougame::restart_older(g_older_offer_mode == Matchmaking::DIRECT ? "direct" : "ranked", &why)) host::request_exit(0);
           else g_forced_error = why;
         }
-      } else if (payload_len == 1 && payload[0] == 0x4A) {
+      } else if (payload_len == 1 && payload[0] == 0x4B) {
         // The Friends row: 1 while the extension's YouGame app is coming up (its channel brings the friend flow).
         q.assign(1, yougame::extension_waiting() ? 1 : 0);
         return true;
