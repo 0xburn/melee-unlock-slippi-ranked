@@ -4916,6 +4916,9 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
     }
   } arena_keep;
   if (arena) arena_keep.room = &parked;
+  // Every ticket and room hold this search asks for says whether this copy can share a match with a links:false
+  // seat (transport::with_links_flag): decide_transport below is that path. Other requests go out as they are.
+  const auto ticket_bridge = [&](json q, int ms) { return bridge(transport::with_links_flag(q), ms, cancelled); };
   json ticket;
   g_bridge_refusal.clear();   // read in the catch below: only this ticket's refusal counts
   try {
@@ -4934,14 +4937,14 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
       // Renewals ask for the same room again, never a new hold.
       // The Doubles home holds a 2-seat teams home (doubles_hold) and its partner joins by code.
       if (lobby_room.empty()) {
-        ticket = bridge(doubles_home ? friends::doubles_hold(lobby_key) : friends::lobby_hold(lobby_key), 30000, cancelled);
+        ticket = ticket_bridge(doubles_home ? friends::doubles_hold(lobby_key) : friends::lobby_hold(lobby_key), 30000);
         const std::string held = ticket.is_object() && ticket.count("room") && ticket["room"].is_string()
                                      ? ticket["room"].get<std::string>() : std::string();
         if (held.empty()) throw std::runtime_error("YouGame did not return a Friends lobby room");
         request = doubles_home ? friends::doubles_home_ticket(lobby_key, held) : friends::lobby_ticket(lobby_key, held);
       } else {
         request = doubles_home ? friends::doubles_home_ticket(lobby_key, lobby_room) : friends::lobby_ticket(lobby_key, lobby_room);
-        ticket = bridge(request, 30000, cancelled);
+        ticket = ticket_bridge(request, 30000);
       }
       std::lock_guard<std::mutex> lock(g_mutex);
       if (!g_search_generation.current(epoch) || cancelled()) throw std::runtime_error("Cancelled");
@@ -4956,12 +4959,12 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
         if (!g_search_generation.current(epoch) || cancelled()) throw std::runtime_error("Cancelled");
         friends::events.current_room(team_room);
       }
-      ticket = bridge(request, 30000, cancelled);
+      ticket = ticket_bridge(request, 30000);
     } else if (friends_mode) {
       ticket = friends::request_ticket(compat, search.friend_room, request,
           [&](const json& q, int ms) {
             if (q.value("type", "") == "mpFriend") host::log("friends: picker requested");
-            auto answer = bridge(q, ms, cancelled);
+            auto answer = ticket_bridge(q, ms);
             if (q.value("type", "") == "mpFriend") host::log("friends: invite sent");
             return answer;
           }, cancelled,
@@ -4972,7 +4975,7 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
           });
     } else {
       // The blend cancels this side when Slippi's is first: the ticket wait must not hold it up.
-      ticket = bridge(request, 30000, cancelled);
+      ticket = ticket_bridge(request, 30000);
     }
   } catch (const update::Required&) {
     // update_required: the answer's own words as the app gave them (it may say it is getting the update), else ours.
@@ -5027,7 +5030,7 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
     if (now >= until || cancelled() || (last_renew && now - last_renew < 1500)) return false;
     last_renew = now;
     const bool renewed = transport::renew_room_ticket(pass, room_code, [&] {
-      try { return bridge(request, (int)std::min<uint64_t>(3000, until - now), cancelled); }
+      try { return ticket_bridge(request, (int)std::min<uint64_t>(3000, until - now)); }
       catch (const update::Required&) { update_refused = true; throw; }
     }, [](const char* message) { host::log("%s", message); });
     if (renewed) pass_at = now_ms();
@@ -5768,7 +5771,7 @@ Match find_match(const Search& search, const std::function<bool()>& cancel_reque
           queue_generation = party.generation;
           try {
             const json queue_request = friends::doubles_queue_ticket(lobby_key, room_code, queue_generation, lobby_session->owns_local() ? 1 : party.humans);
-            const json qt = bridge(queue_request, 15000, cancelled);
+            const json qt = ticket_bridge(queue_request, 15000);
             queue_url = qt.value("url", "");
             queue_pass = qt.value("ticket", "");
             auto qs = std::make_unique<Socket>();
