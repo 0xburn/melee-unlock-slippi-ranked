@@ -850,6 +850,10 @@ bool active_native_scope_is_skinned();
 // The native game reports draw owners in the command stream (token 0xF1) instead of through the
 // render observer.
 void set_native_owner_source(bool native);
+// Predict ahead glides each fighter back as one piece, so it needs to know which draws are whose:
+// on, draw owners are tracked whatever the looks need (subframe.cpp).
+void set_predict_owners(bool on);
+bool predict_owners();
 NativePoseBridgeStats native_pose_bridge_stats();
 void finish_native_pose_scope(uint32_t scope_id);
 const uint8_t* tmem();

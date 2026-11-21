@@ -181,7 +181,8 @@ class ThreadedBackend final : public Backend {
     static const bool arrival_exact_on = [] { const char* v = std::getenv("MELEE_ARRIVAL_EXACT"); return !(v && *v == '0'); }();
     constexpr double kArrivalPhase = 0.0015 / SIM_PERIOD;
     bool pair_pending = false;   // frames[cur] is not paired with its previous frame yet
-    uint64_t arrival_exacts = 0;
+    uint64_t arrival_exacts = 0, arrival_glides = 0;
+    static const bool arrival_glide_on = [] { const char* v = std::getenv("MELEE_ARRIVAL_GLIDE"); return !(v && *v == '0'); }();
     // The frame queue's condition variable wakes this thread 0.2 ms after a push on a quiet PC and
     // 1 ms or more on a busy one. With sub-frames off (60 locked) that is added to every frame, so
     // from 1.5 ms before the next frame is expected this thread watches the push counter instead of
@@ -388,6 +389,7 @@ class ThreadedBackend final : public Backend {
       authored = live_options.subframe == SubFrameMode::Authored || live_options.subframe == SubFrameMode::AuthoredInterpolate;
       interpolate = live_options.subframe == SubFrameMode::Interpolate || live_options.subframe == SubFrameMode::AuthoredInterpolate;
       set_authored_capture_wanted(subframes && authored);
+      set_predict_owners(subframes && authored && !interpolate);   // the glide moves each fighter as one piece
       // The menus, the character select and the stage select are moved by game code that stops
       // without warning, so predicting ahead overshoots a cursor and snaps back. Interpolating
       // between the last two frames never overshoots, and a menu does not need the frame of
@@ -618,8 +620,15 @@ class ThreadedBackend final : public Backend {
       if (!arrival_exact) pair_now(true);
       if (arrival_exact) {
         double t1 = host::now_seconds();
-        renderer->submit_frame(current);
-        solver.present_as_drawn();   // the exact frame is on screen: no predict overshoot to glide back from
+        // The last in-between frame may have put a draw ahead of where this frame turns it back: the
+        // frame then goes out with that overshoot kept, to fade over this tick (predict glide).
+        if (arrival_glide_on && solver.arrival_glide(current, overrides)) {
+          renderer->submit_frame(current, overrides.data());
+          ++arrival_glides;
+        } else {
+          renderer->submit_frame(current);
+          solver.present_as_drawn();   // the exact frame is on screen: no predict overshoot to glide back from
+        }
         submit_seconds += host::now_seconds() - t1; ++cost_presented; ++arrival_exacts;
       } else if (subframes && have_prev) {
         double t0 = host::now_seconds();
@@ -838,8 +847,9 @@ class ThreadedBackend final : public Backend {
             static PredictGlideStats last_glide;
             const PredictGlideStats& g = subframe_predict_glide();
             if (g.ticks != last_glide.ticks)
-              host::log("predict glide: %llu draws glided back from an overshoot over %llu ticks (largest %.2f units)",
-                        (unsigned long long)(g.draws - last_glide.draws), (unsigned long long)(g.ticks - last_glide.ticks), g.largest);
+              host::log("predict glide: %llu draws glided back from an overshoot over %llu ticks (%llu of them from a frame presented on arrival; largest %.2f units)",
+                        (unsigned long long)(g.draws - last_glide.draws), (unsigned long long)(g.ticks - last_glide.ticks),
+                        (unsigned long long)(g.arrival_ticks - last_glide.arrival_ticks), g.largest);
             last_glide = g;
             const StageSplitAudit& a = subframe_stage_split_audit();
             if (a.checked)
@@ -885,8 +895,8 @@ class ThreadedBackend final : public Backend {
         stats_time = now; stats_presented = 0; stats_sim = 0;
       }
     }
-    host::log("renderer: %llu in-between presents dropped for a newer frame while re-posing, %llu while recording; %llu new frames presented as drawn",
-              (unsigned long long)stale_discards, (unsigned long long)submit_cancels, (unsigned long long)arrival_exacts);
+    host::log("renderer: %llu in-between presents dropped for a newer frame while re-posing, %llu while recording; %llu new frames presented on arrival (%llu of them gliding back an overshoot)",
+              (unsigned long long)stale_discards, (unsigned long long)submit_cancels, (unsigned long long)arrival_exacts, (unsigned long long)arrival_glides);
     host::log("renderer: %llu simulation frames, %llu presented frames on its own thread, %llu drained without presenting, %llu with stage held across a rollback",
               submitted, presented, (unsigned long long)drained, (unsigned long long)discontinuities);
   }
