@@ -766,8 +766,8 @@ std::vector<Row> rows_for(Page p) {
     }
     case Page::Ghosts: {
       const bool neural = neural_ghosts();
-      // A pro is playing: the way back to the game's own CPU, first on the page (player report 11-21: "how do you
-      // turn off the mang0 AI"; only CPU > Practice CPU turned it off).
+      // A pro is playing: the way back to the game's own CPU, first on the page (player report 11-21: players could
+      // not find how to stop a pro; only CPU > Practice CPU turned it off).
       if (!active_pro(c).empty())
         rows.push_back(action_row(("Stop fighting " + active_pro(c)).c_str(), kActGhostOff, "",
                                   "The CPU goes back to the game's own CPU. Pick a pro again any time."));
