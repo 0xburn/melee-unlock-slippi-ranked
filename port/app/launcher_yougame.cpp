@@ -567,6 +567,12 @@ void warm() {
   }).detach();
 }
 
+bool app_expected() {
+  bool staging;
+  { std::lock_guard<std::mutex> lock(g_mutex); staging = g_env.id == "staging"; }
+  return app::running(staging) || app::installed(staging);
+}
+
 bool start_app_quietly(std::string* detail) {
   auto say = [&](const std::string& s) { if (detail) *detail = s; };
   if (std::getenv("MELEE_LAUNCHER_TEST") && !std::getenv("MELEE_LAUNCHER_TEST_YOUGAME_APP")) { say("test run: the YouGame app is not started"); return false; }

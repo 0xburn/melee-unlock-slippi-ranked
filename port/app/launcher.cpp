@@ -1955,6 +1955,8 @@ void launch_game_now() {
       log_line("yougame: extension: %s", detail.c_str());
     }).detach();
   SetEnvironmentVariableW(L"MELEE_YOUGAME_EXTENSION", hybrid ? L"1" : nullptr);
+  // The game's Friends row waits for the app's channel (YouGame's friend flow) only when the app is there to come up.
+  SetEnvironmentVariableW(L"MELEE_YOUGAME_APP_EXPECTED", hybrid && launcher::yougame::app_expected() ? L"1" : nullptr);
   SetEnvironmentVariableW(L"MELEE_YOUGAME_POOL", nullptr);   // the bridge's hello names the rooms (pool) now
 #ifdef MELEE_YOUGAME_COMING_SOON
   const std::string yougame_bridge;   // YouGame is not open yet: the game gets no bridge
