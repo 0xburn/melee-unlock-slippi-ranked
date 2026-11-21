@@ -62,9 +62,9 @@ std::wstring g_web_base;   // the browser view's folder; each YouGame site has i
 int g_app_choice = -1;
 
 std::mutex g_mutex;
-// Staging until Melee Unlocked is listed on the production site; launcher.ini yougame_env=production
-// switches.
-Env g_env = kStaging;
+// Production (owner 11-20: YouGame moved Melee Unlocked to production; staging had no test build of a new
+// release, so its searches said "Test build not available"). launcher.ini yougame_env=staging switches back.
+Env g_env = kProduction;
 Session g_session;
 std::string g_build_json = "{}";
 // The first GitHub release whose YouGame rows play in YouGame's pools: none older can be restarted into.
@@ -418,7 +418,7 @@ const Env& env() { static thread_local Env e; std::lock_guard<std::mutex> lock(g
 
 void set_env(const std::string& id) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  const Env& next = id == "production" ? kProduction : kStaging;
+  const Env& next = id == "staging" ? kStaging : kProduction;
   if (next.id != g_env.id) g_session = Session{};
   g_env = next;
 }
@@ -435,7 +435,7 @@ bool load_line(const std::string& line) {
   }
   if (line.rfind("yougame_env=", 0) == 0) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_env = line.substr(12) == "production" ? kProduction : kStaging;
+    g_env = line.substr(12) == "staging" ? kStaging : kProduction;
     return true;
   }
   if (line.rfind("yougame_app=", 0) == 0) {
@@ -464,7 +464,7 @@ bool load_line(const std::string& line) {
 std::string ini_lines() {
   std::lock_guard<std::mutex> lock(g_mutex);
   std::string out;
-  if (g_env.id != "staging") out += "yougame_env=" + g_env.id + "\n";
+  if (g_env.id != "production") out += "yougame_env=" + g_env.id + "\n";
   if (g_extension) out += "yougame_extension=1\n";
   if (g_app_choice >= 0) out += "yougame_app=" + std::to_string(g_app_choice) + "\n";
   // An account the YouGame app gave is not kept: the launcher asks the app again when it starts.

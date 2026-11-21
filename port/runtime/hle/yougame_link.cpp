@@ -2282,7 +2282,17 @@ void channel_closed(const std::shared_ptr<channel::Connection>& conn) {
     looking = false;
   }).detach();
 }
-// One probe: production first, then staging (Linux: three folders each). The first that connects,
+// Which YouGame this build looks for. The GitHub build (MELEE_YOUGAME_START_STAGING off) uses YouGame
+// itself (its app, its channel, its site); a test build (on) uses staging only, as before.
+#ifdef MELEE_YOUGAME_START_STAGING
+constexpr bool kStartStaging = true;
+#else
+constexpr bool kStartStaging = false;
+#endif
+// Owner 11-20: everything is on YouGame's production now (staging has no test build of a new release, and
+// searches there said "Test build not available"), so the GitHub build never falls back to YouGame Staging.
+constexpr bool kStagingFallback = false;
+// One probe: production (staging only for a staging build) (Linux: three folders each). The first that connects,
 // passes the checks and answers hello is kept. One line in the log per probe.
 // quiet: the background re-look (start_channel's watch) logs only a host it finds, not each empty look.
 bool probe_channel(bool quiet = false) {
@@ -2292,6 +2302,8 @@ bool probe_channel(bool quiet = false) {
   if (where.empty()) { host::log("yougame channel: refused %s", why.c_str()); return false; }
   std::string refused;
   for (const auto& candidate : where) {
+    // Production only (kStagingFallback): a YouGame Staging app is never joined by the GitHub build.
+    if (candidate.staging != kStartStaging && !kStagingFallback) continue;
     std::unique_ptr<channel::Connection> opened;
     why.clear();
     const auto opened_as = channel::Connection::open(candidate, &opened, &why);
@@ -3306,14 +3318,6 @@ bool open_outside(const char* target) {
   return true;
 #endif
 }
-// Which YouGame this build looks for. The GitHub build (MELEE_YOUGAME_START_STAGING off) uses YouGame
-// itself and falls back to YouGame Staging only on a computer that has just the staging app (testers);
-// a test build (on) uses staging only, as before.
-#ifdef MELEE_YOUGAME_START_STAGING
-constexpr bool kStartStaging = true;
-#else
-constexpr bool kStartStaging = false;
-#endif
 // The installed app registers this link type; the one link shape it accepts
 // (desktop/src/security-policy.ts deepLinkUrl) brings it up on the game's page.
 const char* app_link(bool staging) { return staging ? "yougame-staging://g/melee-unlocked" : "yougame://g/melee-unlocked"; }
@@ -3351,7 +3355,7 @@ bool app_registered(bool staging) {
 bool app_installed_now() {
   if (g_app_stale.load()) { g_app_installed = 0; return false; }
   bool yes = app_registered(kStartStaging), staging = kStartStaging;
-  if (!yes && !kStartStaging && app_registered(true)) yes = staging = true;   // a tester with only YouGame Staging
+  if (kStagingFallback && !yes && !kStartStaging && app_registered(true)) yes = staging = true;   // a tester with only YouGame Staging
   g_app_staging = staging;
   g_app_installed = yes ? 1 : 0;
   return yes;
@@ -3456,7 +3460,7 @@ int start_once(bool staging, bool quiet, int ask = YG_START_ASK_AT_START) {
 int look_for_app(bool& staging) {
   staging = kStartStaging;
   int r = start_once(staging, true);
-  if (!kStartStaging && (r == YG_START_MISSING || r == YG_START_INSTALLED)) {
+  if (kStagingFallback && !kStartStaging && (r == YG_START_MISSING || r == YG_START_INSTALLED)) {
     // YouGame is not running. A running (or updating) YouGame Staging is the tester's app: use it.
     // With no YouGame at all, an installed YouGame Staging is used too.
     const int rs = start_once(true, true);
