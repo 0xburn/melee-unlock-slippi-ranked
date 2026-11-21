@@ -820,23 +820,30 @@ void SubFrameSolver::predict_glide(double t, std::vector<DrawMatrices>& out) con
     }
   }
   const double w = std::clamp(1.0 - (t - glide_t0_) / kGlideTicks, 0.0, 1.0);
-  shown_.clear(); shown_xyz_.clear();
+  pending_shown_.clear(); pending_xyz_.clear();
   for (size_t i = 0; i < n; ++i) {
     const uint64_t rows = glide_rows(i);
     if (!rows) continue;
     const float* glide = glide_offset_.size() == n && glide_offset_[i] != UINT32_MAX ? &glide_xyz_[glide_offset_[i]] : nullptr;
-    shown_.push_back({cur_->draws[i].identity, rows, (uint32_t)shown_xyz_.size()});
+    pending_shown_.push_back({cur_->draws[i].identity, rows, (uint32_t)pending_xyz_.size()});
     for (uint64_t r = rows; r; ) {
       unsigned long bit = 0; _BitScanForward64(&bit, r); r &= r - 1;
       for (int c = 0; c < 3; ++c) {
         float& v = out[i].pos[(size_t)bit * 4 + (size_t)c * 4 + 3];
         if (glide && w > 0) v += (float)w * *glide;
         if (glide) ++glide;
-        shown_xyz_.push_back(v);
+        pending_xyz_.push_back(v);
       }
     }
   }
-  shown_sequence_ = cur_->sequence;
+  pending_sequence_ = cur_->sequence;
+}
+
+void SubFrameSolver::present_shown() const {
+  if (!pending_sequence_) return;
+  shown_.swap(pending_shown_); shown_xyz_.swap(pending_xyz_);
+  shown_sequence_ = pending_sequence_;
+  pending_shown_.clear(); pending_xyz_.clear(); pending_sequence_ = 0;
 }
 
 bool SubFrameSolver::build(double t, bool interpolate, std::vector<DrawMatrices>& out, bool authored,
@@ -1493,7 +1500,7 @@ bool SubFrameSolver::build(double t, bool interpolate, std::vector<DrawMatrices>
     // Predict only: glide a reversed or stopped draw back from where the last presented frame put
     // it (MELEE_SUBFRAME_DIAG bit 256 turns this off for an A/B comparison).
     if (!interpolate && !menus && !(diag & 256)) predict_glide(t, out);
-    else { shown_.clear(); shown_xyz_.clear(); shown_sequence_ = 0; glide_sequence_ = 0; }
+    else { shown_.clear(); shown_xyz_.clear(); pending_shown_.clear(); pending_xyz_.clear(); shown_sequence_ = pending_sequence_ = 0; glide_sequence_ = 0; }
     if (dump_sequence() && cur_->sequence == dump_sequence() && pair_reason_.size() == n) {
       if (FILE* f = std::fopen("subframe_dump.txt", "a")) {
         std::fprintf(f, "# sequence %llu phase %.3f interpolate %d camera_holds %d stage_carry %d: i identity gen verts posmtxidx reason route dist(out,prev) dist(out,cur) dist(prev,cur) tex0\n", (unsigned long long)cur_->sequence, t, (int)interpolate, (int)camera_holds, (int)have_stage_carry);

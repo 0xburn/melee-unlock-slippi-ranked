@@ -619,6 +619,7 @@ class ThreadedBackend final : public Backend {
       if (arrival_exact) {
         double t1 = host::now_seconds();
         renderer->submit_frame(current);
+        solver.present_as_drawn();   // the exact frame is on screen: no predict overshoot to glide back from
         submit_seconds += host::now_seconds() - t1; ++cost_presented; ++arrival_exacts;
       } else if (subframes && have_prev) {
         double t0 = host::now_seconds();
@@ -645,10 +646,12 @@ class ThreadedBackend final : public Backend {
             goto take_frame;   // nothing was shown: the newer frame is picked up at once
           }
         }
+        solver.present_shown();   // only now does this build count as what the screen showed (predict glide)
         build_seconds += t1 - t0; submit_seconds += host::now_seconds() - t1; ++cost_presented;
       } else {
         double t1 = host::now_seconds();
         renderer->submit_frame(current);
+        solver.present_as_drawn();
         submit_seconds += host::now_seconds() - t1; ++cost_presented;
       }
       const double render_end = host::now_seconds();

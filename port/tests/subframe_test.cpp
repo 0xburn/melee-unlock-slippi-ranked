@@ -443,11 +443,11 @@ int main() {
     };
     gx::Frame f1 = frame_at(1, 0), f2 = frame_at(2, 0.1f), f3 = frame_at(3, 0.1f);
     gx::SubFrameSolver glide; glide.max_rotation = 3.0f;
-    glide.set_frames(&f1, &f2); glide.build(.9, false, mats, true);
+    glide.set_frames(&f1, &f2); glide.build(.9, false, mats, true); glide.present_shown();
     const float shown = mats[1].pos[3];
-    glide.set_frames(&f2, &f3); glide.build(.1, false, mats, true);
+    glide.set_frames(&f2, &f3); glide.build(.1, false, mats, true); glide.present_shown();
     const float first = mats[1].pos[3];
-    glide.build(.35, false, mats, true);
+    glide.build(.35, false, mats, true); glide.present_shown();
     const float middle = mats[1].pos[3];
     glide.build(.7, false, mats, true);
     const float settled = mats[1].pos[3];
@@ -458,9 +458,23 @@ int main() {
     check(near(settled, 0.1f), "the glide is over by half a tick");
     gx::Frame r1 = frame_at(1, 0), r2 = frame_at(2, 0), r3 = frame_at(3, 0.1f);
     gx::SubFrameSolver start; start.max_rotation = 3.0f;
-    start.set_frames(&r1, &r2); start.build(.9, false, mats, true);
+    start.set_frames(&r1, &r2); start.build(.9, false, mats, true); start.present_shown();
     start.set_frames(&r2, &r3); start.build(.1, false, mats, true);
     check(mats[1].pos[3] >= 0.1f - 1e-4f, "motion from rest is not held back by the glide");
+    // A present that never reached the screen is not what the next tick glides from: built at phase
+    // .9 but cut short, so the screen still shows the phase .5 present; and a frame presented exactly
+    // as drawn leaves nothing to glide.
+    gx::SubFrameSolver cut; cut.max_rotation = 3.0f;
+    cut.set_frames(&f1, &f2); cut.build(.5, false, mats, true); cut.present_shown();
+    const float half = mats[1].pos[3];
+    cut.build(.9, false, mats, true);   // cut short: no present_shown
+    cut.set_frames(&f2, &f3); cut.build(.1, false, mats, true);
+    check(near(mats[1].pos[3], half), "the glide starts from the last present that was shown, not one cut short");
+    gx::SubFrameSolver exact; exact.max_rotation = 3.0f;
+    exact.set_frames(&f1, &f2); exact.build(.9, false, mats, true); exact.present_shown();
+    exact.present_as_drawn();   // the new frame went out exactly as drawn on arrival
+    exact.set_frames(&f2, &f3); exact.build(.1, false, mats, true);
+    check(near(mats[1].pos[3], 0.1f), "after a frame presented as drawn there is nothing to glide back");
   }
   std::puts("sub-frame rigid fractions, cuts, blends, pairing and model-shake isolation passed");
 }

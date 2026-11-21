@@ -105,6 +105,13 @@ class SubFrameSolver {
   // from tick to tick, and alternating is what the eye reads as flicker. Matrix-driven motion
   // (cursors, sliding panels, the rotating background) still gets full sub-frame motion.
   void set_menu_mode(bool on) { menu_mode_ = on; }
+  // Predict glide bookkeeping (PredictGlideStats): what the last build put out counts as shown only
+  // once its present reaches the screen. A present cut short or dropped for a newer frame was never
+  // seen, and gliding from it would move a draw away from where it actually was on screen.
+  void present_shown() const;
+  // A present that showed the current frame exactly as the game drew it (no build): nothing was
+  // ahead of the game on screen, so the next tick has nothing to glide back.
+  void present_as_drawn() const { pending_shown_.clear(); pending_xyz_.clear(); shown_sequence_ = 0; glide_sequence_ = 0; glide_offset_.clear(); }
 
   // Exposed for tests: apply fraction t of the rigid/blended delta between prev and cur 3x4 matrices.
   static void fractional(const float prev[12], const float cur[12], double t, bool interpolate,
@@ -140,9 +147,9 @@ class SubFrameSolver {
   // Predict overshoot glide (PredictGlideStats): the translations last presented per draw, and the
   // correction each draw of this tick fades out from.
   struct ShownDraw { uint64_t identity; uint64_t rows; uint32_t offset; };
-  mutable std::vector<ShownDraw> shown_;
-  mutable std::vector<float> shown_xyz_;
-  mutable uint64_t shown_sequence_ = 0, glide_sequence_ = 0;
+  mutable std::vector<ShownDraw> shown_, pending_shown_;
+  mutable std::vector<float> shown_xyz_, pending_xyz_;
+  mutable uint64_t shown_sequence_ = 0, pending_sequence_ = 0, glide_sequence_ = 0;
   mutable double glide_t0_ = 0;
   mutable std::vector<uint32_t> glide_offset_;   // per draw, into glide_xyz_; UINT32_MAX none
   mutable std::vector<float> glide_xyz_;
