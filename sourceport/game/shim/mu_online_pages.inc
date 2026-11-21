@@ -67,6 +67,10 @@ static int pages_slippi_open(void)
 static int pages_start(void)
 {
     pages_load_prefs();   /* the slider's remembered value */
+    /* Not signed in to YouGame but signed in to Slippi: Slippi's page (Teams, Unranked, Direct) first.
+     * Players without YouGame opened on rows that all refused, and asked where Slippi Doubles went
+     * (player report, 0.9.992). Signed in to YouGame: its page first, as before. Z flips either way. */
+    if (!agent_copy && !(yg_flags & YG_ROWS_OPEN) && slp.app_state == MU_SLP_APP_LOGGED_IN) return 1;
     return 0;
 }
 

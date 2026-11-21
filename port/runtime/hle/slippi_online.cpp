@@ -2322,7 +2322,10 @@ void prepare_online_status(std::vector<uint8_t>& q) {
   uint8_t app_state = 0;
   if (g_user->IsLoggedIn()) app_state = 1;   // version check: this port speaks SLIPPI_SEMVER; the server enforces the rest
   q.push_back(app_state);
-  std::string name = convert_string_for_game(me.display_name, 15);
+  // A YouGame copy shows the YouGame name, as the match does (local_name above): it showed the Slippi
+  // account's name on the character select (player report, 0.9.992).
+  const std::string yg_name = yougame::session() && yougame::launcher() ? yougame::identity().name : std::string();
+  std::string name = convert_string_for_game(yg_name.empty() ? me.display_name : yg_name, 15);
   q.insert(q.end(), name.begin(), name.end());
   std::string code = convert_connect_code_for_game(me.connect_code);
   q.insert(q.end(), code.begin(), code.end());
