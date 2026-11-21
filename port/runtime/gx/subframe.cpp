@@ -37,6 +37,7 @@ namespace gx {
 EndpointStats& subframe_endpoint_stats() { static EndpointStats e; return e; }
 StageSplitAudit& subframe_stage_split_audit() { static StageSplitAudit a; return a; }
 PhaseFlipStats& subframe_phase_flips() { static PhaseFlipStats p; return p; }
+PredictGlideStats& subframe_predict_glide() { static PredictGlideStats p; return p; }
 // Development measurement, off unless MELEE_AUDIT_STAGE_SPLIT is in the environment: reports how
 // far apart the solver's routes place pieces of the stage that are standing still in the world.
 // Development bisect, off unless MELEE_SUBFRAME_DIAG is set: bit 1 no stage object sampling,
@@ -741,6 +742,103 @@ void run_pairing_chunks(size_t n, const std::function<void(size_t, size_t)>& fn)
 }
 }  // namespace
 
+// The position rows of draw i that the predict glide follows: paired draws seen through a world
+// camera. Not the HUD (orthographic, screen space), and not a rebuilt vertex stream, whose rows can
+// be remapped between ticks so the previous tick's rows may belong to another object.
+uint64_t SubFrameSolver::glide_rows(size_t i) const {
+  const Pair& p = pairs_[i];
+  if (p.prev_draw < 0 || p.blend_vertices || cur_->draws[i].xf_regs[0x26] != 0) return 0;
+  uint64_t rows = p.pos_slots;
+  for (uint64_t r = rows; r;) {   // a matrix that does not fit the array is left alone
+    unsigned long bit = 0; _BitScanForward64(&bit, r); r &= r - 1;
+    if (bit + 3 > 64) rows &= ~(1ull << bit);
+  }
+  return rows;
+}
+
+// Predicting presents a draw at its latest pose plus the phase's share of this tick's motion. The
+// next tick shows whether that motion went on. When it did not (Falcon turning in a dash dance,
+// Peach stopping into a float), the last presented frame put the draw beyond where the game ever
+// had it, and the first frame of the new tick puts it back: a jump of up to a whole frame of motion
+// inside one presented frame, against the eighth of a frame every other presented frame moves. At
+// 480 presented frames a second that is the character visibly snapping back on every turn, and on
+// screen it reads as the picture disagreeing with the game. Instead, the part of the jump that
+// undoes the overshoot is kept as an offset that fades to nothing over half a tick. Only that part:
+// a draw that starts moving (a hit, a dash from standing) was never shown ahead of the game, and
+// gliding it would only delay it. A large correction is a teleport, a respawn or a cut, and snaps.
+static constexpr double kGlideTicks = 0.5;
+static constexpr float kGlideMax = 12.0f;
+static constexpr float kGlideMin = 0.01f;
+void SubFrameSolver::predict_glide(double t, std::vector<DrawMatrices>& out) const {
+  const size_t n = cur_->draws.size();
+  if (glide_sequence_ != cur_->sequence) {
+    glide_sequence_ = cur_->sequence;
+    glide_t0_ = t;
+    glide_offset_.assign(n, UINT32_MAX);
+    glide_xyz_.clear();
+    if (prev_ && shown_sequence_ + 1 == cur_->sequence && !shown_.empty()) {
+      std::sort(shown_.begin(), shown_.end(), [](const ShownDraw& a, const ShownDraw& b) { return a.identity < b.identity; });
+      std::vector<std::pair<uint64_t, uint32_t>> ids;
+      ids.reserve(n);
+      for (size_t i = 0; i < n; ++i) if (glide_rows(i)) ids.emplace_back(cur_->draws[i].identity, (uint32_t)i);
+      std::sort(ids.begin(), ids.end());
+      PredictGlideStats& g = subframe_predict_glide();
+      ++g.ticks;
+      for (size_t k = 0; k < ids.size(); ++k) {
+        // An identity drawn twice in either tick cannot be matched to one presented pose.
+        if ((k > 0 && ids[k - 1].first == ids[k].first) || (k + 1 < ids.size() && ids[k + 1].first == ids[k].first)) continue;
+        const uint64_t id = ids[k].first; const size_t i = ids[k].second;
+        auto it = std::lower_bound(shown_.begin(), shown_.end(), id, [](const ShownDraw& a, uint64_t v) { return a.identity < v; });
+        if (it == shown_.end() || it->identity != id || (it + 1 != shown_.end() && (it + 1)->identity == id)) continue;
+        const uint64_t rows = glide_rows(i);
+        if (it->rows != rows) continue;
+        const DrawCall& pd = prev_->draws[pairs_[i].prev_draw];
+        const uint32_t offset = (uint32_t)glide_xyz_.size();
+        bool any = false, sane = true; float largest = 0;
+        const float* shown = &shown_xyz_[it->offset];
+        for (uint64_t r = rows; r; ) {
+          unsigned long bit = 0; _BitScanForward64(&bit, r); r &= r - 1;
+          for (int c = 0; c < 3; ++c, ++shown) {
+            const size_t idx = (size_t)bit * 4 + (size_t)c * 4 + 3;
+            const float overshoot = *shown - pd.posMatrices[idx];   // shown beyond the game's own pose
+            const float jump = *shown - out[i].pos[idx];            // what the new tick would snap back
+            float glide = 0;
+            // Below a hundredth of a unit is rounding in the two poses, not an overshoot anyone sees.
+            if (std::isfinite(overshoot) && std::isfinite(jump) && overshoot * jump > 0 && std::abs(jump) >= kGlideMin)
+              glide = jump > 0 ? std::min(jump, overshoot) : std::max(jump, overshoot);
+            if (std::abs(glide) > kGlideMax) sane = false;
+            if (glide != 0) any = true;
+            largest = std::max(largest, std::abs(glide));
+            glide_xyz_.push_back(glide);
+          }
+        }
+        if (!any || !sane) { glide_xyz_.resize(offset); continue; }
+        glide_offset_[i] = offset;
+        ++g.draws;
+        g.largest = std::max(g.largest, largest);
+      }
+    }
+  }
+  const double w = std::clamp(1.0 - (t - glide_t0_) / kGlideTicks, 0.0, 1.0);
+  shown_.clear(); shown_xyz_.clear();
+  for (size_t i = 0; i < n; ++i) {
+    const uint64_t rows = glide_rows(i);
+    if (!rows) continue;
+    const float* glide = glide_offset_.size() == n && glide_offset_[i] != UINT32_MAX ? &glide_xyz_[glide_offset_[i]] : nullptr;
+    shown_.push_back({cur_->draws[i].identity, rows, (uint32_t)shown_xyz_.size()});
+    for (uint64_t r = rows; r; ) {
+      unsigned long bit = 0; _BitScanForward64(&bit, r); r &= r - 1;
+      for (int c = 0; c < 3; ++c) {
+        float& v = out[i].pos[(size_t)bit * 4 + (size_t)c * 4 + 3];
+        if (glide && w > 0) v += (float)w * *glide;
+        if (glide) ++glide;
+        shown_xyz_.push_back(v);
+      }
+    }
+  }
+  shown_sequence_ = cur_->sequence;
+}
+
 bool SubFrameSolver::build(double t, bool interpolate, std::vector<DrawMatrices>& out, bool authored,
                            const std::function<bool()>* cancelled) const {
   out.resize(cur_ ? cur_->draws.size() : 0);
@@ -1392,6 +1490,10 @@ bool SubFrameSolver::build(double t, bool interpolate, std::vector<DrawMatrices>
     }
     last_posed_ = routes_;
     last_build_phase_ = t;
+    // Predict only: glide a reversed or stopped draw back from where the last presented frame put
+    // it (MELEE_SUBFRAME_DIAG bit 256 turns this off for an A/B comparison).
+    if (!interpolate && !menus && !(diag & 256)) predict_glide(t, out);
+    else { shown_.clear(); shown_xyz_.clear(); shown_sequence_ = 0; glide_sequence_ = 0; }
     if (dump_sequence() && cur_->sequence == dump_sequence() && pair_reason_.size() == n) {
       if (FILE* f = std::fopen("subframe_dump.txt", "a")) {
         std::fprintf(f, "# sequence %llu phase %.3f interpolate %d camera_holds %d stage_carry %d: i identity gen verts posmtxidx reason route dist(out,prev) dist(out,cur) dist(prev,cur) tex0\n", (unsigned long long)cur_->sequence, t, (int)interpolate, (int)camera_holds, (int)have_stage_carry);

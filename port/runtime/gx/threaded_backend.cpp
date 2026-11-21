@@ -732,6 +732,12 @@ class ThreadedBackend final : public Backend {
             if (compared) host::log("phase flips: %llu of %llu draws changed route between two frames of the same tick (%llu of them skinned)",
                                     (unsigned long long)flipped, (unsigned long long)compared, (unsigned long long)skinned);
             last_flips = f;
+            static PredictGlideStats last_glide;
+            const PredictGlideStats& g = subframe_predict_glide();
+            if (g.ticks != last_glide.ticks)
+              host::log("predict glide: %llu draws glided back from an overshoot over %llu ticks (largest %.2f units)",
+                        (unsigned long long)(g.draws - last_glide.draws), (unsigned long long)(g.ticks - last_glide.ticks), g.largest);
+            last_glide = g;
             const StageSplitAudit& a = subframe_stage_split_audit();
             if (a.checked)
               host::log("stage split audit: %llu of %llu static draws placed off the camera transform, worst %.4f units",

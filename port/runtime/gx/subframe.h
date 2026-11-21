@@ -65,6 +65,13 @@ struct StageSplitAudit { uint64_t checked = 0, split = 0; float worst = 0; };
 // inside a single tick.
 struct PhaseFlipStats { uint64_t compared = 0, flipped = 0, flipped_skinned = 0; };
 PhaseFlipStats& subframe_phase_flips();
+// Predict overshoot: in the predicting modes a presented frame shows where a draw will be if it
+// keeps this tick's motion. When the next tick shows it reversed or stopped (a dash dance turning,
+// Peach starting a float), the drawn pose would jump back by up to a whole frame of motion in one
+// presented frame. That jump is glided out over half a tick instead. Counts the draws glided and
+// the largest correction, in view-space units.
+struct PredictGlideStats { uint64_t ticks = 0, draws = 0; float largest = 0; };
+PredictGlideStats& subframe_predict_glide();
 StageSplitAudit& subframe_stage_split_audit();
 
 class SubFrameSolver {
@@ -130,6 +137,17 @@ class SubFrameSolver {
   mutable std::vector<uint8_t> last_posed_, routes_;
   std::vector<int> pair_reason_;   // development dump only
   mutable double last_build_phase_ = -1;
+  // Predict overshoot glide (PredictGlideStats): the translations last presented per draw, and the
+  // correction each draw of this tick fades out from.
+  struct ShownDraw { uint64_t identity; uint64_t rows; uint32_t offset; };
+  mutable std::vector<ShownDraw> shown_;
+  mutable std::vector<float> shown_xyz_;
+  mutable uint64_t shown_sequence_ = 0, glide_sequence_ = 0;
+  mutable double glide_t0_ = 0;
+  mutable std::vector<uint32_t> glide_offset_;   // per draw, into glide_xyz_; UINT32_MAX none
+  mutable std::vector<float> glide_xyz_;
+  uint64_t glide_rows(size_t i) const;
+  void predict_glide(double t, std::vector<DrawMatrices>& out) const;
   bool menu_mode_ = false;
   mutable SubFrameStats stats_;
 };
