@@ -56,8 +56,9 @@ bool app_used_before();
 bool start_app_quietly(std::string* detail);
 // The launcher starting: its browser view's folder holds a session (a sign-in made before) that launcher.ini
 // does not name. Asks the site through the hidden view, as warm() does (never a window); true when it answered
-// signed in (account() is that account then). Blocking: never on the window thread.
-bool resume_web();
+// signed in (account() is that account then). Blocking: never on the window thread. *why (when given) says
+// why not, for the launcher's log: no WebView2, no saved sign-in, or YouGame's answer (0: no answer in time).
+bool resume_web(std::string* why = nullptr);
 // YouGame's own sign-in page in a browser view this launcher owns (launcher_yougame_web.h). The player
 // signs in there once; the view keeps the session in its folder, and every YouGame request goes
 // through a page of the site in that view. Windows; elsewhere web_sign_in_available() is false.

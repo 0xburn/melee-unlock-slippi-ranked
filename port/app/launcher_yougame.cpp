@@ -568,19 +568,32 @@ bool start_app_quietly(std::string* detail) {
 bool app_declined() { std::lock_guard<std::mutex> lock(g_mutex); return g_app_choice == 0; }
 bool app_used_before() { std::lock_guard<std::mutex> lock(g_mutex); return g_app_choice == 1; }
 
-bool resume_web() {
+bool resume_web(std::string* why) {
+  std::string local;
+  if (!why) why = &local;
   {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_session.web || g_session.app) return false;
+    if (g_session.web || g_session.app) { *why = "already connected"; return false; }
   }
   use_web_folder();
-  if (!web::supported() || !web::remembered()) return false;
+  if (!web::supported()) { *why = "Microsoft Edge WebView2 is not available on this computer"; return false; }
+  if (!web::remembered()) { *why = "no saved sign-in in the launcher's browser view (Connect signs in)"; return false; }
   Env e;
   { std::lock_guard<std::mutex> lock(g_mutex); e = effective_env(g_env); }
   // The site's own answer for the view's saved session (as warm() asks it): 200 with a code is signed in.
   const web::Reply r = web::request(e.site, "GET", "/api/multiplayer/code", "");
   const json j = parse_or_empty(r.body);
-  if (r.status != 200 || !j.is_object() || !j.count("code") || !j["code"].is_string()) return false;
+  if (r.status != 200 || !j.is_object() || !j.count("code") || !j["code"].is_string()) {
+    // The answer's first line only (an error page can be long); never the session itself.
+    std::string body = r.body.substr(0, r.body.find('\n')).substr(0, 160);
+    *why = r.status == 0 ? "YouGame did not answer (no connection, or no answer within the time limit" +
+                               (body.empty() ? std::string(")") : ": " + body + ")")
+         : r.status == 401 || r.status == 403 ? "YouGame answered " + std::to_string(r.status) +
+                                                    ": the saved sign-in has ended (Connect signs in again)"
+         : r.status == 200 ? "YouGame answered 200 without an account code"
+         : "YouGame answered " + std::to_string(r.status) + (body.empty() ? std::string() : ": " + body);
+    return false;
+  }
   {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_session.web || g_session.app) return true;

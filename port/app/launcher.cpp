@@ -220,20 +220,24 @@ void invalidate(RECT r) { if (g_main) InvalidateRect(g_main, &r, FALSE); }
 void log_line(const char* fmt, ...) {
   char buf[4096]; va_list ap; va_start(ap, fmt); std::vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);
   PostMessageW(g_main, WM_APP_LOG, 0, (LPARAM) new std::string(std::string(buf) + "\r\n"));
-  // YouGame's lines also go to launcher-yougame.log beside the launcher (what Connect and the start did, step by
-  // step), started again when it passes 256 KB.
-  if (std::strncmp(buf, "yougame", 7) == 0 && !g_dir.empty()) {
-    static std::mutex m;
-    std::lock_guard<std::mutex> lock(m);
-    const std::string path = g_dir + "\\launcher-yougame.log";
+  // Every line also goes to launcher.log beside the launcher (a Play that never started a game leaves no game log;
+  // this says why), and YouGame's lines to launcher-yougame.log too (what Connect and the start did, step by step).
+  // Each is started again when it passes 256 KB. Send logs includes both (launcher_crash_zip.h kParts).
+  if (g_dir.empty()) return;
+  static std::mutex m;
+  std::lock_guard<std::mutex> lock(m);
+  SYSTEMTIME t; GetLocalTime(&t);
+  const auto append = [&](const char* name) {
+    const std::string path = g_dir + "\\" + name;
     const char* mode = "ab";
     if (FILE* probe = std::fopen(path.c_str(), "rb")) { std::fseek(probe, 0, SEEK_END); if (std::ftell(probe) > 256 * 1024) mode = "wb"; std::fclose(probe); }
     if (FILE* f = std::fopen(path.c_str(), mode)) {
-      SYSTEMTIME t; GetLocalTime(&t);
       std::fprintf(f, "%04d-%02d-%02d %02d:%02d:%02d %s\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, buf);
       std::fclose(f);
     }
-  }
+  };
+  append("launcher.log");
+  if (std::strncmp(buf, "yougame", 7) == 0) append("launcher-yougame.log");
 }
 
 std::string repo_root();   // defined below; load_ini looks for a disc beside a source checkout
@@ -1276,12 +1280,14 @@ void yougame_sign_in_thread(bool use_app) {
   const std::string no_webview = narrow(launcher::lang::txw(L"Signing in to YouGame needs Microsoft Edge WebView2, which this computer does not have. Install it from Microsoft (it is free), then press Connect again."));
   const std::wstring unlisted = launcher::lang::txw(L"YouGame has not listed this version yet: sign in here once to play it now.");
   std::thread([use_app_asked = use_app, again = g_yg_again, version = yougame_build_version(), no_webview, unlisted] {
-    if (launcher::yougame::resume_web()) {
+    std::string resume_why;
+    if (launcher::yougame::resume_web(&resume_why)) {
       log_line("yougame: Connect: the launcher's own saved sign-in answered signed in");
       g_yg_connecting = false;
       PostMessageW(g_main, WM_APP_YOUGAME_WEB, 1, (LPARAM)new std::string());
       return;
     }
+    log_line("yougame: Connect: no saved sign-in to use (%s)", resume_why.c_str());
     std::wstring title;
     // Owner 11-19: while YouGame does not list this build nothing of the YouGame app runs: it is never started
     // or asked (a running app overlays any Melee Unlocked window); the launcher's own sign-in is the way.
@@ -2336,8 +2342,11 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         std::thread([version = yougame_build_version()] {
           std::string how;
           // Owner 11-20: only the launcher's own saved sign-in (the YouGame app is never asked for an account).
-          if (launcher::yougame::resume_web()) how = "the launcher's own saved sign-in answered signed in";
-          else how = "no saved sign-in (Connect opens the launcher's own sign-in)";
+          std::string why;
+          const ULONGLONG asked = GetTickCount64();
+          if (launcher::yougame::resume_web(&why)) how = "the launcher's own saved sign-in answered signed in";
+          else how = "not connected: " + why;
+          how += " (" + std::to_string((GetTickCount64() - asked) / 1000) + " s)";
           (void)version;
           log_line("yougame: at start: %s", how.c_str());
           g_yg_connecting = false;
