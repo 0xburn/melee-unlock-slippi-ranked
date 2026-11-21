@@ -1516,8 +1516,12 @@ void draw_bars(ImDrawList* dl, const Frame& f, std::vector<Row>& rows, float a) 
     const float top = block_top + i * pitch;
     const float l = right - w + an.x + slide, r = right + an.x - 16.0f * u + slide;
     const Row& row = rows[(size_t)index];
-    // Leave room for the value even with a long label; draw_bar scales the label to fit beside it.
-    const std::string shown_value = fit(value_of(row), h * 0.5f * 0.84f, (r - l) * 0.35f);
+    // Leave room for the value even with a long label; draw_bar scales the label to fit beside it. The value takes
+    // what the label leaves (up to 60% of the bar, never under 35%), so "Dash dance" or "Forward throw" shows whole
+    // beside a short label instead of ending in "..." (owner 11-21: the cut values looked bad).
+    const float label_room = (r - l) - 82.0f * u - text_width(h * 0.5f, row.label.c_str());
+    const float value_room = std::max((r - l) * 0.35f, std::min(label_room, (r - l) * 0.60f));
+    const std::string shown_value = fit(value_of(row), h * 0.5f * 0.84f, value_room);
     draw_bar(dl, l, top, r, h, u, lit, row.label.c_str(), shown_value, row.enabled, ba, false);
     g_bar_hits.push_back({index, ImVec2(l, top), ImVec2(r, top + h)});
     if (lit) draw_ring(dl, ImVec2(r - 6.0f * u, top + h * 0.5f), u, t, ba);
