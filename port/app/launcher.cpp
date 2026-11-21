@@ -1953,10 +1953,19 @@ void launch_game_now() {
   // and match state, pause): MELEE_YOUGAME_EXTENSION=1 with MELEE_YOUGAME_MATCH_BRIDGE=1 and the bridge
   // (yougame_link.cpp routed_to_bridge). The app is started quietly (tray, no window) when installed and not
   // running; closed or gone mid-session, the game goes on through the bridge. Unticked: no app, no channel.
-  // Owner 11-20: the extension is only the game's own YouGame button (top left) and its menu; the launcher never
-  // starts the YouGame app for it. The app opens only from Open YouGame (or the player's own start).
+  // Owner 11-21: "Launch with YouGame extension" works whether the YouGame app is open or not, and never opens the
+  // whole app. The button and Shift+Tab menu are the app's, over the game: when the app is installed and not running,
+  // it is started in the background with its own tray link (tray icon only, no window), on a worker so the game
+  // starts at once; the game reaches its channel when it comes up. Matches stay on the launcher's bridge either way.
+  // The app's window opens only from Open YouGame (or the player's own start).
   const bool hybrid = !vanilla_active() && launcher::yougame::extension();
   const std::string app_channel = hybrid ? yougame_app_channel() : std::string();   // for the log line only
+  if (hybrid && app_channel.empty())
+    std::thread([] {
+      std::string detail;
+      launcher::yougame::start_app_quietly(&detail);
+      log_line("yougame: extension: %s", detail.c_str());
+    }).detach();
   SetEnvironmentVariableW(L"MELEE_YOUGAME_EXTENSION", hybrid ? L"1" : nullptr);
   SetEnvironmentVariableW(L"MELEE_YOUGAME_POOL", nullptr);   // the bridge's hello names the rooms (pool) now
 #ifdef MELEE_YOUGAME_COMING_SOON
@@ -1968,7 +1977,7 @@ void launch_game_now() {
   const std::string yougame_bridge = vanilla_active() ? std::string() : launcher::yougame::bridge_url();
   const std::string yougame_decision = vanilla_active() ? std::string()
       : hybrid ? "YouGame: the game uses the launcher's bridge for matches and the YouGame app's channel for the extension (" +
-                     (app_channel.empty() ? std::string("the app is not running; it is not started for the extension") : "the " + app_channel + " app is running") + ")."
+                     (app_channel.empty() ? std::string("the app is not running; it is started in the background (tray, no window) when installed") : "the " + app_channel + " app is running") + ")."
       : std::string("YouGame: the game uses the launcher's bridge (extension off: no YouGame app).");
 #endif
   if (!yougame_decision.empty()) log_line("%s", yougame_decision.c_str());
