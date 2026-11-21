@@ -2685,6 +2685,16 @@ void Matchmaking::startMatchmaking() {
     startYouGameMatchmaking();
     return;
   }
+  // A YouGame row (the menu's pick 1: YouGame's Ranked, Unranked, Friends, Squad Strike) searches YouGame only. With
+  // YouGame not connected at that moment (extension on with the app still starting or closed, no launcher bridge),
+  // it used to fall through to Slippi's own search of the same mode: Friends, a Direct code search under the
+  // launcher, opened a Slippi Direct match (11-21, Seimy). It stops here and says why; the row works again once
+  // YouGame is connected (the game finds a started app's channel by itself within seconds).
+  if (yougame::menu_service() == 1 && !yougame::session() && !yougame::active() && !local_peer.enabled) {
+    host::log("yougame: a YouGame row was picked while YouGame is not connected: not searched (never on Slippi)");
+    fail("YouGame is not connected yet. Try again, or Connect YouGame in the launcher.");
+    return;
+  }
   if (!yougame::session() && !local_peer.enabled) {
     std::string error;
     if (!user_ || !user_->CheckSessionCompatibility(&error)) {
