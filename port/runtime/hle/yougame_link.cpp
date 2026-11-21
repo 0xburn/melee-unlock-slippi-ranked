@@ -271,6 +271,9 @@ const bool kNoApp = [] { const char* v = std::getenv("MELEE_YOUGAME_EXTENSION");
 #else
 const bool kNoApp = false;
 #endif
+// The launcher found the extension's app running or installed (MELEE_YOUGAME_APP_EXPECTED=1): its channel is
+// expected, so the Friends row waits for it (extension_waiting) rather than opening the connect-code search.
+const bool kAppExpected = [] { const char* v = std::getenv("MELEE_YOUGAME_APP_EXPECTED"); return v && v[0] == '1'; }();
 std::atomic<bool> g_channel_allowed{false};          // start(): nothing started this game
 std::mutex g_channel_mutex;
 std::shared_ptr<channel::Connection> g_channel;      // g_channel_mutex; set while probing and while up
@@ -3637,6 +3640,7 @@ bool coming_soon_build() {
 bool available() { return active() || launcher(); }
 bool session() { return active() || (launcher() && g_launcher_session.load()); }
 bool friends_flow() { return active() || (launcher() && g_channel_up.load()); }
+bool extension_waiting() { return kAppExpected && !kNoApp && g_match_bridge && g_channel_allowed.load() && !g_channel_up.load(); }
 std::string build_version() {
 #ifdef MELEE_PORT_VERSION
   return MELEE_PORT_VERSION;
