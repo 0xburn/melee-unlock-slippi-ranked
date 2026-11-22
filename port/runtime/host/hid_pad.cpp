@@ -234,11 +234,11 @@ int8_t hid_stick_value(long logical_min, long logical_max, int bits, unsigned lo
 }
 
 int8_t hid_stick_encoding(long logical_min, long logical_max, int bits, unsigned long rest) {
-  auto far = [](int v) { return v < 0 ? -v : v; };
-  const int declared = far(hid_stick_value(logical_min, logical_max, bits, rest, kStickDeclared));
+  auto away = [](int v) { return v < 0 ? -v : v; };
+  const int declared = away(hid_stick_value(logical_min, logical_max, bits, rest, kStickDeclared));
   if (declared <= 64) return kStickDeclared;   // a normal pad (or a stick held at plug-in): as declared
-  const int twos = far(hid_stick_value(logical_min, logical_max, bits, rest, kStickTwos));
-  const int offset = far(hid_stick_value(logical_min, logical_max, bits, rest, kStickOffset));
+  const int twos = away(hid_stick_value(logical_min, logical_max, bits, rest, kStickTwos));
+  const int offset = away(hid_stick_value(logical_min, logical_max, bits, rest, kStickOffset));
   if (twos <= 16 && twos <= offset) return kStickTwos;
   if (offset <= 16) return kStickOffset;
   return kStickDeclared;
