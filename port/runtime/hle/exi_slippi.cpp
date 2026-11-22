@@ -13,6 +13,7 @@
 #include "unlock_code_policy.h"
 #include "offline_results_code_policy.h"
 #include "host.h"
+#include "cosmetic_mods.h"
 #include "slippi_hsd_links.h"
 #include "vcdiff.h"
 #include "sysgen_boot.h"
@@ -742,16 +743,38 @@ std::vector<uint8_t> build_game_file_contents(const std::string& name) {
 }
 
 // One file of the player's disc by name, for the asset links below (Slippi Dolphin reads it with
-// FileMon::ReadFileWithName). The retail base when a mod disc runs on one, as for the .diff files
-// above; else, or when the base lacks it, the mounted disc.
+// FileMon::ReadFileWithName, from the running disc): the mod's file, then the mounted disc as the player's
+// cosmetics serve it, then the disc's own copy. build_game_file's retry reads the retail base and the disc only.
+thread_local bool t_links_disc_only = false;   // build_game_file's retry: the disc's copies only, never cosmetics
 bool read_disc_file_by_name(const std::string& name, std::vector<uint8_t>* out) {
   out->clear();
-  if (!host::options.mod_base_iso.empty() &&
+  // What the game itself loads first, as Slippi Dolphin reads the running disc: the Source Port's mod disc, else (the
+  // Static Recomp, where the mod disc is the mounted one) the mounted disc through the player's cosmetics below.
+  // The retail base only on build_game_file's disc-only retry.
+  if (!t_links_disc_only) {
+    if (host::mod_layer_file && host::mod_layer_file(name, out) && !out->empty()) return true;
+    out->clear();
+  }
+  if (t_links_disc_only && !host::options.mod_base_iso.empty() &&
       source_port::mods::read_disc_file(std::filesystem::u8path(host::options.mod_base_iso), ("/" + name).c_str(), out) &&
       !out->empty())
     return true;
   uint32_t off = 0, size = 0;
   if (!host::disc_find_file(name, &off, &size) || !size) return false;
+  // The player's cosmetics (Animelee's character select art): the online select's links take the art from the file
+  // the game itself loads for the VS select, not the disc's copy (player report 11-21: VS showed Animelee, netplay
+  // the default). Only an override allowed online (proven visual-only); an HSD archive's first word is its length.
+  if (!t_links_disc_only && host::cosmetics::online_allowed(off)) {
+    uint8_t head[32];
+    if (host::cosmetics::read(off, 0, head, sizeof head) == host::cosmetics::OverrideRead::Success) {
+      const uint32_t length = (uint32_t)head[0] << 24 | (uint32_t)head[1] << 16 | (uint32_t)head[2] << 8 | head[3];
+      if (length >= sizeof head && length <= (64u << 20)) {
+        out->resize(length);
+        if (host::cosmetics::read(off, 0, out->data(), length) == host::cosmetics::OverrideRead::Success) return true;
+        out->clear();
+      }
+    }
+  }
   out->resize(size);
   if (!host::disc_read(off, out->data(), size)) { out->clear(); return false; }
   return true;
@@ -774,9 +797,20 @@ std::vector<uint8_t> build_game_file(const std::string& name) {
   std::vector<uint8_t> out = build_game_file_contents(name);
   if (out.empty()) return out;
   std::string error;
-  const hsd::Status status = hsd::resolve_links(name, out, read_disc_file_by_name, &error,
+  hsd::Status status = hsd::resolve_links(name, out, read_disc_file_by_name, &error,
       [](const std::string& line) { host::log("slippi: %s", line.c_str()); });
   if (status == hsd::Status::NoLinks) return out;
+  if (status == hsd::Status::Failed) {
+    // A cosmetic's asset that a strict link refuses: the disc's own copies instead, so the menu is never lost to a skin.
+    host::log("slippi: %s did not resolve with the player's cosmetics (%s); using the disc's files", name.c_str(), error.c_str());
+    out = build_game_file_contents(name);
+    error.clear();
+    t_links_disc_only = true;
+    status = out.empty() ? hsd::Status::Failed
+                         : hsd::resolve_links(name, out, read_disc_file_by_name, &error,
+                                              [](const std::string& line) { host::log("slippi: %s", line.c_str()); });
+    t_links_disc_only = false;
+  }
   if (status == hsd::Status::Failed) {
     host::log("slippi: could not load %s: %s", name.c_str(), error.c_str());
     out.clear();
