@@ -106,7 +106,8 @@ int main(int argc, char** argv) {
         "&lt;/ul&gt;\n&lt;p&gt;Includes everything from 0.9.996.&lt;/p&gt;</content></entry></feed>";
     const std::string list = host::updater::releases_from_feed_for_test(feed);
     check(list.find("\"tag_name\":\"v0.9.997\"") != std::string::npos, "the feed lists its release");
-    check(list.find("## Fixes\\n- The Lab view needs Ctrl+F3. It's off.") != std::string::npos, "the feed's notes become What's new lines");
+    // A blank line after a heading, as in the API's Markdown body.
+    check(list.find("## Fixes\\n\\n- The Lab view needs Ctrl+F3. It's off.") != std::string::npos, "the feed's notes become What's new lines");
     check(list.find("Video > Ray tracing") != std::string::npos, "escaped characters in the feed's notes come back");
     check(list.find("&lt;") == std::string::npos && list.find("<p>") == std::string::npos, "no HTML is left in the notes");
     check(list.find("Includes everything from 0.9.996.") != std::string::npos, "the last paragraph is kept");

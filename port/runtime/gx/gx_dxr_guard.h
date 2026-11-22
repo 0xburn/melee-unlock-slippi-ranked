@@ -5,7 +5,6 @@
 // A fault now costs ray tracing for the session, not the game: dxr_driver_faulted() stays true and the
 // renderer skips the rest of its ray tracing setup. No C++ objects live in the guarded function, as SEH
 // requires. MELEE_TEST_DXR_FAULT=1 (hidden test runs only) faults the first call on purpose.
-#include "test_env.h"
 #include <windows.h>
 #include <d3d12.h>
 #include <atomic>
@@ -15,6 +14,7 @@ namespace gx {
 
 inline std::atomic<bool>& dxr_driver_fault_flag() { static std::atomic<bool> f{false}; return f; }
 inline bool dxr_driver_faulted() { return dxr_driver_fault_flag().load(std::memory_order_relaxed); }
+bool dxr_test_fault();   // MELEE_TEST_DXR_FAULT=1 (gx_dxr_path_tracer.cpp, through the test policy)
 
 inline HRESULT dxr_guarded_create_state_object_raw(ID3D12Device5* device, const D3D12_STATE_OBJECT_DESC* desc,
                                                    ID3D12StateObject** out, bool test_fault) {
@@ -33,8 +33,7 @@ inline HRESULT dxr_guarded_create_state_object(ID3D12Device5* device, const D3D1
                                                ID3D12StateObject** out) {
   *out = nullptr;
   if (dxr_driver_faulted()) return E_ABORT;
-  const char* t = host::test_env::getenv("MELEE_TEST_DXR_FAULT");
-  const HRESULT hr = dxr_guarded_create_state_object_raw(device, desc, out, t && std::atoi(t) == 1);
+  const HRESULT hr = dxr_guarded_create_state_object_raw(device, desc, out, dxr_test_fault());
   if (hr == E_ABORT) dxr_driver_fault_flag().store(true, std::memory_order_relaxed);
   return hr;
 }

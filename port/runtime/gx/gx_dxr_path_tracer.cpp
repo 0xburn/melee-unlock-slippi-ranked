@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "gx_dxr_path_tracer.h"
 #include "gx_dxr_guard.h"
+#include "test_env.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -342,6 +344,11 @@ ID3D12Resource* DxrPathTracer::normal_roughness(unsigned slot) const {
 }
 ID3D12Resource* DxrPathTracer::specular_albedo(unsigned slot) const {
   return slot < kFrameSlots ? targets_[slot].specular_albedo.Get() : nullptr;
+}
+
+bool dxr_test_fault() {
+  const char* t = host::test_env::getenv("MELEE_TEST_DXR_FAULT");
+  return t && std::atoi(t) == 1;
 }
 
 }  // namespace gx
