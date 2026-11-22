@@ -86,6 +86,24 @@ inline std::string current(const nlohmann::json& reply) {
           c == '.' || c == '-' || c == '_')) return "unknown";
   return v;
 }
+// An update_required whose `current` is not a newer release than this build (YouGame's own build
+// numbers such as "103", a test build, or none) means YouGame does not list this version for this
+// system yet: the app has nothing to update to, and offering Update only answered "not out yet"
+// (Linux on 1.0.0, player report 11-22). Said plainly, and no Update is offered.
+inline bool listed_newer(const nlohmann::json& refused, const std::string& ours) {
+  return newer(current(refused), ours);
+}
+inline std::string not_listed_text(const std::string& ours) {
+#if defined(__linux__)
+  const char* system = " for Linux";
+#elif defined(__APPLE__)
+  const char* system = " for Mac";
+#else
+  const char* system = "";
+#endif
+  return "YouGame does not list Melee Unlocked " + ours + system +
+         " yet, so its modes cannot start here. They open once YouGame adds it. Slippi modes work now.";
+}
 // Only positively identified idle scenes may hand back. Unknown scenes stay conservative.
 inline bool idle_scene(uint32_t major, uint32_t minor) {
   // GameModeKind (melee/gm/forward.h): 0x00 GM_TITLE, 0x01 GM_MENU (main and Online menus).
