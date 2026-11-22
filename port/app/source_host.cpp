@@ -552,14 +552,6 @@ bool g_mod_root_explicit = false;
 std::string g_mod_profile_name;
 std::vector<mods::Layer> g_mod_layers;
 std::vector<mods::Layer> g_explicit_mod_layers;
-// host::mod_layer_file: the named file from the topmost mod disc that has it. The online select's asset links read
-// the mod's art, as Slippi Dolphin reads the running disc (player report 11-21: Animelee in VS, the default online).
-bool read_mod_layer_file(const std::string& name, std::vector<uint8_t>* out) {
-  for (auto it = g_mod_layers.rbegin(); it != g_mod_layers.rend(); ++it)
-    if (it->kind == mods::LayerKind::Iso && mods::read_disc_file(it->path, ("/" + name).c_str(), out) && !out->empty()) return true;
-  out->clear();
-  return false;
-}
 std::vector<std::filesystem::path> g_mod_gcis;
 std::string g_mod_fingerprint;                 // content identity of the enabled layers, "" = vanilla
 std::string g_direct_fingerprint;              // what Direct compares when not the content identity (Melee Maker)
@@ -5400,7 +5392,6 @@ MuHostApi make_host() {
   h.vi_flush = h_vi_flush; h.vi_retrace_count = h_vi_retrace_count; h.vi_next_field = h_vi_next_field;
   h.vi_set_black = h_vi_set_black; h.vi_wait_retrace = h_vi_wait_retrace;
   h.pad_read = h_pad_read; h.pad_rumble = h_pad_rumble;
-  host::mod_layer_file = read_mod_layer_file;
   h.disc_entrynum = h_disc_entrynum; h.disc_file = h_disc_file; h.disc_read = h_disc_read;
   h.disc_status = h_disc_status; h.disc_id = h_disc_id;
   h.card_probe = h_card_probe; h.card_mount = h_card_mount; h.card_unmount = h_card_unmount; h.card_open = h_card_open;

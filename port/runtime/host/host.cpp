@@ -596,8 +596,6 @@ uint32_t disc_fst_size() { return g_fst_size; }
 
 // Looks a file up by name in the disc's FST (root and nested directories; exact match first,
 // then case-insensitive). Used to serve ISO files to host-side loaders (Slippi game files).
-bool (*mod_layer_file)(const std::string& name, std::vector<uint8_t>* out) = nullptr;
-
 bool disc_find_file(const std::string& name, uint32_t* offset, uint32_t* size) {
   static std::vector<uint8_t> fst;
   if (fst.empty()) {

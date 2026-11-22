@@ -159,9 +159,6 @@ uint32_t disc_fst_size();
 uint32_t disc_fst_addr();   // the file table as boot placed it (repairs the low-memory pointer when it was overwritten)
 uint32_t disc_fst_max_size();
 bool disc_find_file(const std::string& name, uint32_t* offset, uint32_t* size);
-// The Source Port's mod layers (a mod disc started with --mod-iso): the named file from the topmost layer that has
-// it, for host-side loaders that must see what the game sees (the online select's asset links). Null elsewhere.
-extern bool (*mod_layer_file)(const std::string& name, std::vector<uint8_t>* out);
 // Resolves an absolute disc file offset (as sent to the jukebox) to its case-normalized FST path.
 bool disc_find_path_by_offset(uint32_t offset, std::string* path);
 // Lists menu and stage HPS paths from the loaded disc's FST.
