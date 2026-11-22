@@ -34,9 +34,10 @@ with zipfile.ZipFile(args.out, 'w', zipfile.ZIP_DEFLATED) as z, zipfile.ZipFile(
             z.writestr(folder+str(path),assets.read(item))
             copied.add(str(path))
     assert 'Sys/GC/dsp_coef.bin' in copied
-    for p in [args.host/'melee_source.exe',args.game/'melee_game.dll',args.game/'melee_game.snapexcl',root/'LICENSE',root/'NOTICE',*args.host.glob('*.dxil'),*args.host.glob('*.dll')]:
+    for p in [args.host/'MeleeUnlockedLauncher.exe',args.host/'melee_source.exe',args.game/'melee_game.dll',args.game/'melee_game.snapexcl',root/'LICENSE',root/'NOTICE',*args.host.glob('*.dxil'),*args.host.glob('*.dll')]:
         if p.name not in copied:
             z.write(p,folder+p.name)
             copied.add(p.name)
     assert 'dxr_pathtrace.dxil' in copied
     z.writestr(folder+'Play.bat',bat.replace('\n','\r\n'))
+    z.writestr(folder+'MeleeUnlocked.bat',bat.replace('Play.bat', 'MeleeUnlocked.bat').replace('\n','\r\n'))

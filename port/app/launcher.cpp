@@ -557,6 +557,8 @@ std::string sysgen_data_arg(const std::string& exe) {
 #endif
 }
 
+bool vanilla_active();
+
 std::string game_args() {
   std::string base = active_dir();
   std::string a = " --iso \"" + g_iso + "\" --threaded-renderer --settings-path \"" + settings_ini_path() + "\"";
@@ -567,6 +569,10 @@ std::string game_args() {
 #else
   if (file_exists(base + "\\Sys\\codehandler.bin"))
     a += " --sys-dir \"" + base + "\\Sys\" --user-dir \"" + g_dir + "\\User\\Slippi\" --replay-dir \"" + replay_dir_for_game() + "\" --card-dir \"" + g_dir + "\\User\\GC\\CardA\"" + sysgen_data_arg(g_game_exe);
+#endif
+#ifndef MELEE_NO_SLIPPI
+  if (g_engine == ENGINE_SOURCE && g_active_version.empty() && !vanilla_active())
+    a += " --pc-settings --slippi-menus on";
 #endif
   return a;
 }

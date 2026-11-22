@@ -19,7 +19,7 @@ jobs:
           $dxc = (Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/bin/*/x64/dxc.exe' | Sort-Object FullName -Descending | Select-Object -First 1).FullName
           cmake -S . -B wh -A x64 -DMELEE_BUILD_EXPERIMENTAL_PORT=ON -DMELEE_SQUAD_STRIKE=OFF "-DPORT_GEN=$gen" "-DMELEE_DXC_EXECUTABLE=$dxc"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build wh --config Release --target melee_source --parallel 4
+          cmake --build wh --config Release --target melee_unlocked melee_source --parallel 4
       - uses: actions/upload-artifact@v4
         with:
           name: windows-fork-binaries
@@ -77,6 +77,19 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne '1.0.5') { throw "Windows startup failed ($LASTEXITCODE, $version)" }
           python -c "import ctypes, pathlib; ctypes.WinDLL(str(pathlib.Path('melee_game.dll').resolve()))"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:MELEE_LAUNCHER_TEST = '1'
+          $env:MELEE_LAUNCHER_TEST_CAPTURE_MS = '500'
+          $launcher = Start-Process .\MeleeUnlockedLauncher.exe -PassThru
+          try {
+            for ($i = 0; $i -lt 60; $i++) {
+              if ($launcher.HasExited) { throw "Launcher exited before showing its window" }
+              if (Test-Path launcher-capture.bmp) { break }
+              Start-Sleep -Milliseconds 500
+            }
+            if (!(Test-Path launcher-capture.bmp)) { throw "Launcher did not draw the Play page" }
+          } finally {
+            if (!$launcher.HasExited) { Stop-Process -Id $launcher.Id }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: Melee-Unlocked-Windows-x64
