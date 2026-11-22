@@ -34,6 +34,9 @@ with zipfile.ZipFile(args.out, 'w', zipfile.ZIP_DEFLATED) as z, zipfile.ZipFile(
             z.writestr(folder+str(path),assets.read(item))
             copied.add(str(path))
     assert 'Sys/GC/dsp_coef.bin' in copied
+    # Both D3D renderers merge the shipped recipes with the player's writable cache.
+    z.writestr(folder + 'shadercache/recipes.shipped.bin',
+               assets.read('MeleeUnlocked-1.0.5/shadercache/recipes.bin'))
     for p in [args.host/'MeleeUnlockedLauncher.exe',args.host/'melee_source.exe',args.game/'melee_game.dll',args.game/'melee_game.snapexcl',root/'LICENSE',root/'NOTICE',*args.host.glob('*.dxil'),*args.host.glob('*.dll')]:
         if p.name not in copied:
             z.write(p,folder+p.name)

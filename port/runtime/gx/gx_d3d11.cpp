@@ -15,6 +15,7 @@
 #endif
 #include <windows.h>
 #include "gx_cache_prune.h"
+#include "d3d_recipes.h"
 #include <d3d11_1.h>
 #include <dxgi1_6.h>
 #include "dxgi_paced_mode.h"
@@ -148,12 +149,6 @@ struct SamplerKey {
   bool operator==(const SamplerKey& o) const { return mode0 == o.mode0 && mode1 == o.mode1 && anisotropy == o.anisotropy; }
 };
 struct SamplerKeyHash { size_t operator()(const SamplerKey& k) const { return (size_t)hash_bytes(&k, sizeof k); } };
-
-struct PipelineRecipe {   // binary-compatible with the D3D12 backend's recipes.bin
-  uint32_t topology = 0, components = 0;
-  BPMemory bp{};
-  uint32_t xf[0x58]{};
-};
 
 // ---------------------------------------------------------------- dynamic buffers
 // One buffer per kind, filled once per frame with MAP_WRITE_DISCARD. Unlike D3D12 there is no
@@ -2559,16 +2554,6 @@ void D3D11Backend::submit_frame(const Frame& frame, const DrawMatrices* override
 }
 
 // ---------------------------------------------------------------- pipeline prewarm
-static bool read_recipe_file(const std::string& path, std::vector<PipelineRecipe>& out) {
-  std::ifstream file(path, std::ios::binary);
-  uint64_t header[3]{};
-  if (!file.read((char*)header, sizeof(header)) || header[0] != 0x3150535247505847ull || header[1] > 16384) return false;
-  std::vector<PipelineRecipe> recipes((size_t)header[1]);
-  if (!file.read((char*)recipes.data(), recipes.size() * sizeof(PipelineRecipe)) ||
-      hash_bytes(recipes.data(), recipes.size() * sizeof(PipelineRecipe)) != header[2]) return false;
-  out.insert(out.end(), recipes.begin(), recipes.end());
-  return true;
-}
 
 void D3D11Backend::prewarm_pipelines() {
   std::vector<PipelineRecipe> recipes;
@@ -2576,6 +2561,7 @@ void D3D11Backend::prewarm_pipelines() {
   std::error_code ec;
   for (auto& entry : std::filesystem::directory_iterator(shader_cache_root_, ec))
     if (entry.is_directory(ec)) read_recipe_file(entry.path().string() + "/recipes.bin", recipes);
+  read_shipped_d3d_recipes(recipes);
   if (recipes.empty()) return;
   std::unordered_set<std::string> seen;
   std::unordered_set<PipeKey, PipeKeyHash> keys_seen;

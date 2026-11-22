@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #define NOMINMAX
 #include "gx_cache_prune.h"
+#include "d3d_recipes.h"
 #include "test_env.h"
 #include <windows.h>
 #include <d3d12.h>
@@ -418,11 +419,6 @@ class Ring {
   ID3D12Resource* resource() { return pages()[current_].buffer.Get(); }
 };
 
-struct PipelineRecipe {
-  uint32_t topology = 0, components = 0;
-  BPMemory bp{};
-  uint32_t xf[0x58]{};
-};
 static std::atomic<uint64_t> next_backend_id{1};
 class D3D12Backend : public Backend {
  public:
@@ -6171,20 +6167,6 @@ static void write_cache(const std::string& path, const void* data, size_t size) 
   if (!ok) DeleteFileA(temporary.c_str());
 }
 
-// Pipeline recipes (the game-side state a pipeline was built from) do not depend on the shader
-// sources, so they live at the cache root and survive every shader/namespace change; older
-// per-namespace files are merged in. This is what lets a fresh build precompile before boot.
-static bool read_recipe_file(const std::string& path, std::vector<PipelineRecipe>& out) {
-  std::ifstream file(path, std::ios::binary);
-  uint64_t header[3]{};
-  if (!file.read((char*)header, sizeof(header)) || header[0] != 0x3150535247505847ull || header[1] > 16384) return false;
-  std::vector<PipelineRecipe> recipes((size_t)header[1]);
-  if (!file.read((char*)recipes.data(), recipes.size()*sizeof(PipelineRecipe)) ||
-      hash_bytes(recipes.data(), recipes.size()*sizeof(PipelineRecipe)) != header[2]) return false;
-  out.insert(out.end(), recipes.begin(), recipes.end());
-  return true;
-}
-
 void D3D12Backend::prewarm_upscalers() {
   if (!opts_.dlss_mode) return;
   Stopwatch timer;
@@ -6277,6 +6259,9 @@ void D3D12Backend::prewarm_upscalers() {
   host::log("d3d12: completed 6 upscaler warm-up frames before guest/audio startup in %.1f ms", timer.lap() * 1000.0);
 }
 
+// Pipeline recipes (the game-side state a pipeline was built from) do not depend on the shader
+// sources, so they live at the cache root and survive every shader/namespace change; older
+// per-namespace files are merged in. This is what lets a fresh build precompile before boot.
 void D3D12Backend::prewarm_pipelines() {
   host::loading_show(L"Loading shaders", 3, 4);
   std::vector<PipelineRecipe> recipes;
@@ -6289,6 +6274,7 @@ void D3D12Backend::prewarm_pipelines() {
   std::error_code ec;
   for (auto& entry : std::filesystem::directory_iterator(shader_cache_root_, ec))
     if (entry.is_directory(ec)) read_recipe_file(entry.path().string() + "/recipes.bin", recipes);
+  read_shipped_d3d_recipes(recipes);
   if (recipes.empty()) return;
   std::unordered_set<std::string> seen;
   std::unordered_set<PsoKey, PsoKeyHash> keys_seen;
