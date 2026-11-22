@@ -55,6 +55,7 @@
 #include "gx_dxr_scene.h"
 #include "gx_dxr_gpu_scene.h"
 #include "gx_dxr_path_tracer.h"
+#include "gx_dxr_guard.h"
 #include "rtx_scene.h"
 #ifdef MELEE_REMIX_SPIKE
 #include "remix_bridge.h"
@@ -1379,6 +1380,14 @@ void D3D12Backend::init() {
       g_dxr_path_available.store(false, std::memory_order_relaxed);
       host::log("dxr: path tracing unavailable: %s", dxr_error.c_str());
     }
+  }
+  // The driver faulted while it built a ray tracing pipeline (gx_dxr_guard.h): no more ray tracing setup this
+  // session, so nothing else calls into that driver code. The game draws as it does on a card without it.
+  if (dxr_device_ && dxr_list_ && dxr_driver_faulted()) {
+    host::log("dxr: the graphics driver faulted in its ray tracing setup; ray tracing is off for this session");
+    set_rtx_status(1, "This graphics driver failed while it set up ray tracing. Melee Unlocked is drawing.");
+    g_dxr_path_available.store(false, std::memory_order_relaxed);
+  } else if (dxr_device_ && dxr_list_) {
     std::string rtx_error;
     if (rtx_scene_.initialize(dxr_device_.Get(), exe_dir_, &rtx_error)) host::log("rtx: GPU scene pass initialized");
     else host::log("rtx: GPU scene unavailable: %s", rtx_error.c_str());
