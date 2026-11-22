@@ -2606,7 +2606,9 @@ int ping_ms() { return p2p_session_up() ? host::netplay::ping_ms() : (g_netplay 
 // their second choice; a player with no choice keeps their own port's colour. Both games know both choices
 // (the build message), so both draw the same. Display only (mu_port_colour in the game).
 uint32_t port_colour_bits() {
-  if (!g_netplay || !is_online_match() || bounded_remote_machine_count() != 1) return 0;
+  // Whole online session, not only once the match runs: the tags and damage displays take their colour as
+  // the match scene builds them, before is_online_match() turns true.
+  if (!g_netplay || session_mode() < 0 || bounded_remote_machine_count() != 1) return 0;
   int8_t mine[2], theirs[2];
   if (!g_netplay->PortColours(mine, theirs) || (mine[0] < 0 && theirs[0] < 0)) return 0;
   const int me = local_player_index();
