@@ -840,7 +840,7 @@ void page_box(float x, float y, float w, const View& v) {
     text(small, x + px(8), y + px(8), "ROOM");
     text(head, x + px(8), y + px(20), "ADD A FRIEND");
     const Ink dim{Face::Body, 10, kDimText};
-    text(dim, x + px(8), y + px(40), "They enter your code too.");
+    text(dim, x + px(8), y + px(40), "Exchange codes.");
     float yy = y + px(56);
     dl()->AddRectFilled(ImVec2(x + px(7), yy), ImVec2(x + w - px(7), yy + px(22)), IM_COL32(5, 7, 11, 255), px(3));
     dl()->AddRect(ImVec2(x + px(7), yy), ImVec2(x + w - px(7), yy + px(22)), kSlotLine, px(3));
