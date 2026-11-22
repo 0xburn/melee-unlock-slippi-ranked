@@ -77,11 +77,7 @@ static u8 squad_coin_color(int port)
 static int squad_num_colors(u8 ck) { return ck >= 26 ? 1 : (int) mu_squad_colors(ck); }
 static bool squad_budget(int coin_port, u8 coin_ck, u8 coin_color)
 { (void) coin_port; (void) coin_ck; (void) coin_color; return budget_ok; }
-#ifndef FIXTURE_LOBBY
-#define FIXTURE_LOBBY 0
-#endif
-static bool gmSquad_OnlineChosen(void) { return !FIXTURE_LOBBY; }
-static bool gmSquad_LobbyChosen(void) { return FIXTURE_LOBBY; }
+static bool gmSquad_OnlineChosen(void) { return true; }
 static bool gmSquad_OnlineEditable(void) { return true; }
 static bool gmSquad_Any(void) /* production's: any door has a member (one door here) */
 { return gmSquad_rows[0][0].ckind != GMSQUAD_NONE; }

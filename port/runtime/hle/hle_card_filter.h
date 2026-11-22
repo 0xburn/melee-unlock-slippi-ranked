@@ -1,5 +1,5 @@
 // Optional process-local file filter for the Static Recomp's memory card mount.
-// Keep the card SDK independent of the app's mod scanner and YouGame bridge.
+// Keep the card SDK independent of the app's mod scanner.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include <filesystem>

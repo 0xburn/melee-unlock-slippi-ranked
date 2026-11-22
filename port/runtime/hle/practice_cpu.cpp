@@ -29,8 +29,7 @@ MuPcConfig g_config = [] {
   mu_pc_defaults(&c);
   return c;
 }();
-// YouGame: the test overrides below wait for the first use, after test_env has latched the session policy
-// (global initialization runs before it, so a YouGame session could otherwise keep them). A saved setting wins.
+// Read test overrides on first use. A saved setting takes precedence.
 bool g_test_env_done = false;
 void apply_test_env_locked() {
   if (g_test_env_done) return;

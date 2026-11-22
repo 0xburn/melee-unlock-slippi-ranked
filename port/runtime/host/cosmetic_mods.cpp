@@ -7387,7 +7387,7 @@ std::string active_look_pack() {
   return g_look_pack;
 }
 
-std::atomic<bool> g_tool_recovery{true};   // set_tool_recovery: the host turns it off in the YouGame app
+std::atomic<bool> g_tool_recovery{true};
 void set_tool_recovery(bool allowed) { g_tool_recovery = allowed; }
 
 bool build_look_packs(const std::string& patcher_folder, const std::string& retail_disc, const std::string& xdelta_tool,

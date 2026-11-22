@@ -107292,7 +107292,7 @@ index 4bafe4ed5..93dc8193d 100644
  
  #endif
 diff --git a/src/melee/gm/gm_1A3F.c b/src/melee/gm/gm_1A3F.c
-index 9fc7d6b09..19c2003c0 100644
+index 9fc7d6b..62f2ced 100644
 --- a/src/melee/gm/gm_1A3F.c
 +++ b/src/melee/gm/gm_1A3F.c
 @@ -1,9 +1,15 @@
@@ -107412,7 +107412,7 @@ index 9fc7d6b09..19c2003c0 100644
      lbSnap_8001E27C();
      Toy_803127D4();
      tyDisplay_8031C8B8();
-@@ -129,30 +191,77 @@ void gm_801A4014(GameMode* mode)
+@@ -129,30 +191,67 @@ void gm_801A4014(GameMode* mode)
      GameModeState* state;
      struct stateMachine* sm;
      struct GameSceneInfo* info;
@@ -107430,13 +107430,6 @@ index 9fc7d6b09..19c2003c0 100644
 +    /* Slippi playback: the waiting scene's preloads, before the match state's own. */
 +    if (mode->kind == GM_DEBUG_VS && state->id == 1 && (mu_replay_on() || mu_online_is_test_run())) {
 +        mu_replay_prepare_scene();
-+    }
-+#endif
-+#ifdef MU_NATIVE
-+    if (mu_css_origin_resume(2)) {
-+        info = &state->info;
-+        scene = gm_FindGameSceneHandler(info->scene_kind);
-+        goto mu_origin_scene_body;
 +    }
 +#endif
      preloadState(state);
@@ -107475,9 +107468,6 @@ index 9fc7d6b09..19c2003c0 100644
 +        BAM_OnSceneReady();
 +    }
 +#endif
-+#ifdef MU_NATIVE
-+mu_origin_scene_body:
-+#endif
      gm_801A4D34(scene->on_frame, info);
      if (!gmMainLib_8046B0F0.resetting && scene->on_exit != NULL) {
          scene->on_exit(info->exit_data);
@@ -107494,7 +107484,7 @@ index 9fc7d6b09..19c2003c0 100644
      if (!gmMainLib_8046B0F0.resetting) {
          if (state->on_exit != NULL) {
              state->on_exit(state);
-@@ -161,24 +270,38 @@ void gm_801A4014(GameMode* mode)
+@@ -161,24 +260,38 @@ void gm_801A4014(GameMode* mode)
          state_machine.routing.prev_state_id = sm->routing.curr_state_id;
  
          if (sm->routing.next_state_id) {
@@ -107536,7 +107526,7 @@ index 9fc7d6b09..19c2003c0 100644
          gmMainLib_8015FBA4();
          gm_GetAllGameModes();
          memzero(&state_machine, sizeof(state_machine));
-@@ -228,11 +351,17 @@ void gm_SetNewGameModePending(void)
+@@ -228,11 +341,17 @@ void gm_SetNewGameModePending(void)
  
  void gm_SetPendingGameMode(u8 pending_mode)
  {
@@ -107554,15 +107544,11 @@ index 9fc7d6b09..19c2003c0 100644
      state_machine.routing.pending_mode = pending_mode;
      state_machine.pending_mode_change = true;
  }
-@@ -291,6 +420,16 @@ u8 runGameMode(u8 mode_kind)
+@@ -291,6 +410,12 @@ u8 runGameMode(u8 mode_kind)
      struct stateMachine* sm = &state_machine;
      PAD_STACK(2 * 4);
  
 +#ifdef MU_NATIVE
-+    if (mu_css_origin_resume(1)) {
-+        mode = findMode(mode_kind);
-+        goto mu_origin_scene_dispatch;
-+    }
 +    mu_practice_enter_mode(mode_kind);
 +    /* The prior runGameMode has completed its unload callback. Content-view changes need a new
 +     * preload lifetime before this major reinstates its flag and loads any archives. */
@@ -107571,7 +107557,7 @@ index 9fc7d6b09..19c2003c0 100644
      mode = findMode(mode_kind);
  
      state_machine.pending_mode_change = false;
-@@ -298,6 +437,13 @@ u8 runGameMode(u8 mode_kind)
+@@ -298,6 +423,13 @@ u8 runGameMode(u8 mode_kind)
      state_machine.routing.prev_state_id = 0;
      state_machine.routing.next_state_id = 0;
      lbDvd_80018F58(mode->preloaded);
@@ -107585,12 +107571,11 @@ index 9fc7d6b09..19c2003c0 100644
      if (mode->on_load != NULL) {
          mode->on_load();
      }
-@@ -316,13 +462,24 @@ u8 runGameMode(u8 mode_kind)
+@@ -316,13 +448,23 @@ u8 runGameMode(u8 mode_kind)
                  state_machine.routing = state_machine.backup_routing;
              }
          } else {
 +#ifdef MU_NATIVE
-+mu_origin_scene_dispatch:
 +            /* TM-CE, Add SSS To Event Match Scene List (runGameMode+0x11C): while TM-CE is on the
 +             * event mode's states gain an SSS and the main menu's a credits state; the vanilla
 +             * tables come back when it is off (shim/mu_tmce_event.c). */
@@ -107610,14 +107595,13 @@ index 9fc7d6b09..19c2003c0 100644
  }
  
  /// UnclePunch: Scene_Main
-@@ -348,8 +505,33 @@ void gm_801A4510(void)
+@@ -348,7 +490,24 @@ void gm_801A4510(void)
      } else {
          state_machine.routing.curr_mode = GM_BOOT;
      }
 +#ifdef MU_NATIVE
 +    /* Slippi playback, "Boot to Playback Scene": a --replay run boots into GM_DEBUG_VS. */
 +    mu_replay_boot_mode(&state_machine.routing.curr_mode);
-+    mu_css_origin_boot(&state_machine.routing.curr_mode);
 +#endif
 +#ifdef MU_NATIVE
 +    /* Slippi online menus, "Slippi Online Scene" main: the online major replaces GM_HANYU_CSS. */
@@ -107634,23 +107618,11 @@ index 9fc7d6b09..19c2003c0 100644
 +    state_machine.routing.curr_mode = RogueHooks_BootMode(state_machine.routing.curr_mode);
 +#endif
  
-+#ifdef MU_NATIVE
-+    {
-+        void* origin_context[5];
-+        mu_css_origin_arm(origin_context);
-+        (void) __builtin_setjmp(origin_context);
-+        gamestate = &state_machine;
-+#endif
      while (true) {
          u8 next_mode = runGameMode(state_machine.routing.curr_mode);
-         if (gmMainLib_8046B0F0.resetting) {
-@@ -358,4 +540,13 @@ void gm_801A4510(void)
-         gamestate->routing.prev_mode = gamestate->routing.curr_mode;
+@@ -359,3 +518,9 @@ void gm_801A4510(void)
          gamestate->routing.curr_mode = next_mode;
      }
-+#ifdef MU_NATIVE
-+    }
-+#endif
  }
 +
 +#ifdef MU_NATIVE
@@ -115713,7 +115685,7 @@ diff --git a/src/melee/gm/gm_1A45.c b/src/melee/gm/gmscene.c
 similarity index 64%
 rename from src/melee/gm/gm_1A45.c
 rename to src/melee/gm/gmscene.c
-index be743ad04..edc59ef3e 100644
+index be743ad04..52ef74734 100644
 --- a/src/melee/gm/gm_1A45.c
 +++ b/src/melee/gm/gmscene.c
 @@ -1,7 +1,12 @@
@@ -115816,17 +115788,7 @@ index be743ad04..edc59ef3e 100644
      if (gm_804D672C != NULL) {
          HSD_GObj_SetupProc(gm_804D672C, fn_801A4BD0, 0);
      }
-@@ -274,18 +313,38 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-     gm_801677C0(&temp_r25->unk_10);
-     gm_80479D58.unk_0 = 0;
-     gm_80479D58.unk_4 = 0;
-+#ifdef MU_NATIVE
-+    if (mu_css_origin_resume(4)) {
-+        i = 0;
-+        pad_queue_count = 1;
-+        goto mu_origin_body;
-+    }
-+#endif
+@@ -277,15 +316,28 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
      gm_80479D58.unk_8 = 0;
      gm_80479D58.unk_C = 0;
      HSD_PadFlushQueue(HSD_PAD_FLUSH_QUEUE_LEAVE1);
@@ -115856,7 +115818,7 @@ index be743ad04..edc59ef3e 100644
          lb_800195D0();
  
          if (HSD_PadGetResetSwitch()) {
-@@ -294,11 +353,35 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
+@@ -294,11 +346,34 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
          }
  
          for (i = 0; i < pad_queue_count; i++) {
@@ -115868,7 +115830,6 @@ index be743ad04..edc59ef3e 100644
 +            /* Slippi online, StartEngineLoop: rollback loads, checksums, savestates. */
 +            mu_online_frame_begin();
 +            /* Training Lab: savestates and collision bubbles (Training mode, offline). */
-+        mu_origin_body:
 +            mu_te_frame_begin();
 +            mu_lab_frame_begin();
 +            /* Replay playback: the viewer's pause, speed and jumps (shim/mu_replay.c). */
@@ -115893,7 +115854,7 @@ index be743ad04..edc59ef3e 100644
              if (gm_801A46B8(0) || !gm_GetDbPauseFlag(0)) {
                  temp_r25->unk_10.unk_38_0 = true;
              } else {
-@@ -311,6 +394,15 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
+@@ -311,6 +386,15 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
                  }
                  if (lb_80019A30(0) && on_frame != NULL) {
                      on_frame();
@@ -115909,7 +115870,7 @@ index be743ad04..edc59ef3e 100644
                  }
              }
              if (gm_80479D58.unk_10.x0 != gm_80479D58.unk_10.x1 ||
-@@ -331,14 +423,19 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
+@@ -331,14 +415,19 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
                  temp_r25->unk_10.unk_28 |=
                      ~gm_803DA8C8[temp_r25->unk_10.unk_34];
              }
@@ -115931,18 +115892,10 @@ index be743ad04..edc59ef3e 100644
              if (temp_r25->unk_0 != -2) {
                  temp_r25->unk_0++;
              }
-@@ -353,9 +450,35 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-             }
-             gmMainLib_8046B0F0.xC = false;
+@@ -355,7 +444,24 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
              if (temp_r25->unk_C != 0) {
-+#ifdef MU_NATIVE
-+                /* Console rollback commits causal inputs before the scene can tear down. */
-+                if (mu_online_scene_terminal()) {
-+                    goto mu_online_body;
-+                }
-+#endif
-+                break;
-+            }
+                 break;
+             }
 +#ifdef MU_NATIVE
 +            /* Slippi online, LoopEngineForRollback: re-run the body for the next frame of a
 +             * rollback without drawing, or leave for the render once the rollback is done. */
@@ -115954,20 +115907,17 @@ index be743ad04..edc59ef3e 100644
 +                i++;
 +                goto mu_online_rollback_done;
 +            default:
-                 break;
-             }
++                break;
++            }
 +#endif
          }
 +#ifdef MU_NATIVE
 +    mu_online_rollback_done:
 +#endif
-+#ifdef MU_NATIVE
-+        if (mu_css_origin_skip_draw()) continue;
-+#endif
          if (temp_r25->unk_C == 2) {
              break;
          }
-@@ -368,6 +491,9 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
+@@ -368,6 +474,9 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
          HSD_Init_803755A8();
          HSD_PerfSetDrawTime();
          HSD_VICopyXFBAsync(HSD_RP_SCREEN);
@@ -115977,7 +115927,7 @@ index be743ad04..edc59ef3e 100644
          if (temp_r25->unk_4 != -2U) {
              temp_r25->unk_4++;
          }
-@@ -375,5 +501,14 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
+@@ -375,5 +484,14 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
          HSD_PerfSetTotalTime();
          HSD_PerfInitStat();
      }
@@ -116056,7 +116006,7 @@ diff --git a/src/melee/gm/gm_1AED.c b/src/melee/gm/gmscmemcard.c
 similarity index 54%
 rename from src/melee/gm/gm_1AED.c
 rename to src/melee/gm/gmscmemcard.c
-index ad71183a5..7aa744375 100644
+index ad71183a5..681b04c04 100644
 --- a/src/melee/gm/gm_1AED.c
 +++ b/src/melee/gm/gmscmemcard.c
 @@ -1,4 +1,4 @@
@@ -116293,7 +116243,7 @@ index ad71183a5..7aa744375 100644
          return;
      case 4:
 +#ifdef MU_NATIVE
-+        /* YouGame takes decision 5's Yes branch. The normal create/write runs in 6;
++        /* An optional host callback takes decision 5's Yes branch. The normal create/write runs in 6;
 +         * only the question and successful-creation acknowledgement are skipped.
 +         * Standalone keeps the existing native shortcut below. */
 +        if (mu_card_boot_confirm(enter_data.unk0.chan, 5)) {
@@ -119701,7 +119651,7 @@ index 2adba8159..1d2b33edb 100644
  
      gm_InitVsMode(temp_r31);
 diff --git a/src/melee/gm/gmvs.c b/src/melee/gm/gmvs.c
-index b2fc84a75..5fa1385bd 100644
+index b2fc84a..e375a32 100644
 --- a/src/melee/gm/gmvs.c
 +++ b/src/melee/gm/gmvs.c
 @@ -1,4 +1,13 @@
@@ -121355,7 +121305,7 @@ index b2fc84a75..5fa1385bd 100644
                      lbAudioAx_800237A8(0x41F4E, 0x7F, 0x40);
                  }
              }
-@@ -1989,6 +2437,21 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -1989,6 +2437,20 @@ void fn_8016E730(StartMeleeData* arg0)
      VsSceneController* r30;
  
      db_Setup();
@@ -121368,7 +121318,6 @@ index b2fc84a75..5fa1385bd 100644
 +        mu_tmce_osd_frame_counter_init();
 +    }
 +    /* Console rollback: arm deterministic initialization, preserving rules and session RNG. */
-+    mu_console_match_setup();
 +    /* Slippi playback, RestoreGameInfo: the replay's match data, seed and per-frame seed process. */
 +    mu_replay_start_melee(arg0);
 +    /* Slippi online, InitOnlinePlay: the negotiated match, its seed, delay and pad exchange. */
@@ -121377,7 +121326,7 @@ index b2fc84a75..5fa1385bd 100644
      gm_SetDbPauseInputHandlers(gm_AnyControllerPressedStart,
                                 gm_AnyControllerPressedZ);
      gm_SetPreGObjProcCallback(db_RunEveryFrame);
-@@ -1997,6 +2460,9 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -1997,6 +2459,9 @@ void fn_8016E730(StartMeleeData* arg0)
      Camera_Init(70);
      Camera_Create();
      fn_8016DCC0(arg0);
@@ -121387,7 +121336,7 @@ index b2fc84a75..5fa1385bd 100644
      lbRefract_800222A4();
      lb_8000FCDC();
      efLib_Init();
-@@ -2010,7 +2476,7 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -2010,7 +2475,7 @@ void fn_8016E730(StartMeleeData* arg0)
  
      r30 = &controller;
  
@@ -121396,7 +121345,7 @@ index b2fc84a75..5fa1385bd 100644
      Item_80266F70();
      Item_80266FCC();
      it_8026D018();
-@@ -2022,13 +2488,20 @@ void fn_8016E730(StartMeleeData* arg0)
+@@ -2022,13 +2487,20 @@ void fn_8016E730(StartMeleeData* arg0)
      Ground_EnableMatchCamera();
      Camera_8002F3AC();
      fn_801A1134();
@@ -121419,7 +121368,7 @@ index b2fc84a75..5fa1385bd 100644
      if (arg0->rules.on_match_start != NULL) {
          arg0->rules.on_match_start();
      }
-@@ -2052,6 +2525,17 @@ void gm_Scene_Vs_OnEnter(void* arg0)
+@@ -2052,6 +2524,17 @@ void gm_Scene_Vs_OnEnter(void* arg0)
          ifStatus_802F6EA4(3, -1, -1, 0, (void*) fn_8016B7B4, fn_8016B7F8);
      }
      ifTime_CreateTimers();
@@ -121437,7 +121386,7 @@ index b2fc84a75..5fa1385bd 100644
      ifStatus_802F665C(tmp->rules.x0_3);
  }
  
-@@ -2059,7 +2543,7 @@ struct EndMeleeData {
+@@ -2059,7 +2542,7 @@ struct EndMeleeData {
      /* 00 */ u32 x0;
      /* 04 */ u32 x4;
      /* 08 */ u32 x8;
@@ -121446,7 +121395,7 @@ index b2fc84a75..5fa1385bd 100644
  };
  
  static inline bool gm_8016E9C8_inline(void)
-@@ -2086,43 +2570,69 @@ void gm_Scene_Vs_OnExit(void* user_data)
+@@ -2086,43 +2569,69 @@ void gm_Scene_Vs_OnExit(void* user_data)
      VsSceneController* tmp = &controller;
      int i;
  
@@ -121526,7 +121475,7 @@ index b2fc84a75..5fa1385bd 100644
  }
  
  void gm_Scene_SuddenDeath_OnEnter(void* user_data)
-@@ -2145,7 +2655,7 @@ void gm_Scene_Training_OnEnter(void* user_data)
+@@ -2145,7 +2654,7 @@ void gm_Scene_Training_OnEnter(void* user_data)
      grStadium_801D410C();
      un_802FD404();
      tmp2 = &controller;
@@ -121535,7 +121484,7 @@ index b2fc84a75..5fa1385bd 100644
      Stage_802252E4(tmp2->start.stkind, NULL);
      grStadium_801D4040();
      if (!controller.start.x1_3) {
-@@ -2187,7 +2697,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
+@@ -2187,7 +2696,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
      float var_f1;
      PAD_STACK(8);
  
@@ -121544,7 +121493,7 @@ index b2fc84a75..5fa1385bd 100644
          Player_GetPlayerSlotType(arg0) == Gm_PKind_NA &&
          Player_GetEntity(arg0) == NULL)
      {
-@@ -2211,7 +2721,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
+@@ -2211,7 +2720,7 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
          Player_80032768(arg0, &sp18);
          setPlayerUnk45(arg0);
          Player_80031AD0(arg0);
@@ -121553,7 +121502,7 @@ index b2fc84a75..5fa1385bd 100644
              lbAudioAx_800237A8(0x41F4E, 0x7F, 0x40);
          }
          fn_8016E124();
-@@ -2225,7 +2735,9 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
+@@ -2225,7 +2734,9 @@ bool gm_8016EDDC(int arg0, PlayerInitData* arg1)
  
  bool fn_8016EF98(int arg0)
  {
@@ -121564,7 +121513,7 @@ index b2fc84a75..5fa1385bd 100644
          ifStatus_802F6788(arg0);
          Player_80031EBC(arg0);
          Player_SetSlottype(arg0, Gm_PKind_NA);
-@@ -2281,10 +2793,20 @@ int gm_8016F120(int arg0)
+@@ -2281,10 +2792,20 @@ int gm_8016F120(int arg0)
  
  void fn_8016F140(int arg0)
  {
@@ -195778,7 +195727,7 @@ index 646493571..79b9d1916 100644
  
  #endif
 diff --git a/src/melee/sfx/crowdsfx.c b/src/melee/sfx/crowdsfx.c
-index 3218bf163..0f2bca769 100644
+index 3218bf1..c180606a2 100644
 --- a/src/melee/sfx/crowdsfx.c
 +++ b/src/melee/sfx/crowdsfx.c
 @@ -10,23 +10,27 @@
@@ -195912,8 +195861,8 @@ index 3218bf163..0f2bca769 100644
      if (cat >= 2) {
 +#ifdef MU_NATIVE
 +        /* Online, PreventCharacterCrowdChants: the chant waits on the mixer, not on a frame, so a
-+         * rollback could not adopt it and it would double. YouGame console matches roll back too. */
-+        if (!(mu_online_active() || mu_console_rollback_active()) && un_80321EBC(arg0, arg1) != 0) {
++         * rollback could not adopt it and it would double. */
++        if (!mu_online_active() && un_80321EBC(arg0, arg1) != 0) {
 +#else
          if (un_80321EBC(arg0, arg1) != 0) {
 +#endif
@@ -209301,10 +209250,10 @@ index 4985b6164..e29881c86 100644
  typedef struct _cobj_Unk1 cobj_Unk1;
  
 diff --git a/src/sysdolphin/baselib/controller.c b/src/sysdolphin/baselib/controller.c
-index e058eba71..5a77f98e5 100644
+index e058eba..69f7558 100644
 --- a/src/sysdolphin/baselib/controller.c
 +++ b/src/sysdolphin/baselib/controller.c
-@@ -57,15 +57,37 @@ void HSD_PadRenewRawStatus(bool err_check)
+@@ -57,15 +57,33 @@ void HSD_PadRenewRawStatus(bool err_check)
      int i;
      u32 mask;
      PadLibData* p = &HSD_PadLibData;
@@ -209314,10 +209263,6 @@ index e058eba71..5a77f98e5 100644
 -    PADStatus now[4];
 +    HSD_PadData now;
  
-+#ifdef MU_NATIVE
-+    /* Console rollback steps scripts once per body, after its checkpoint, never on alarms. */
-+    if (!mu_console_rumble_owned())
-+#endif
      HSD_PadRumbleInterpret();
 -    PADRead(now);
 +#ifdef MU_NATIVE
@@ -209346,7 +209291,7 @@ index e058eba71..5a77f98e5 100644
                  break;
              }
          }
-@@ -74,16 +96,16 @@ void HSD_PadRenewRawStatus(bool err_check)
+@@ -74,16 +92,16 @@ void HSD_PadRenewRawStatus(bool err_check)
          }
      }
  
@@ -209366,7 +209311,7 @@ index e058eba71..5a77f98e5 100644
              }
              break;
          case 1:
-@@ -96,18 +118,13 @@ void HSD_PadRenewRawStatus(bool err_check)
+@@ -96,18 +114,13 @@ void HSD_PadRenewRawStatus(bool err_check)
          p->qcount += 1;
      }
  
@@ -209387,7 +209332,7 @@ index e058eba71..5a77f98e5 100644
              mask |= pad_bit[i];
          }
      }
-@@ -173,7 +190,7 @@ static void HSD_PadClampCheck1(u8* val, u8 shift, u8 min, u8 max)
+@@ -173,7 +186,7 @@ static void HSD_PadClampCheck1(u8* val, u8 shift, u8 min, u8 max)
      *val = *val - min;
  }
  

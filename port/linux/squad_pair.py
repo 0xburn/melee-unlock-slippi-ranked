@@ -41,7 +41,7 @@ DESYNC = 'slippi: DESYNC: checksum mismatch at frame '
 GAME_DESYNC = 'online: DESYNC at frame '
 # Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
 LIMITS = '''LIMITS
-1. Loopback --local-peer never touches YouGame matchmaking: ticket, the "sq" compat-key queue isolation and room roster are not proven here (unit-tested; the real queue waits for a staging run).
+1. Loopback exercises local peer transport. It does not exercise a live matchmaking queue.
 2. Delay legs simulate latency in-process; real loss and reordering on the internet are not covered.
 3. One VM: identical CPU and build on both sides; cross-OS comes later.
 4. The harness enters debug VS and imports the exchanged setup itself (mu_replay_prepare_scene, mu_online_start_melee hooks gated on the harness); the production CSS/splash preload path is exercised by the Windows offline smoke and the later staging run, not here.

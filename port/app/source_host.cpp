@@ -68,7 +68,6 @@
 #if MU_SQUAD
 // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
 #include "mu_squad_wire.h"
-#include "squad_costume_rule.h"
 #endif
 #include "../runtime/abi/mu_tourney.h"
 #include "ppc.h"

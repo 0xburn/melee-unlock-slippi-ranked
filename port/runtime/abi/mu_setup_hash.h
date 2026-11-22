@@ -130,28 +130,6 @@ static inline void mu_setup_ports(unsigned char* block, size_t size, unsigned re
     }
 }
 
-/* The 4-player Friends lobby (yougame_lobby_setup.h): the room's frozen setup names every port's
- * slot type (0 = a human plays there, 1 = a CPU, 3 = nobody). Write all four, then the costume index
- * (0x67) over every port that plays, humans and CPUs alike, by the same rule as mu_setup_ports. */
-static inline void mu_setup_ports_kinds(unsigned char* block, size_t size, const unsigned char kinds[4], int teams)
-{
-    int i, j;
-    if (!block || !kinds || size < 0x60 + 4 * 0x24) return;
-    for (i = 0; i < 4; ++i) block[0x61 + i * 0x24] = kinds[i] == 0 || kinds[i] == 1 ? kinds[i] : 3;
-    for (i = 0; i < 4; ++i) {
-        const unsigned char* a = block + 0x60 + i * 0x24;
-        unsigned char index = 0;
-        if (a[1] != 0 && a[1] != 1) continue;
-        for (j = 0; j < i; ++j) {
-            const unsigned char* b = block + 0x60 + j * 0x24;
-            if (b[1] != 0 && b[1] != 1) continue;
-            if ((a[0] == 0x13 ? 0x12 : a[0]) == (b[0] == 0x13 ? 0x12 : b[0]) &&
-                (teams ? a[9] == b[9] : a[3] == b[3])) ++index;
-        }
-        block[0x67 + i * 0x24] = index;
-    }
-}
-
 /* Which of a port's records the setup hash keeps whole: a human's (0) and a CPU's (1). Any other
  * port (3, nobody) keeps only its slot type, since the block still holds whoever last played there.
  * A CPU's record holds its character, colour, team and level: blanking it, as before the Friends

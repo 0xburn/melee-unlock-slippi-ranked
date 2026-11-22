@@ -533,7 +533,7 @@ void process_command(Command command) {
       const int port = warmup_button_port();
       MatchMode mode = MatchMode::None;
       std::string code;
-      // A search running on the select (YouGame's modes, Unranked): Training, the search kept as it is.
+      // Keep the current search running when entering Training.
       if (kept_possible()) kept_go_training(port, "WARM UP on the select while searching");
       else if (wait_practice_possible(&mode, &code)) wait_practice_go(port, mode, code);
       else warmup_enter(port);
@@ -1909,8 +1909,6 @@ void tick() {
       const bool plain = !connected_pair &&
           (online_mode() == (uint8_t)MatchMode::Unranked || online_mode() == (uint8_t)MatchMode::Direct ||
            online_mode() == (uint8_t)MatchMode::Teams) && !slippi::online::is_online_match();
-      // A search running that can be kept (any YouGame mode, Ranked too, and Unranked): Training with
-      // the search kept as it is, never started again.
       keep = !warm && kept_possible();
       if (warm || plain || keep) {
         lr_mode = (MatchMode)online_mode();

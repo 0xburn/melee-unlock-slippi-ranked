@@ -46,7 +46,7 @@ struct Snapshot {
     bool active = false;        // in the warm-up room (on the way there, in Training, on the way back)
     int stage = 0;              // slippi::warmup::Stage
     bool arena = false;         // an arena room's wait, not a parked pair
-    std::string mode;           // "Direct", "Teams", "Arena"
+    std::string mode;
     int peers = 0;
     // state: warmup::PeerState; character: locked in with; picked: on the select before that (our builds)
     struct Peer { std::string name; int state = 0; int character = -1; int costume = 0; int picked = -1; } peer[3];
@@ -68,8 +68,8 @@ struct Snapshot {
   // Play while searching: a search the player chose to keep while they play elsewhere.
   struct Kept {
     int stage = 0;              // 0 none, 1 searching while away, 2 opponent found, 3 on the way back
-    std::string service;        // "YouGame", "Slippi", "YouGame and Slippi"
-    std::string mode;           // "Unranked", "Ranked", "Friends", "Squad Strike", "Direct", "Teams"
+    std::string service;
+    std::string mode;
     uint32_t elapsed_ms = 0;    // the search's own time
     uint32_t shown_ms = 0;      // since it was kept
     uint32_t found_ms = 0;      // since the opponent was found

@@ -11,10 +11,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
-bool gmSquad_LobbyChosen(void);
-#if !MU_SQUAD_ONLINE_FIXTURE
-bool gmSquad_LobbyChosen(void) { return false; }
-#endif
 
 typedef uint8_t u8;
 typedef int8_t s8;
@@ -149,14 +145,6 @@ static void mu_squad_copy_files(int kind, u8 color, void* ctx, GmSquadFileVisito
 { if (kind >= 0 && kind != 4) visit(ctx, file_names[kind + 80], false);
   if (fixture_costumes && kind >= 0 && kind != 4 && gmSquad_CostumeBytes(kind, 3))
       visit(ctx, file_names[440 + kind * 6 + color], 3); }
-/* Friends' synced select (a console session): the fixed online floors decide, not this host. */
-static int fixture_console;
-static int mu_console_active(void) { return fixture_console; }
-/* Friends' costume rule: the real one (mu_squad_online.c) in the online fixture, else a stand-in. */
-u8 gmSquad_ConsoleCostumes(bool want);
-#if !MU_SQUAD_ONLINE_FIXTURE
-u8 gmSquad_ConsoleCostumes(bool want) { return want ? 1 : 0; }
-#endif
 /* The test-only Kirby copy check reads the game's Kirby tables; the fixture has none. */
 static void test_kirby_copies(void) {}
 #include "mu_squad_lineup_fixture.h"
@@ -225,11 +213,6 @@ static unsigned facts_sent, commands_sent;
 static u8 fixture_budget_answer = 1; /* the host's op 4 answer: 1 ok, 0 none, 2 disc copy over, 3 mod's */
 /* FNV-1a over every budget digest byte (ops 2 and 3), as the host's SHA-256 identity sees them. */
 static u64 fixture_identity;
-/* Friends' costume rule (MU_SQUAD_OP_CONSOLE): facts held since the last off, and the ARM answer
- * once the host has them. */
-static unsigned console_facts, console_arms, console_offs;
-static bool console_have_facts;
-static u8 fixture_console_answer = 1;
 enum { EF_DAT_FILE_MAX = 3 };
 static void mu_squad_effect_file(int index, void* ctx, GmSquadFileVisitor visit)
 { visit(ctx, file_names[index+70], false); }
@@ -257,23 +240,6 @@ static int mu_slippi_cmd(unsigned cmd, const void* payload, unsigned size,
         fixture_identity = 14695981039346656037ull;
         assert(((u32)p[1]<<24 | (u32)p[2]<<16 | (u32)p[3]<<8 | p[4]) == MU_SQUAD_ONLINE_ALLM);
         assert(((u32)p[5]<<24 | (u32)p[6]<<16 | (u32)p[7]<<8 | p[8]) == MU_SQUAD_ONLINE_ALLA);
-    } else if (p[0] == MU_SQUAD_OP_CONSOLE) {
-        if (p[1] == MU_SQUAD_CONSOLE_FACT) {
-            const u32 kind = (u32)p[3]<<24 | (u32)p[4]<<16 | (u32)p[5]<<8 | p[6];
-            const u32 bytes = (u32)p[7]<<24 | (u32)p[8]<<16 | (u32)p[9]<<8 | p[10];
-            /* op 3's layout after the console op: a cosmetic at its fighter's constant, delimited */
-            assert(size >= 13 && size <= 138 && (p[2] == 2 || p[2] == 3));
-            assert(p[size - 1] == 0 && strlen((const char*) p + 11) == size - 12);
-            assert(bytes == gmSquad_CostumeBytes((int) kind, p[2]) && bytes != 0);
-            ++console_facts; console_have_facts = true;
-        } else if (p[1] == MU_SQUAD_CONSOLE_ARM) {
-            assert(size == 2 && got && capacity >= 1);
-            ++console_arms;
-            *(u8*)out = console_have_facts ? fixture_console_answer : 0; *got = 1;
-        } else {
-            assert(size == 2 && p[1] == MU_SQUAD_CONSOLE_OFF);
-            ++console_offs; console_have_facts = false;
-        }
     } else if (p[0] == 0 || p[0] == 1 || p[0] == 4) {
         bool lineup_ok = true;
         if (p[0] == 1) {
@@ -759,7 +725,7 @@ static void online_costume_test(void)
     assert(!memcmp(&a, &b, sizeof a));
     for (i = 40; i < 80; ++i) file_bytes[i] = 1024;
     /* Skins never refuse the search: any size, on the floor heap, and a costume the disc lacks.
-     * In the match the host opens the disc's copy for any file over its size (squad_costume_rule.h). */
+     */
     costume_pack(900000);
     fixture_missing = 200 + 1 * 6 + 1;
     s_allm_budget = MU_SQUAD_ONLINE_ALLM;
@@ -812,64 +778,11 @@ static void online_costume_test(void)
     gmSquad_Disable(); gmSquad_ClearAll();
     puts("PASS: costumes keep the identity and the trim for any skin pack; skins never refuse, only a standard copy over its size does; offline charges the local length");
 }
-/* Friends: the synced select runs this offline engine on both machines (a console session), so
- * squad_add, squad_place_coin and squad_trim must decide alike on each. Each machine's own heap and
- * its own skins' lengths must not matter: the fixed online floors and the costume constants do. */
-static bool friends_decide(const GmSquadMember* m, int n, u32 allm, u32 alla, u32 pack)
+static bool local_budget_fits(const GmSquadMember* m, int n, u32 allm, u32 alla, u32 pack)
 {
     s_allm_budget = allm; s_alla_budget = alla;
     costume_pack(pack); s_disc_count = 0;
     return gmSquad_Budget(m, n, 0);
-}
-static void friends_fixed_budget_test(void)
-{
-    const GmSquadMember m[6] = {{2,0},{3,1},{5,2},{6,0},{8,1},{9,2}};
-    /* Local heaps: under both floors, 32 bytes under one or the other, on them, far over. */
-    const u32 heaps[5][2] = {{0x40000, 0x1000}, {MU_SQUAD_ONLINE_ALLM - 32u, MU_SQUAD_ONLINE_ALLA},
-                             {MU_SQUAD_ONLINE_ALLM, MU_SQUAD_ONLINE_ALLA - 32u},
-                             {MU_SQUAD_ONLINE_ALLM, MU_SQUAD_ONLINE_ALLA}, {0x7FFFFFF0u, 0x7FFFFFF0u}};
-    const u32 packs[3] = {1000, 300000, 900000};
-    u32 main_file, lo, hi;
-    int i, h, k, n, checked = 0;
-    fixture_costumes = 1; fixture_online_chosen = false; major = GM_VS;
-    for (i = 0; i < 640; ++i) file_bytes[i] = 1024;
-    /* Off a console session the local heap decides: a tiny heap refuses, a big one admits. */
-    fixture_console = 0;
-    assert(!friends_decide(m, 2, 0x40000, 0x1000, 1000));
-    assert(friends_decide(m, 2, 0x7FFFFFF0u, 0x7FFFFFF0u, 1000));
-    /* In it the floors decide: the same answer on the floor heap and a huge one, with any skin
-     * pack, for every lineup size, and with main files around the floor's edge. A machine whose
-     * own heap is under either floor refuses squads (as online refuses its search). */
-    fixture_console = 1;
-    for (n = 1; n <= 6; ++n) {
-        /* The largest main file size this lineup takes on the floors (binary search). */
-        lo = 0; hi = MU_SQUAD_ONLINE_ALLM;
-        while (lo < hi) {
-            const u32 mid = lo + (hi - lo + 1) / 2;
-            for (i = 40; i < 80; ++i) file_bytes[i] = mid;
-            if (friends_decide(m, n, MU_SQUAD_ONLINE_ALLM, MU_SQUAD_ONLINE_ALLA, 1000)) lo = mid; else hi = mid - 1;
-        }
-        assert(lo > 0 && lo < MU_SQUAD_ONLINE_ALLM);
-        for (main_file = lo; main_file <= lo + 1; ++main_file) {
-            bool want, floor_answer;
-            for (i = 40; i < 80; ++i) file_bytes[i] = main_file;
-            fixture_online_chosen = true; fixture_console = 0;
-            floor_answer = friends_decide(m, n, MU_SQUAD_ONLINE_ALLM, MU_SQUAD_ONLINE_ALLA, 1000);
-            fixture_online_chosen = false; fixture_console = 1;
-            want = friends_decide(m, n, heaps[3][0], heaps[3][1], packs[0]);
-            assert(want == floor_answer && want == (main_file == lo)); /* admitted at the edge only */
-            for (h = 0; h < 5; ++h)
-                for (k = 0; k < 3; ++k)
-                    assert(friends_decide(m, n, heaps[h][0], heaps[h][1], packs[k]) == (h >= 3 && want));
-            ++checked;
-        }
-    }
-    assert(checked == 12);
-    fixture_console = 0;
-    for (i = 0; i < 640; ++i) file_bytes[i] = 1024;
-    s_allm_budget = MU_SQUAD_ONLINE_ALLM; s_alla_budget = MU_SQUAD_ONLINE_ALLA; s_disc_count = 0;
-    fixture_costumes = 0;
-    puts("PASS: Friends synced select budgets on the fixed floors and costume constants, never this host's skins; a host under the floors refuses");
 }
 /* The worst vanilla 4v4 by animation, found over every fighter. Each CSS fighter loads its own
  * animation file and its partner's (Ice Climbers: Popo's PlPpAJ.dat and Nana's PlNnAJ.dat,
@@ -945,7 +858,7 @@ static void worst_4v4_fits_test(void)
     extras[0] = 0; extras[1] = margin; extras[2] = margin + 32u;
     /* The same set through gmSquad_Budget. The fixture loads file `kind` as a fighter's animation
      * and file 19 as Zelda's partner (Sheik's), so these lengths are exactly the set's. */
-    fixture_costumes = 1; fixture_online_chosen = false; fixture_console = 0; major = GM_VS;
+    fixture_costumes = 1; fixture_online_chosen = false; major = GM_VS;
     for (i = 0; i < 640; ++i) file_bytes[i] = 1024;
     for (i = 0; i < 26; ++i) {
         if (!(set >> i & 1u)) continue;
@@ -955,98 +868,14 @@ static void worst_4v4_fits_test(void)
     }
     assert(n == 8 && !(set >> 14 & 1u) && !(set >> 15 & 1u) && !(set >> 19 & 1u));
     /* Offline the local heap decides: the old 32 MiB mod-asset AllA trimmed it, 40 MiB keeps it. */
-    assert(!friends_decide(m, 8, 0xC96800, 13313952, 1000));
-    assert(friends_decide(m, 8, 0xC96800, 21702560, 1000));
-    assert(friends_decide(m, 8, 0xC96800, 23799712, 1000));
-    /* Friends (a console session) and online: the floors decide, so every machine at or over them
-     * admits it with any skin pack; one Roy file 1235520 bytes longer still fits exactly, and 32 more
-     * is refused everywhere. A Friends machine under the floors refuses squads outright. */
-    for (mode = 0; mode < 2; ++mode) {
-        fixture_console = mode == 0; fixture_online_chosen = mode == 1;
-        for (e = 0; e < 3; ++e) {
-            const bool fits = extras[e] <= margin;
-            file_bytes[23] = 2027200u + extras[e];
-            for (h = 0; h < 4; ++h)
-                for (k = 0; k < 3; ++k)
-                    assert(friends_decide(m, 8, heaps[h][0], heaps[h][1], packs[k]) ==
-                           (fits && (mode == 1 || h >= 2)));
-        }
-    }
-    fixture_console = 0; fixture_online_chosen = false;
+    assert(!local_budget_fits(m, 8, 0xC96800, 13313952, 1000));
+    assert(local_budget_fits(m, 8, 0xC96800, 21702560, 1000));
+    assert(local_budget_fits(m, 8, 0xC96800, 23799712, 1000));
+    fixture_online_chosen = false;
     for (i = 0; i < 640; ++i) file_bytes[i] = 1024;
     s_allm_budget = MU_SQUAD_ONLINE_ALLM; s_alla_budget = MU_SQUAD_ONLINE_ALLA; s_disc_count = 0;
     fixture_costumes = 0;
     puts("PASS: the worst vanilla 4v4 (16590272 animation bytes) fits the 40 MiB floor on every machine");
-}
-static unsigned cosmetics_counted;
-static void count_cosmetic(void* ctx, const char* name, int use)
-{ (void) ctx; (void) name; if (use == GMSQUAD_FILE_COSTUME || use == GMSQUAD_FILE_HAT) ++cosmetics_counted; }
-/* Friends' synced select charges costumes at their constants on a main heap with no room over them,
- * so while squads are in play in a console session the host's disc-costume rule is armed: before
- * every preload list, facts first when the host has none, off once squads or the session end. */
-static void console_costume_rule_test(void)
-{
-    const GmSquadMember one[1] = {{5, 1}};
-    struct GameCache c;
-    int ck, color, target;
-    memset(&c, 0, sizeof c);
-    for (ck = 0; ck < 8; ++ck) c.entries[ck].char_id = ChKind_None;
-    c.entries[0].char_id = 2; c.entries[1].char_id = 3;
-    for (ck = 0; ck < 640; ++ck) file_bytes[ck] = 1024;
-    fixture_costumes = 1; fixture_online_chosen = false; major = GM_VS; allowed = 1;
-    gmSquad_ClearAll(); gmSquad_Disable();
-    console_facts = console_arms = console_offs = 0; console_have_facts = false; fixture_console_answer = 1;
-    /* Every fighter's costumes and every Kirby hat, as the identity scan visits them. */
-    cosmetics_counted = 0;
-    for (ck = 0; ck < 26; ++ck)
-        for (color = 0; color < (int) mu_squad_colors((unsigned) ck); ++color) {
-            s32 extra, kind = mu_squad_fighter_kinds(ck, &extra);
-            mu_squad_fighter_files(kind, (u8) color, NULL, count_cosmetic);
-            mu_squad_fighter_files(extra, (u8) color, NULL, count_cosmetic);
-        }
-    for (color = 0; color < (int) mu_squad_colors(CKind_Kirby); ++color)
-        for (target = 0; target < 26; ++target) {
-            s32 extra, kind = mu_squad_fighter_kinds(target, &extra);
-            mu_squad_copy_files(kind, (u8) color, NULL, count_cosmetic);
-            mu_squad_copy_files(extra, (u8) color, NULL, count_cosmetic);
-        }
-    assert(cosmetics_counted > 26);
-    /* Offline nothing is asked; a console session with no squad in play asks nothing either (no
-     * rule armed, nothing to switch off). */
-    fixture_console = 0; gmSquad_AddPreloads(&c);
-    assert(!console_arms && !console_offs && !console_facts);
-    fixture_console = 1; gmSquad_AddPreloads(&c); gmSquad_AddPreloads(&c);
-    assert(!console_arms && !console_offs && !console_facts);
-    /* A squad pick arms it: the host has no facts, so the game sends them, then arms again. */
-    gmSquad_rows[0][0] = (GmSquadMember){5, 1};
-    gmSquad_AddPreloads(&c);
-    assert(console_arms == 2 && console_facts == cosmetics_counted && console_have_facts);
-    assert(gmSquad_Budget(one, 1, 0));
-    /* Held facts: the next list only arms. Stock rules only: another mode turns it off. */
-    gmSquad_AddPreloads(&c);
-    assert(console_arms == 3 && console_facts == cosmetics_counted);
-    allowed = 0; gmSquad_AddPreloads(&c); assert(console_offs == 1 && !console_have_facts);
-    gmSquad_AddPreloads(&c); assert(console_offs == 1);   /* off once */
-    allowed = 1;
-    /* A standard copy over its size (never the vanilla disc): the session's squads are refused,
-     * after the squads are cleared too, until the session ends; then offline decides as before. */
-    fixture_console_answer = 2;
-    gmSquad_AddPreloads(&c);
-    assert(console_arms == 5 && !gmSquad_Budget(one, 1, 0));
-    gmSquad_ClearAll(); gmSquad_AddPreloads(&c);
-    assert(console_offs == 2 && !gmSquad_Budget(one, 1, 0));
-    fixture_console = 0; s_allm_budget = s_alla_budget = 0x7FFFFFF0u;
-    gmSquad_AddPreloads(&c);
-    assert(console_offs == 2 && gmSquad_Budget(one, 1, 0));
-    /* Leaving the session while armed sends off once. */
-    fixture_console = 1; fixture_console_answer = 1; gmSquad_rows[0][0] = (GmSquadMember){5, 1};
-    gmSquad_AddPreloads(&c); assert(console_arms == 7);
-    fixture_console = 0; gmSquad_AddPreloads(&c); gmSquad_AddPreloads(&c);
-    assert(console_offs == 3 && console_arms == 7);
-    gmSquad_ClearAll(); gmSquad_Disable();
-    s_allm_budget = MU_SQUAD_ONLINE_ALLM; s_alla_budget = MU_SQUAD_ONLINE_ALLA; s_disc_count = 0;
-    fixture_costumes = 0; preload_fighters = preload_copies = 0;
-    puts("PASS: Friends squads arm the disc-costume rule, facts first, off when squads or the session end");
 }
 #endif
 
@@ -1326,9 +1155,7 @@ int main(void)
     agent_css_test();
     online_setup_test();
     online_costume_test();
-    friends_fixed_budget_test();
     worst_4v4_fits_test();
-    console_costume_rule_test();
 #endif
     return 0;
 }

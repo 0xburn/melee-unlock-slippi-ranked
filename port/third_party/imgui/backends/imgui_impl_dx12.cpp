@@ -387,7 +387,7 @@ static void ImGui_ImplDX12_DestroyTexture(ImTextureData* tex)
     tex->SetStatus(ImTextureStatus_Destroyed);
 }
 
-// YouGame: a texture created this call whose first upload failed goes back to "not created", so the next call
+// A texture created this call whose first upload failed goes back to "not created", so the next call
 // creates it again from scratch (UpdateTexture asserts a WantCreate texture has no backend data yet).
 static void ImGui_ImplDX12_UndoCreate(ImTextureData* tex, ImGui_ImplDX12_Texture* backend_tex)
 {
@@ -435,7 +435,7 @@ void ImGui_ImplDX12_UpdateTexture(ImTextureData* tex)
         desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
         ID3D12Resource* pTexture = nullptr;
-        // YouGame: a lost device (or out of memory) fails this; skip the upload instead of copying into a null
+        // A lost device (or out of memory) fails this; skip the upload instead of copying into a null
         // texture. The texture stays WantCreate, and the renderer's own device check reports the loss.
         if (FAILED(bd->pd3dDevice->CreateCommittedResource(&props, D3D12_HEAP_FLAG_NONE, &desc,
             D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pTexture))) || pTexture == nullptr)
@@ -514,7 +514,7 @@ void ImGui_ImplDX12_UpdateTexture(ImTextureData* tex)
             props.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
             props.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
 
-            // YouGame: these fail on a lost device. Unchecked, the Map below ran on a null buffer and crashed
+            // These fail on a lost device. Unchecked, the Map below ran on a null buffer and crashed
             // (builds 82 and 83 on an AMD 780M). Skip this upload and keep the texture's status, so it is retried;
             // the renderer's own device check reports the loss and switches to Direct3D 11.
             HRESULT hr = bd->pd3dDevice->CreateCommittedResource(&props, D3D12_HEAP_FLAG_NONE, &desc,

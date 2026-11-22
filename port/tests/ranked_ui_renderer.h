@@ -115,10 +115,6 @@ void mu_ranked_reveal_frame();
 const MuRankedSet* mu_ranked_set() { return &set; }
 static bool fail_ranks;
 int mu_ranked_read_ranks(MuPlayerRanks* out) { if (fail_ranks) return 0; *out=ranks; return 1; }
-#if defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH
-static bool practice_mode;
-int mu_ranked_practice() { return practice_mode; }
-#endif
 static int mu_slippi_cmd(unsigned cmd, const void*, unsigned, void* out, unsigned size, unsigned* got) {
     if(cmd==0xE4)return 0;
     CHECK(cmd==0xE3 && size==16); std::memset(out,0,size);

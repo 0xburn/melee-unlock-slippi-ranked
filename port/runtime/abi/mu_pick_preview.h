@@ -15,7 +15,7 @@
 
 #define MU_PICK_PREVIEW_CAP 0x20        /* MU_BUILD caps bit (after MU_SQUAD_CAP 0x10) */
 #define MU_PICK_PREVIEW_MSG 0xE4        /* netplay message id (after 0xE3) */
-#define MU_PICK_PREVIEW_COMMAND 0xED    /* private game/host ABI, never a YouGame bridge key */
+#define MU_PICK_PREVIEW_COMMAND 0xED    /* private game/host ABI */
 #define MU_PICK_PREVIEW_OP_SEND 0       /* {op, wire}: the local pick, every CSS frame */
 #define MU_PICK_PREVIEW_OP_READ 1       /* {op}: reply MU_PICK_PREVIEW_REPLY bytes */
 #define MU_PICK_PREVIEW_VERSION 1

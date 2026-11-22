@@ -378,35 +378,6 @@ static void motor_reconcile(void)
     }
 }
 
-/* A new replay replaces deferred requests from the abandoned replay. The hardware voices stay
- * live until their own bodies adopt or retire them. Rumble follows restored HSD state at catch-up. */
-void mu_online_audio_console_restore(int body)
-{
-    (void) body;
-    if (!mu_console_rollback_active()) return;
-    audio.music_op = 0;
-    audio.in_body = 0;
-}
-
-/* An earlier corrected exit never visits the abandoned future bodies to retire their voices. */
-void mu_online_audio_console_commit(int body)
-{
-    int f, i;
-    if (!mu_console_rollback_active()) return;
-    for (f = 0; f < SFX_RING; ++f) {
-        SfxFrame* s = &audio.f[f];
-        if (s->frame <= body) continue;
-        for (i = 0; i < s->stable_count; ++i) {
-            HSD_AudioSFXKeyOff(s->stable[i].instance);
-            audio.stopped++;
-        }
-        s->frame = -1;
-        s->stable_count = s->pending_count = 0;
-        s->consumed = 0;
-    }
-    audio.latest = body;
-}
-
 void mu_online_audio_rollback_end(void)
 {
     if (!mu_online_active()) {

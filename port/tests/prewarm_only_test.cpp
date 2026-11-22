@@ -52,7 +52,6 @@ int main(int argc, char** argv) {
   if (argc == 3 && std::string(argv[1]) == "--test-lock")
     return pw::with_cache_lock(std::filesystem::u8path(argv[2]), [] { return 0; });
 
-  // tools/ci/inputs/yougame-native.json's args (from sibling mu-ci-console; not in this base).
   // Also cover port/mac/README.md launch defaults and every path inserted by full_launch.h.
   const char* args[] = {"game", "--prewarm-only", "--iso", "{disc}", "--threaded-renderer",
       "--settings-path", "{data}/port-settings.ini", "--sys-dir", "{build}/Sys",

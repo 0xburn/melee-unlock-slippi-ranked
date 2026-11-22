@@ -48,7 +48,7 @@ constexpr int BLOCK_BYTES = 640;      // one 5 ms AI DMA frame: 160 stereo sampl
 constexpr int BLOCKS = 24;            // 120 ms of queue; more than that is dropped (fast mode)
 std::atomic<int> g_volume{0};
 std::atomic<bool> g_muted{false};     // audio_set_muted: the game's blocks are not queued
-std::atomic<int> g_page_volume{100};  // audio_set_page_volume: the YouGame page's master
+std::atomic<int> g_page_volume{100};
 // What plays: the player's volume under the page's master.
 int output_volume() { return g_volume.load() * g_page_volume.load() / 100; }
 std::mutex g_mutex;

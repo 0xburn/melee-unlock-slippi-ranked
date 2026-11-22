@@ -256,8 +256,6 @@ void fetch_worker() {
 
 void fetch_later(const Entry& e, bool retry = false) {
   static const bool off = std::getenv("MELEE_PRO_AI_NO_DOWNLOAD") != nullptr;
-  // Never inside the YouGame app: its builds ship no catalog, and one dropped beside the game (a mod or
-  // a pack) must not start downloads until the catalog is part of the verified build.
 
   // Two places only: Phillip's published models (a pinned Hugging Face commit) and this game's own
   // content release, which holds the policies trained here.

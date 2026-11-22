@@ -48,11 +48,8 @@ inline bool command_payload_valid(uint8_t cmd, const uint8_t* payload, uint32_t 
                      payload_len == 2u + 2u * payload[1]; // own lineup / clear
       case 2: return payload_len == 9; // begin budget digest, two u32 BE budgets
       case 3: return payload_len >= 10 && payload_len <= 137; // file fact
-      case MU_SQUAD_OP_LOBBY_MODE: case 4: case 5: return payload_len == 1; // finish digest / read setup
+      case 4: case 5: return payload_len == 1; // finish digest / read setup
       case MU_SQUAD_OP_FRIEND: return payload_len == 2 && payload[1] <= MU_SQUAD_FRIEND_INTENT;
-      case MU_SQUAD_OP_CONSOLE: // off / arm, or a costume fact laid out as op 3's
-        return (payload_len == 2 && payload[1] <= MU_SQUAD_CONSOLE_ARM) ||
-               (payload_len >= 11 && payload_len <= 138 && payload[1] == MU_SQUAD_CONSOLE_FACT);
       default: return false;
     }
   }

@@ -214,7 +214,7 @@ _Static_assert(MU_DISPLAY_BOOT_TO_CSS == MU_DISPLAY_OPTION_BOOT_TO_CSS, "display
  * on screen, and only those get their bones refreshed for the next frame's gameplay (ftLib_80086A8C, mu_online.c
  * camera_tasks), so a shake past the game's own could show a fighter at the edge that the other player's game does
  * not. Lowering it is the same as "Disable screen shake" (MU_GAME_OPTION_NO_SCREEN_SHAKE) and Slippi's own code,
- * both always allowed online. A YouGame console session keeps the game's own camera, as it keeps its options. */
+ * both always allowed online. */
 float mu_screen_shake_scale(void)
 {
     if (!mu_host || mu_host->version < 27 || !mu_host->screen_shake_scale) return 1.0f;

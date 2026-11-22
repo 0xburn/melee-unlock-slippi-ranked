@@ -509,7 +509,7 @@ void mu_hud_scale(struct HSD_GObj* gobj, int stock);
  * host's overlays (nicknames above the fighters). */
 void mu_hud_report(void);
 unsigned int mu_mod_flags(void);
-/* YouGame-only automatic answers in the memory-card scene (shim/mu_card.c). */
+/* Optional host callback for memory-card prompts. */
 int mu_card_boot_confirm(unsigned int channel, unsigned int decision);
 #ifndef MU_MOD_ASSETS_PRESENT
 #define MU_MOD_ASSETS_PRESENT 0x1u

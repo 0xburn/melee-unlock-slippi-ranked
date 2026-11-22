@@ -1,4 +1,4 @@
-// YouGame gcManifest content_sha1, version 2. No window or game dependencies.
+// Disc content identity, version 2. The domain separator is part of the persisted digest format.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include <algorithm>

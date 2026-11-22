@@ -358,7 +358,6 @@ void window_presented(uint64_t frame) {
   const char* const tag = "Linux test";
 #endif
   // Same opt-in evidence controls as M2; counts here are presented frames, not simulation retraces.
-  // Read through host::test_env, so they stay off in YouGame and --vanilla-only sessions (first read is after start()).
   // RESIZE and FULLSCREEN work on both; TOGGLE (AppKit's green button) and ESCAPE (the Mac menu check) are Mac-only.
   static const auto number = [](const char* name) -> uint64_t {
     const char* value = host::test_env::getenv(name); return value ? std::strtoull(value, nullptr, 10) : 0;

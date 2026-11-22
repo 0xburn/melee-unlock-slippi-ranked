@@ -5,11 +5,8 @@
 #define MU_SQUAD_H
 
 /* Optional native Squad Strike. All state is in the game image and rolls back.
- * A nonempty lineup opts into the mode at runtime, only in stock singles VS
- * (including Friends' shared, synced VS character select), or the explicit
- * YouGame Unranked Squad Strike row with exchanged, canonical lineups.
- * Offline: R clears the last extra; holding L clears the lineup and restores normal VS.
- * The online row picks four fighters with A; B removes the last pick, holding B clears them.
+ * A nonempty lineup selects Squad Strike in local stock singles VS. R removes the last
+ * extra fighter. Holding L clears the lineup and restores ordinary VS.
  */
 
 #include <stdbool.h>
@@ -26,9 +23,6 @@ struct GameCache;
 /* Explicit Online row. Virtual picker door 0 maps to the local controller;
  * negotiated game ports are imported only from the host's exchanged bytes. */
 bool gmSquad_OnlineChosen(void);
-bool gmSquad_LobbyChosen(void);
-void gmSquad_LobbyChoose(bool chosen);
-bool gmSquad_LobbyAdmission(void);
 bool gmSquad_OnlineReady(void);
 void gmSquad_GetBudgets(u32* main_bytes, u32* animation_bytes);
 void gmSquad_TrimOnline(StartMeleeData* start);
@@ -57,11 +51,6 @@ bool gmSquad_OnlineSelect(u8 coin_ck, u8 coin_color);
 /* Agent-test hook hosts only: the squadLineup the host gave for this CSS visit, once. */
 bool gmSquad_OnlineAgentLineup(MuSquadSide* out);
 bool gmSquad_OnlineBudget(void);
-/* Friends' synced select (a console session): want arms the host's costume rule (a skin over its
- * fighter's fixed size opens the disc's copy), sending the costume facts first when the host has
- * none; !want disarms it. The host's answer: 1 armed, 2 or 3 a standard copy is over its size (so
- * the fixed budget cannot hold), 0 off or no answer. */
-u8 gmSquad_ConsoleCostumes(bool want);
 bool gmSquad_OnlineSearchReady(void);
 const char* gmSquad_OnlineError(void);
 void gmSquad_OnlineNeedLineup(int count); /* "Pick 4 fighters first (n/4)." */

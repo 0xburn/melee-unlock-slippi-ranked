@@ -55,7 +55,6 @@ struct MemoryCadence {
 namespace host { void log(const char*, ...); }
 namespace host::pause_probe {
 inline bool enabled() {
-  // test_env::getenv deliberately hides diagnostics in YouGame; this probe must work there.
   static const bool on = [] {
     const char* value = std::getenv("MELEE_PAUSE_PROBE");
     return value && std::strcmp(value, "1") == 0;

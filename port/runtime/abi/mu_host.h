@@ -398,7 +398,7 @@ typedef struct MuHostApi {
 
     /* Version 21. The colour of the Arcade look's grid (MU_DISPLAY_OPTION_GRID), 0xRRGGBB. */
     uint32_t (*grid_color)(void);
-    /* Version 22. YouGame answers only the card scene's create/created prompts.
+    /* Version 22. Optional host answers to the card scene's create/created prompts.
      * The game still probes, creates and writes the save using its own disc assets. */
     int32_t (*card_boot_confirm)(uint32_t channel, uint32_t decision);
     /* Version 22. Session-gated diagnostic environment; NULL means unset. */

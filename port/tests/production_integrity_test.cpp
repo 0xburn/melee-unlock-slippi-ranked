@@ -143,7 +143,7 @@ static void overlay_tests(const fs::path& root) {
   fs::remove(iso);
 }
 static std::string content_key(const fs::path& iso) {
-  return "yougame-gc-content-2|" + fs::absolute(iso).u8string() + "|" + std::to_string(fs::file_size(iso)) + "|" +
+  return "melee-gc-content-2|" + fs::absolute(iso).u8string() + "|" + std::to_string(fs::file_size(iso)) + "|" +
       std::to_string((int64_t)fs::last_write_time(iso).time_since_epoch().count());
 }
 static double timed_verdict(const fs::path& iso, const ScanOptions& options, bool fresh) {

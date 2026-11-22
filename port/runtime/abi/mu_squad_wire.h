@@ -14,7 +14,7 @@
  * either bit the inviter's game says the friend's game can't play it; a later build that drops
  * both bits is a refusal (that game can't load Squad Strike). 0x20, 0x40 are taken. */
 #define MU_SQUAD_FRIEND_CAP 0x80
-#define MU_SQUAD_COMMAND 0xEC /* private game/host ABI, never a YouGame bridge key */
+#define MU_SQUAD_COMMAND 0xEC /* private game/host ABI */
 /* Friend rooms: {op, action}, 1 byte back.
  * QUERY: does this friend room play Squad Strike? MU_SQUAD_ROOM_PLAIN, MU_SQUAD_ROOM_SQUAD (our
  *   pick for this room, or the friend's pick), or MU_SQUAD_ROOM_WAITING (the friend's build has
@@ -44,19 +44,6 @@
 /* Harness observations only; private host ABI, never passed to Slippi dispatch. */
 #define MU_SQUAD_OP_DIGEST_FRAME 9
 #define MU_SQUAD_OP_DIGEST_END 10
-/* Friends' synced select (a console session): costumes and hats are charged at their fighter's
- * fixed size there too, so while squads are in play the host opens the standard copy for a skin
- * over it, as in an online squad match. {op, OFF or ARM}, 1 byte back: OFF 1; ARM 0 the host has
- * no facts yet (send them, then ARM again), 1 armed, 2 the disc's own copy of a costume is over its
- * size, 3 a mod's (Friends squads are then refused). {op, FACT, use, kind (4), bytes (4), name NUL}:
- * one costume or hat fact, laid out as op 3's from its second byte. Host-local, never sent to a
- * peer. */
-/* Frozen Friends setup mode, one byte back; independent of the select's last choice. */
-#define MU_SQUAD_OP_LOBBY_MODE 13
-#define MU_SQUAD_OP_CONSOLE 12
-#define MU_SQUAD_CONSOLE_OFF 0
-#define MU_SQUAD_CONSOLE_ARM 1
-#define MU_SQUAD_CONSOLE_FACT 3
 /* Version 3: every side is exactly MU_SQUAD_LINEUP = 4 fighters (version 2 was exactly 3, version 1
  * allowed 1 to 4). Another version's 0xE3 is refused (mu_squad_decode), and the squad budget identity
  * names the lineup size too (slippi_online.cpp, op 2), so a 3-fighter build never shares a pool. */
@@ -85,8 +72,7 @@
  * still charged by gmSquad_Budget; no host arena or pack-loaded bit is hashed.
  * Costumes and Kirby's colour hats are charged and hashed at fixed per-fighter
  * constants (gmSquad_CostumeBytes), never their local lengths, so skins never
- * change the identity or the trim; in the match a local file over its constant
- * loads the disc's own copy (squad_costume_rule.h). */
+ * change the identity or the trim. */
 #define MU_SQUAD_ONLINE_ALLM 0xC96800u
 #define MU_SQUAD_ONLINE_ALLA 0x1100000u
 
@@ -108,7 +94,7 @@ static inline unsigned mu_squad_colors(unsigned kind)
     return kind < 26 ? colors[kind] : 0;
 }
 /* A colour that fighter has, else its last: the Friends lobby's costume clamp (mu_friends4_css.inc
- * mu_f4_color, yougame_lobby_setup.h costume_for) over Squad Strike's per-fighter colour counts.
+ * the native character select) over Squad Strike's per-fighter colour counts.
  * Character select runs every door colour through it before it becomes a pick, so a costume past
  * the fighter's own (an m-ex 7th) plays as its last colour and the lineup stays valid on the wire. */
 static inline unsigned char mu_squad_color(unsigned kind, unsigned color)

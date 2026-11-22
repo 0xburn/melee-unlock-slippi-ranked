@@ -486,7 +486,7 @@ DiscInfo parse_disc(std::ifstream& in, uint64_t image_size) {
   return info;
 }
 
-// YouGame desktop gcManifest's GALE01 rev 2 content identity (gc-content 2).
+// GALE01 rev 2 content identity (gc-content 2).
 constexpr const char kRetailContentFingerprint[] = "4852be98b97acd8def716d11a5b781f24f9fcfab";
 
 // Share the ISO fingerprint cache with source_host's layer fingerprints, using a versioned

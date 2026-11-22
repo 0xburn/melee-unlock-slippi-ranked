@@ -106,7 +106,7 @@ bool window_take_fullscreen_toggle();   // true once per Alt+Enter press in the 
 // True once each time the game window comes back to the front: exclusive fullscreen, which Windows
 // leaves on Alt+Tab, is entered again then.
 bool window_take_activation();
-bool window_take_escape();              // true once per game Esc press (also F1 under YouGame; Shift+Esc is app-only)
+bool window_take_escape();              // true once per game Esc press
 // Host-specific menu shortcut hint. Plain Esc also opens/backs the embedded game menu;
 // Shift+Esc belongs to the app.
 const char* window_menu_key();
@@ -130,10 +130,7 @@ inline std::wstring& window_title_debug() { static std::wstring debug = L"Melee 
 // owns the game window; nothing is shown for a hidden window.
 void loading_show(const wchar_t* what, size_t done, size_t total);
 void loading_close();
-// Runs the renderer's startup (DLSS, the graphics device, shaders) on a worker while the calling thread,
-// the window's own, keeps answering the window's messages and drawing the panel above; returns when it
-// is done and rethrows what it threw. Only in an app-backed launch (the YouGame app hosts or overlays the
-// game); any other launch, any other thread, or a second call inside one, runs it in place.
+// Run renderer startup work on the window thread.
 void window_responsive(const std::function<void()>& work);
 bool window_closed();
 void window_client_size(int* w, int* h);

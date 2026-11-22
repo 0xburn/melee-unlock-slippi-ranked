@@ -385,7 +385,7 @@ int mu_slippi_zelda_is_sheik(void)
 #if MU_SQUAD
     /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
      * Squads keep the picker's exact Zelda/Sheik kinds, also once a friend room turns them on. */
-    if (gmSquad_OnlineChosen() || gmSquad_LobbyChosen()) return 0;
+    if (gmSquad_OnlineChosen()) return 0;
 #endif
     return mu_slippi_menus_enabled() && zelda_sheik;
 }
@@ -650,7 +650,7 @@ void mu_slippi_splash_init(void)
     mu_replay_apply_game_info(&gmVsMelee_GetVsData()->start, last_match.game_info);
 #if MU_SQUAD
     /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-    if (gmSquad_OnlineChosen() || gmSquad_LobbyChosen()) gmSquad_OnlineSetup(&gmVsMelee_GetVsData()->start);
+    if (gmSquad_OnlineChosen()) gmSquad_OnlineSetup(&gmVsMelee_GetVsData()->start);
 #endif
 }
 
@@ -661,7 +661,7 @@ void mu_slippi_splash_init(void)
  * nobody. */
 static int squad_opponent_gone(const char* where)
 {
-    if (!gmSquad_OnlineLive(slp.mode) && !gmSquad_LobbyChosen()) return 0;
+    if (!gmSquad_OnlineLive(slp.mode)) return 0;
     if (!mu_slippi_load_match_state(NULL) &&
         last_match.connection_state == MU_SLP_MM_CONNECTION_SUCCESS) return 0;
     OSReport("squad: opponent gone at the %s (connection %u), back to the CSS\n", where,

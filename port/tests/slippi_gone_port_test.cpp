@@ -78,7 +78,7 @@ void the_gate_needs_every_peer_to_have_the_new_read() {
   const PeerBuildRow with_plain[3] = {fresh, plain, fresh};
   check(!EveryPeerReadsGoneOwnFrames(with_plain, 3), "a plain Slippi peer closes the gate");
   const PeerBuildRow with_old[3] = {fresh, fresh, old_build};
-  check(!EveryPeerReadsGoneOwnFrames(with_old, 3), "an older YouGame build closes the gate");
+  check(!EveryPeerReadsGoneOwnFrames(with_old, 3), "an older client closes the gate");
   const PeerBuildRow with_no_byte[3] = {before_byte, fresh, fresh};
   check(!EveryPeerReadsGoneOwnFrames(with_no_byte, 3), "a build from before the second byte closes the gate");
   check(!EveryPeerReadsGoneOwnFrames(all, 0), "no peers keeps the gate closed");

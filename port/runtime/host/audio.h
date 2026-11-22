@@ -8,8 +8,7 @@
 
 namespace host {
 void audio_set_volume(int volume);
-// The YouGame page's volume control, 0..100: a master over the game's own volume (what plays is
-// volume x page / 100), so it never changes the volume the player set and saves. Any thread.
+// Transient 0..100 volume multiplier, independent of the saved player volume.
 void audio_set_page_volume(int volume);
 // Replay viewer controls: while muted the game's sound is not queued at all (the volume setting
 // and the settings menu's own sounds are untouched). Any thread.

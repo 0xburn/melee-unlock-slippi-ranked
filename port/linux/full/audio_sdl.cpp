@@ -34,7 +34,7 @@ constexpr double MAX_SKEW = 0.001;
 
 std::atomic<int> g_volume{0};
 std::atomic<bool> g_muted{false};
-std::atomic<int> g_page_volume{100};  // audio_set_page_volume: the YouGame page's master
+std::atomic<int> g_page_volume{100};
 // What plays: the player's volume under the page's master (audio.h).
 int output_volume() { return g_volume.load(std::memory_order_relaxed) * g_page_volume.load(std::memory_order_relaxed) / 100; }
 std::atomic<double> g_speed{1.0};

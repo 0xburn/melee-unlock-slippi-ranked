@@ -132,8 +132,7 @@ u32 gmSquad_FileSize(const char* name, int* entry)
  * rev 2 file table, the largest of that fighter's colour slots), and each Kirby colour hat at the
  * largest of that copy's colour hats; Captain Falcon's is the English game's PlCaRe.usd. Indexed by
  * fighter kind (Ft_Kind_Mario 0 .. Sandbag 32). Every player charges the same bytes, so the budget
- * identity and the trim are the same for any skin pack; in an online squad match a local file over
- * its size loads the disc's own copy instead (the host's file lookup, squad_costume_rule.h).
+ * identity and the trim are the same for any skin pack.
  * Changing a value changes the identity: the game hashes the table. */
 static const u32 s_costume_worst[33] = {
     473526, 362982, 558539, 641744, 283994, 518222, 491576, 380180, /* Mr Fx Ca Dk Kb Kp Lk Sk */

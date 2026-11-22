@@ -18,17 +18,6 @@ int snprintf(char* buffer, __SIZE_TYPE__ size, const char* format, ...);
 static bool online_chosen, online_ready, host_supported, selection_accepted;
 /* Squad Strike in a friend room (Direct): each lock-in carries its lineup, there is no search. */
 static bool online_friend;
-static bool lobby_chosen;
-bool gmSquad_LobbyChosen(void) { return lobby_chosen; }
-void gmSquad_LobbyChoose(bool chosen)
-{
-    if (lobby_chosen != chosen) { gmSquad_ClearAll(); gmSquad_Disable(); online_ready = false; }
-    lobby_chosen = chosen;
-}
-bool gmSquad_LobbyAdmission(void)
-{
-    return false;
-}
 /* A friend room's lock-in, held until the friend's game is heard from (MU_SQUAD_ROOM_WAITING).
  * It is the one line shown without Squad Strike chosen: the friend may still pick it. */
 static const char wait_text[] = "Waiting for your friend's game...";
@@ -74,7 +63,7 @@ static u8 own_coin_pos;
 static bool saved_own;
 
 bool gmSquad_OnlineChosen(void) { return online_chosen; }
-bool gmSquad_OnlineReady(void) { return (online_chosen || lobby_chosen) && online_ready; }
+bool gmSquad_OnlineReady(void) { return online_chosen && online_ready; }
 bool gmSquad_OnlineFriend(void) { return online_chosen && online_friend; }
 bool gmSquad_OnlineLive(int mode)
 {
@@ -403,55 +392,6 @@ bool gmSquad_OnlineBudget(void)
     return budget_accepted;
 }
 
-/* Friends' costume rule (MU_SQUAD_OP_CONSOLE): one costume or hat fact, op 3's bytes after the
- * console op, with the same fixed size and name the identity scan sends. ctx is the fighter kind. */
-static void console_fact(void* ctx, const char* name, int use)
-{
-    u8 payload[138] = { MU_SQUAD_OP_CONSOLE, MU_SQUAD_CONSOLE_FACT };
-    size_t length;
-    s32 kind;
-    if (name == NULL || ctx == NULL || (use != GMSQUAD_FILE_COSTUME && use != GMSQUAD_FILE_HAT)) return;
-    length = strlen(name);
-    if (length > 126) return;
-    kind = *(const s32*) ctx;
-    payload[2] = (u8) use;
-    put32(payload + 3, (u32) kind);
-    put32(payload + 7, gmSquad_CostumeBytes(kind, use));
-    memcpy(payload + 11, name, length + 1);
-    mu_slippi_cmd(MU_SQUAD_COMMAND, payload, (unsigned) (12 + length), NULL, 0, NULL);
-}
-u8 gmSquad_ConsoleCostumes(bool want)
-{
-    u8 op[2] = { MU_SQUAD_OP_CONSOLE, MU_SQUAD_CONSOLE_OFF }, answer = 0;
-    unsigned got = 0;
-    int ck, color, target;
-    if (!want) {
-        mu_slippi_cmd(MU_SQUAD_COMMAND, op, sizeof op, NULL, 0, NULL);
-        return 0;
-    }
-    op[1] = MU_SQUAD_CONSOLE_ARM;
-    if (mu_slippi_cmd(MU_SQUAD_COMMAND, op, sizeof op, &answer, 1, &got) || got != 1) return 0;
-    if (answer != 0) return answer;
-    /* The host has no facts: every fighter's costumes, then every Kirby hat, as the identity scan. */
-    for (ck = 0; ck < 26; ++ck) {
-        for (color = 0; color < (int) mu_squad_colors((unsigned) ck); ++color) {
-            s32 extra, kind = mu_squad_fighter_kinds(ck, &extra);
-            mu_squad_fighter_files(kind, (u8) color, &kind, console_fact);
-            mu_squad_fighter_files(extra, (u8) color, &extra, console_fact);
-        }
-    }
-    for (color = 0; color < (int) mu_squad_colors(CKind_Kirby); ++color) {
-        for (target = 0; target < 26; ++target) {
-            s32 extra, kind = mu_squad_fighter_kinds(target, &extra);
-            mu_squad_copy_files(kind, (u8) color, &kind, console_fact);
-            mu_squad_copy_files(extra, (u8) color, &extra, console_fact);
-        }
-    }
-    got = 0;
-    if (mu_slippi_cmd(MU_SQUAD_COMMAND, op, sizeof op, &answer, 1, &got) || got != 1) return 0;
-    return answer;
-}
-
 /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
  * Test-only menu/CSS substitute, called solely by --online-test squad with --local-peer. */
 int gmSquad_OnlineTest(const int* picks, int n)
@@ -490,7 +430,7 @@ void gmSquad_OnlineSetup(StartMeleeData* start)
     online_ready = false;
     trim_text[0] = 0;
     gmSquad_ClearAll();
-    if ((!online_chosen && !lobby_chosen) || mu_slippi_cmd(MU_SQUAD_COMMAND, &query, 1, bytes, sizeof bytes, &got) ||
+    if (!online_chosen || mu_slippi_cmd(MU_SQUAD_COMMAND, &query, 1, bytes, sizeof bytes, &got) ||
         !mu_squad_decode(bytes, got, &setup)) return; /* agreed normal 1v1 */
     start->rules.match_kind = MatchKind_Stock;
     start->rules.is_teams = false;
@@ -526,9 +466,6 @@ void gmSquad_OnlineSetup(StartMeleeData* start)
 }
 #else
 /* Offline/Friends engine remains usable; this build has no squad online row. */
-bool gmSquad_LobbyChosen(void) { return false; }
-void gmSquad_LobbyChoose(bool chosen) { (void) chosen; }
-bool gmSquad_LobbyAdmission(void) { return false; }
 bool gmSquad_OnlineChosen(void) { return false; }
 bool gmSquad_OnlineReady(void) { return false; }
 bool gmSquad_OnlineEditable(void) { return false; }
@@ -548,7 +485,6 @@ void gmSquad_OnlineCss(void) {}
 bool gmSquad_OnlineSelect(u8 ck, u8 color) { (void) ck; (void) color; return false; }
 bool gmSquad_OnlineAgentLineup(MuSquadSide* out) { (void) out; return false; }
 bool gmSquad_OnlineBudget(void) { return false; }
-u8 gmSquad_ConsoleCostumes(bool want) { (void) want; return 0; }
 bool gmSquad_OnlineSearchReady(void) { return false; }
 void gmSquad_OnlineSetup(StartMeleeData* start) { (void) start; }
 int gmSquad_OnlineTest(const int* picks, int n) { (void) picks; (void) n; return -1; }

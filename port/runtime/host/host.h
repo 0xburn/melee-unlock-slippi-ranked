@@ -208,17 +208,14 @@ void request_user_exit();
 void set_replay_viewing(bool on);
 // Local launcher mailbox for an explicitly accepted lobby Direct match.
 // Only a normal completed game with one known winner contributes to W/L history.
-// Also YouGame's word that an online game ended (yougame::game_ended): `lras` is the port a No
-// Contest names (-1 none), `placements` the Game End record's four placement bytes when known.
+// lras is the No Contest port (-1 when absent). placements holds the four Game End placements.
 void publish_lobby_result(int winner_index, int end_method, int lras = -1, const uint8_t* placements = nullptr);
 // Relaunch this executable with the same command line, then shut down the way request_exit does,
 // so the replay is finalised and the pipeline cache written before the new process takes over.
 // Used for settings a running device cannot adopt, the graphics backend being the one that
 // matters today.
 void request_restart();
-// Called right before this game starts its own replacement (request_restart, restart_after_device_loss,
-// restart_with_mod_looks), so values this process took out of its environment at start (the YouGame
-// launcher's bridge) are there again for the new process.
+// Called before launching the replacement game process.
 void set_before_restart(void (*hook)());
 // The graphics device was lost (a driver reset, a display change): the game starts again in a new
 // process with the same command line and this one ends quietly, with no crash report. A loss again
