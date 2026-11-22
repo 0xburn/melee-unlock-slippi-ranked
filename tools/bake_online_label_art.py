@@ -22,7 +22,7 @@ KEEP = {'yougame_ranked', 'yougame_unranked', 'yougame_friends', 'yougame_double
 SQUAD_INK, SQUAD_TRACKING, SQUAD_SHIFT = 194, -0.6, 12
 # 186: the ink Squad Strike shows (194 columns drawn on a 192-texel quad from 200), which clears the ring.
 UNRANKED_INK, UNRANKED_TRACKING, UNRANKED_BASE = 186, -0.6, 24
-# Owner 11-21 (Crunch's ask): the YouGame page's rows drop the "YouGame" prefix, the page's heading already says YouGame.
+# 11-21: the YouGame page's rows drop the "YouGame" prefix, the page's heading already says YouGame.
 UNRANKED = [('un_yougame', '', 'Unranked'), ('un_both', 'Both', 'Unranked'), ('un_slippi', 'Slippi', 'Unranked')]
 # The YouGame page's other rows, set at the same scale as every other row (one letter height on both pages).
 YOUGAME_ROWS = {'yougame_ranked': 'Ranked', 'yougame_friends': 'Friends', 'yougame_doubles': 'Doubles'}
