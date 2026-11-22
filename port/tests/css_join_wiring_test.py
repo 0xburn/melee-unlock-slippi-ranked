@@ -9,7 +9,7 @@ def read(p): return (ROOT / p).read_text()
 class CssJoinWiring(unittest.TestCase):
     def test_fixed_byte_abi_and_version_gates(self):
         h=read('port/runtime/abi/mu_host.h')
-        self.assertIn('#define MU_HOST_API_VERSION 34',h)   # 33: main's pro AI tag robot (upstream 26); 34: display options
+        self.assertIn('#define MU_HOST_API_VERSION 33',h)   # 33: main's pro AI tag robot (upstream 26)
         self.assertIn('#define MU_GAME_API_VERSION 10',h)
         self.assertIn('int32_t (*css_state)(int32_t operation, void* bytes, uint32_t size)',h)
         self.assertIn('host->version != MU_HOST_API_VERSION',read('sourceport/game/shim/mu_entry.c'))

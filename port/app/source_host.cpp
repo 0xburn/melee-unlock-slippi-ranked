@@ -1670,11 +1670,17 @@ static_assert(gx::kArcadeHitboxes == MU_DISPLAY_OPTION_HITBOXES &&
               gx::kArcadeProjectileHitboxes == MU_DISPLAY_OPTION_PROJECTILE_HITBOXES &&
               gx::kArcadeHitboxesBehind == MU_DISPLAY_OPTION_HITBOXES_BEHIND && gx::kArcadeGrid == MU_DISPLAY_OPTION_GRID,
               "Arcade look bits");
+// "Show Training mode's HUD" off. MELEE_TEST_TRAINING_HUD=0|1 (tests) overrides the setting.
+bool training_hud_hidden() {
+  static const int env = [] { const char* v = host::test_env::getenv("MELEE_TEST_TRAINING_HUD"); return v && *v ? (*v == '0' ? 0 : 1) : -1; }();
+  return env >= 0 ? env == 0 : !gx::RenderOptions::live_training_hud();
+}
 // Display-only options (MU_DISPLAY_OPTION_*), read live by the native game's draw code. Never part
 // of a replay or of the match the opponent plays: the viewer's own, as the HUD sizes are.
 uint32_t h_display_options() {
   if (yougame::console::console_active()) return 0;
   return (gx::low_poly_fighters_active() ? MU_DISPLAY_OPTION_LOW_POLY : 0u) |
+         (training_hud_hidden() ? MU_DISPLAY_OPTION_NO_TRAINING_HUD : 0u) |
          (gx::player_tags_always_active() ? MU_DISPLAY_OPTION_PLAYER_TAGS : 0u) |
          (gx::fod_reflections_active() ? MU_DISPLAY_OPTION_FOD_REFLECTIONS : 0u) |
          (gx::css_background_free_active() ? MU_DISPLAY_OPTION_CSS_BACKGROUND_FREE : 0u) |
@@ -1702,13 +1708,6 @@ void h_hud_combo(int32_t slot, int32_t link_slot, float percent, int32_t stunned
 }
 void h_hud_extras(int32_t slot, int32_t nana_damage, int32_t team) { gx::set_native_hud_extras(slot, nana_damage, team); }
 void h_hud_pro_tag(int32_t slot, float dx, float width) { gx::set_native_hud_pro_tag(slot, dx, width); }
-// Display-only choices (mu_host.h MU_DISPLAY_*): each viewer's own, also online and in replays.
-// MELEE_TEST_TRAINING_HUD=0 (tests) hides Training's HUD without a settings file.
-uint32_t h_display_options() {
-  static const int env = [] { const char* v = host::test_env::getenv("MELEE_TEST_TRAINING_HUD"); return v && *v ? (*v == '0' ? 0 : 1) : -1; }();
-  const bool hud = env >= 0 ? env == 1 : gx::RenderOptions::live_training_hud();
-  return hud ? 0u : MU_DISPLAY_HIDE_TRAINING_HUD;
-}
 void h_hud_player(int32_t slot, int32_t present, int32_t damage, int32_t stocks, float tag_x, float tag_y,
                   int32_t tag_visible) {
   gx::set_native_hud_player(slot, present != 0, damage, stocks, tag_x, tag_y, tag_visible != 0);
@@ -5465,7 +5464,6 @@ MuHostApi make_host() {
   h.hud_extras = h_hud_extras;
   h.native_rtx_semantics = h_native_rtx_semantics;
   h.hud_pro_tag = h_hud_pro_tag;
-  h.display_options = h_display_options;
   return h;
 }
 

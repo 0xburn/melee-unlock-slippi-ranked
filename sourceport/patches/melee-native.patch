@@ -106780,7 +106780,7 @@ index 8bbd8c0c5..d47747183 100644
  /* 187F48 */ void gm_Scene_IntroNormal_OnEnter(UNK_T);
  /* 188364 */ void gm_Scene_IntroNormal_OnLeave(UNK_T);
 diff --git a/src/melee/gm/gm_1884.c b/src/melee/gm/gm_1884.c
-index d2318284a..997a996d6 100644
+index d2318284a..87109a786 100644
 --- a/src/melee/gm/gm_1884.c
 +++ b/src/melee/gm/gm_1884.c
 @@ -4,8 +4,8 @@
@@ -106893,7 +106893,7 @@ index d2318284a..997a996d6 100644
 +static void mu_training_hud_draw(HSD_GObj* gobj, intptr_t code)
 +{
 +    extern unsigned int mu_display_options(void);
-+    if ((mu_display_options() & 0x1u) && gm_80473814.anim_frames[22] >= 30) {
++    if ((mu_display_options() & MU_DISPLAY_NO_TRAINING_HUD) && gm_80473814.anim_frames[22] >= 30) {
 +        return;
 +    }
 +    HSD_GObj_JObjCallback(gobj, code);

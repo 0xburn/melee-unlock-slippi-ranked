@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-#define MU_HOST_API_VERSION 34
+#define MU_HOST_API_VERSION 33
 #define MU_GAME_API_VERSION 10
 #define MU_SLIPPI_RESPONSE_CAPACITY 4096u
 
@@ -441,12 +441,7 @@ typedef struct MuHostApi {
      * the name. `dx` is the robot's centre right of the tag's x and `width` the room the name left for
      * it, both in 640x480 units; width 0 when this tag has none. Display only. */
     void (*hud_pro_tag)(int32_t slot, float dx, float width);
-    /* Version 34. Display-only choices the game reads live (MU_DISPLAY_*). Never gameplay, never
-     * recorded: a replay or an online match shows each viewer's own. */
-    uint32_t (*display_options)(void);
 } MuHostApi;
-/* Training mode's HUD (speed, enemy, damage panels) is not drawn while its menu is closed. */
-#define MU_DISPLAY_HIDE_TRAINING_HUD 0x1u
 
 /* Start each new sound in the sound frame being mixed now instead of the next one (5 ms sooner):
  * the game's sound callback owed at the end of a frame runs at the top of the next one, before
@@ -502,6 +497,7 @@ typedef struct MuHostApi {
 #define MU_DISPLAY_OPTION_VCANCEL_SOUND      0x00200000u   /* the menu's confirm sound on a successful V-cancel */
 #define MU_DISPLAY_OPTION_NO_FIGHTER_SHADOWS 0x01000000u   /* No Character Shadows: fighters cast no shadow on the stage */
 #define MU_DISPLAY_OPTION_CENTER_2P_HUD      0x04000000u   /* Center Align 2P HUD: players 1 and 2 only, the HUD laid out for two */
+#define MU_DISPLAY_OPTION_NO_TRAINING_HUD    0x08000000u   /* Training's speed, enemy and damage panels are not drawn while its menu is closed */
 #define MU_DISPLAY_OPTION_CODES_ALL 0x053FF000u
 /* Offline community codes: they change menu timing and the pause, so the host sends them only
  * outside network play (source_host.cpp h_display_options). Saved with the codes above. */
