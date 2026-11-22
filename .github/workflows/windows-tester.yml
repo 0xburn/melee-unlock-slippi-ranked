@@ -22,6 +22,20 @@ jobs:
           cmake -S . -B wh -A x64 -DMELEE_BUILD_EXPERIMENTAL_PORT=ON -DMELEE_SQUAD_STRIKE=OFF "-DPORT_GEN=$gen" "-DMELEE_DXC_EXECUTABLE=$dxc"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build wh --config Release --target melee_source --parallel 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-fork-binaries
+          path: |
+            wh/port/Release/*
+
+  game:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned native sources
+        run: |
+          git submodule update --init --depth 1 sourceport/extern/melee
+          python tools/prepare_native_sources.py
       - name: Build x64 game library
         shell: pwsh
         run: |
@@ -31,8 +45,7 @@ jobs:
           cmake --build wg --target melee_game --parallel 4
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-fork-binaries
+          name: windows-fork-game
           path: |
-            wh/port/Release/*
-            wg/**/melee_game.dll
-            wg/**/melee_game.snapexcl
+            wg/melee_game.dll
+            wg/melee_game.snapexcl

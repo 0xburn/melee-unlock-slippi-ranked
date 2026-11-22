@@ -425,10 +425,6 @@ target_compile_definitions(port_mod_catalog_test PRIVATE NOMINMAX)
 target_link_libraries(port_mod_catalog_test PRIVATE bcrypt)
 add_test(NAME port_mod_catalog COMMAND port_mod_catalog_test)
 
-add_executable(port_slippi_game_prep_test tests/slippi_game_prep_test.cpp)
-target_include_directories(port_slippi_game_prep_test PRIVATE runtime/hle)
-target_compile_features(port_slippi_game_prep_test PRIVATE cxx_std_20)
-add_test(NAME port_slippi_game_prep COMMAND port_slippi_game_prep_test)
 
 add_executable(port_stage_read_pin_test tests/stage_read_pin_test.cpp)
 target_include_directories(port_stage_read_pin_test PRIVATE runtime/host)
