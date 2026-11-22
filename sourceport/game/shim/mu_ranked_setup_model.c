@@ -171,47 +171,48 @@ int mu_ranked_setup_packet(const MuRankedSetupModel* m, const MuRankedSetupChoic
             if (!mu_ranked_setup_stage_allowed(m, c.stages[i])) return 0;
             for (j = 0; j < i; ++j) if (c.stages[i] == c.stages[j]) return 0;
         }
-        /* :894-925, fill missing selections with first enabled stages. */
         n = m->set->cur_game == 1 ? 5 : 6;
         pool = n == 5 ? m->policy.starters : m->policy.counterpicks;
-        for (i = 0; i < n && c.count < s->count; ++i) {
-            int used = 0;
-            for (j = 0; j < c.count; ++j) used |= c.stages[j] == pool[i];
-            if (!used && mu_ranked_setup_stage_allowed(m, pool[i])) c.stages[c.count++] = pool[i];
-        }
-        if (c.count != s->count) return 0;
-        /* Canonical pool order, matching selected-selector traversal (:904). */
-        if (c.count == 2) {
-            unsigned a = 0, b = 0;
-            for (i = 0; i < n; ++i) {
-                if (pool[i] == c.stages[0]) a = i;
-                if (pool[i] == c.stages[1]) b = i;
+        /* Stock CompleteCurrentStep emits selected icons in display order.
+         * On timeout it then appends enabled icons, starting again at the
+         * first one. A selected icon is still enabled. */
+        unsigned committed = 0;
+        for (i = 0; i < n; ++i) {
+            for (j = 0; j < c.count; ++j) {
+                if (pool[i] == c.stages[j]) out[3 + committed++] = (MuRankU8)pool[i];
             }
-            if (a > b) { MuRankU16 tmp = c.stages[0]; c.stages[0] = c.stages[1]; c.stages[1] = tmp; }
         }
-        for (i = 0; i < c.count; ++i) out[3+i] = (MuRankU8)c.stages[i];
+        for (i = 0; i < n && committed < s->count; ++i) {
+            if (mu_ranked_setup_stage_allowed(m, pool[i]))
+                out[3 + committed++] = (MuRankU8)pool[i];
+        }
+        if (committed != s->count) return 0;
     }
     return 1;
 }
 int mu_ranked_setup_apply(MuRankedSetupModel* m, unsigned player, const MuRankU8 packet[5])
 {
     const MuRankedSetupStep* s = mu_ranked_setup_current(m);
-    MuRankedSetupChoice c;
-    MuRankU8 checked[5];
     unsigned i;
     if (!s || !packet || player != s->player || packet[0] != m->step) return 0;
-    memset(&c, 0, sizeof c);
-    c.character = packet[1]; c.color = packet[2];
     if (s->type == MU_SETUP_STAGE || s->type == MU_SETUP_STRIKE) {
-        c.count = s->count; c.stages[0] = packet[3]; c.stages[1] = packet[4];
-    }
-    if (!mu_ranked_setup_packet(m, &c, 0, checked) || memcmp(checked, packet, 5)) return 0;
-    if (s->type == MU_SETUP_STRIKE) {
-        for (i = 0; i < s->count; ++i) m->removed[m->removed_count++] = c.stages[i];
-    } else if (s->type == MU_SETUP_STAGE) m->result.stage = c.stages[0];
-    else {
-        m->result.fighters[player].character = c.character;
-        m->result.fighters[player].color = c.color;
+        for (i = 0; i < s->count; ++i)
+            if (!mu_ranked_setup_stage_allowed(m, packet[3 + i])) return 0;
+        if (s->count == 2 && packet[3] == packet[4]) {
+            /* A stock partial timeout can repeat only its first enabled icon. */
+            const MuRankU16* pool = m->set->cur_game == 1 ? m->policy.starters : m->policy.counterpicks;
+            unsigned n = m->set->cur_game == 1 ? 5 : 6;
+            for (i = 0; i < n && !mu_ranked_setup_stage_allowed(m, pool[i]); ++i) {}
+            if (i == n || packet[3] != pool[i]) return 0;
+        }
+        if (s->type == MU_SETUP_STRIKE)
+            for (i = 0; i < s->count; ++i) m->removed[m->removed_count++] = packet[3 + i];
+        else m->result.stage = packet[3];
+    } else {
+        if (s->type == MU_SETUP_COLOR && packet[1] != m->initial[player].character) return 0;
+        if (!mu_ranked_setup_color_allowed(m, player, packet[1], packet[2])) return 0;
+        m->result.fighters[player].character = packet[1];
+        m->result.fighters[player].color = packet[2];
     }
     ++m->step; m->frames = 0;
     if (m->step == m->step_count) {

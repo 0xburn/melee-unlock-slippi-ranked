@@ -148,7 +148,7 @@ static void timers() {
   m=mu_ranked_setup_model();s=mu_ranked_setup_current(m);CHECK(s->count==2 && s->player==1);
   limit=60u*(s->seconds+policy.grace_seconds);
   for(unsigned i=0;i<=limit;++i)mu_ranked_setup_frame();
-  CHECK(m->removed_count==3 && m->removed[1]==28 && m->removed[2]==32);
+  CHECK(m->removed_count==3 && m->removed[1]==32 && m->removed[2]==28);
   while(mu_ranked_setup_current(m))step();match.remote_ready=0;
   for(unsigned i=0;i<900;++i)mu_ranked_setup_frame();CHECK(!exits);
   mu_ranked_setup_frame();CHECK(exits==1 && c2_mode==1);

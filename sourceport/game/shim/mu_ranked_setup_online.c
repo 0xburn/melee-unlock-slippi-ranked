@@ -130,12 +130,20 @@ void mu_ranked_setup_set_draft(const MuRankedSetupChoice* choice)
     draft_step = model.step;
     if (choice) draft = *choice;
 }
+static void log_step(const char* direction, unsigned index, const MuRankU8* values)
+{
+    char line[96];
+    snprintf(line, sizeof line, "ranked setup: %s step %u char %u color %u stages %u,%u\n",
+             direction, index, values[0], values[1], values[2], values[3]);
+    mu_online_abi_log(line);
+}
 int mu_ranked_setup_submit(const MuRankedSetupChoice* choice, int automatic)
 {
     MuRankU8 packet[5];
     const MuRankedSetupStep* s = mu_ranked_setup_current(&model);
     if (!s || s->player != model.local_player || ended ||
         !mu_ranked_setup_packet(&model, choice, automatic, packet)) return 0;
+    log_step("send", packet[0], packet+1);
     /* :949-958: only the controlling seat sends C0. Apply only after send succeeds. */
     if (mu_slippi_cmd(0xC0, packet, sizeof packet, NULL, 0, NULL)) { abort_setup("step send refused"); return 0; }
 #if defined(MU_RANKED_TEST_CPU)
@@ -187,6 +195,7 @@ void mu_ranked_setup_frame(void)
         }
 #endif
         if (response[0]) {
+            log_step("receive", model.step, response+2);
             if (!mu_ranked_setup_remote(&model, response)) { abort_setup("opponent step invalid"); return; }
             publish_result();
         } else if (timeout == MU_SETUP_REMOTE_TIMEOUT) abort_setup("opponent timed out");

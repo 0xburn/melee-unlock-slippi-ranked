@@ -94,7 +94,22 @@ static void timers() {
   CHECK(mu_ranked_setup_model_init(&m,&p,&set,0,&r)); automatic(m);
   MuRankedSetupChoice draft{}; draft.count=1; draft.stages[0]=32;
   CHECK(!mu_ranked_setup_packet(&m,&draft,0,b)); CHECK(mu_ranked_setup_packet(&m,&draft,1,b));
-  CHECK(b[3]==28 && b[4]==32); CHECK(mu_ranked_setup_apply(&m,1,b));
+  CHECK(b[3]==32 && b[4]==28); CHECK(mu_ranked_setup_apply(&m,1,b));
+
+  // Stock GameSetup partial timeout: one selected icon precedes the first
+  // enabled icon. If they're the same icon, stock sends its ID twice.
+  for (MuRankU8 selected : {28, 32}) {
+    set=fresh(); CHECK(mu_ranked_setup_model_init(&m,&p,&set,0,&r)); automatic(m);
+    MuRankedSetupChoice partial{}; partial.count=1; partial.stages[0]=selected;
+    CHECK(mu_ranked_setup_packet(&m,&partial,1,b));
+    CHECK(b[0]==3 && b[3]==selected && b[4]==28);
+    MuRankU8 duplicate_nonfirst[6]={1,0,0,0,32,32};
+    CHECK(!mu_ranked_setup_remote(&m,duplicate_nonfirst));
+    MuRankU8 disabled[6]={1,0,0,0,2,28}; CHECK(!mu_ranked_setup_remote(&m,disabled));
+    MuRankU8 reply[6]={1,0,0,0,selected,28};
+    CHECK(mu_ranked_setup_remote(&m,reply)); CHECK(m.step==4);
+    automatic(m); CHECK(m.status==MU_SETUP_COMPLETE && m.result.stage==31);
+  }
 }
 static void interleave() {
   const auto p=mu_slippi_ranked_policy();
