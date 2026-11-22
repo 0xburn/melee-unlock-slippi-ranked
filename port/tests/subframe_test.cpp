@@ -268,9 +268,15 @@ int main() {
     paused_previous.joints[0].frame = 1000; paused_previous.joints[0].translation[0] = 0; paused_previous.joints[0].world[3] = 0;
     check(gx::sample_authored(paused_previous, paused_current, .5, joint.world.data(), out, nrm, ident_n) && near(out[3], 7.5f),
           "advancing long-running animation still samples at its declared rate");
+    // A speed change (the game sets a run's or a drift's rate from the velocity): the frame advanced by the new
+    // rate, so Predict samples on at that rate instead of holding the joint for the frame (11-21: 60 Hz steps).
     paused_previous.joints[0].rate = .5f;
+    check(gx::sample_authored(paused_previous, paused_current, .5, joint.world.data(), out, nrm, ident_n) && near(out[3], 7.5f),
+          "retimed animation predicts at its new rate");
+    // A frame that neither rate explains is no continuation: it waits for a continuous pair.
+    paused_previous.joints[0].frame = 999.25f;
     check(!gx::sample_authored(paused_previous, paused_current, .5, joint.world.data(), out, nrm, ident_n),
-          "retimed animation waits for a continuous pair before predicting");
+          "a clock neither rate explains waits for a continuous pair before predicting");
   }
   current_pose.joints[0].end = 1;
   check(!gx::sample_authored(previous_pose, current_pose, 0.5, joint.world.data(), out, nrm, ident_n), "authored sampling holds at animation boundary");
