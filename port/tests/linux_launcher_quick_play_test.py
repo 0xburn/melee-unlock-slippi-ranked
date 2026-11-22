@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='mu-quick-play-') as temporary:
     result = subprocess.run([str(exe), '--play', '--iso', str(disc), '--version'], env=env,
                             capture_output=True, text=True, timeout=20)
     assert result.returncode == 37, result.stderr
-    for tail in (['--iso'], ['--iso', str(root/'missing.iso')]):
+    for tail in (['--iso'], ['--iso', str(root/'missing.iso')], ['--mod']):
         result = subprocess.run([str(exe), '--play', *tail], env=env, capture_output=True, text=True, timeout=20)
         assert result.returncode == 2 and result.stderr, (tail, result.returncode)
     # --play --mod <name>: an installed mod disc by (part of) its file name, with its own card folder.
@@ -53,6 +53,15 @@ with tempfile.TemporaryDirectory(prefix='mu-quick-play-') as temporary:
     assert args[-2:] == ['--frames', '1']
     result = subprocess.run([str(exe), '--play', '--mod', 'nothing'], env=env, capture_output=True, text=True, timeout=20)
     assert result.returncode == 2 and 'Akaneia' in result.stderr, (result.returncode, result.stderr)
+    save = root / 'Mods/Saves/Training Mode.gci'
+    save.parent.mkdir(exist_ok=True)
+    save.write_bytes(b'test save')
+    result = subprocess.run([str(exe), '--play', '--iso', disc.name, '--mod', 'TRAIN'],
+                            cwd=root, env=env, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 37, (result.returncode, result.stderr)
+    args = output.read_text().splitlines()
+    assert args[args.index('--iso') + 1] == str(disc), args
+    assert args[-4:] == ['--mod-gci', str(save), '--card-dir', str(root / 'User/GC/Mods/Training Mode')], args
     # An unzip tool that drops file modes: the launcher gives the game back its exec bit and starts it.
     for name in ('melee_source', 'melee_source_compat'):
         (root / name).chmod(0o644)

@@ -814,6 +814,52 @@ int main(int argc, char** argv) {
   g_dir = exe_dir();
   host::g_log = std::fopen((g_dir + "/launcher.log").c_str(), "w");
   load_ini();
+  // Steam Game Mode: open the game directly with the saved ISO, CPU compatibility choice,
+  // controller/card paths and replay preference, without creating a launcher window.
+  if (argc > 1 && std::strcmp(argv[1], "--play") == 0) {
+    std::vector<std::string> extra;
+    std::string mod_name;
+    for (int i = 2; i < argc; ++i) {
+      if (std::strcmp(argv[i], "--iso") == 0) {
+        if (++i == argc) { std::fprintf(stderr, "--iso requires a disc path\n"); return 2; }
+        g_iso = fs::absolute(fs::u8path(argv[i])).string();
+      } else if (std::strcmp(argv[i], "--mod") == 0) {
+        if (++i == argc) { std::fprintf(stderr, "--mod requires the name of an installed mod\n"); return 2; }
+        mod_name = argv[i];
+      } else extra.push_back(argv[i]);
+    }
+    // --play --mod <name>: straight into an installed mod (a disc in Mods/Discs or a save in Mods/Saves),
+    // as its Play button on the Mods page starts it. The name is the file's name without the extension,
+    // or any part of it, upper or lower case ("akaneia" finds Akaneia.iso).
+    if (!mod_name.empty()) {
+      auto lower = [](std::string t) { for (char& c : t) c = (char)std::tolower((unsigned char)c); return t; };
+      refresh_mods();
+      const std::string want = lower(mod_name);
+      const ModDisc* found = nullptr;
+      for (const ModDisc& m : g_mods) if (lower(m.path.stem().string()) == want) { found = &m; break; }
+      if (!found) for (const ModDisc& m : g_mods) if (lower(m.path.stem().string()).find(want) != std::string::npos) { found = &m; break; }
+      if (!found) {
+        std::fprintf(stderr, "No installed mod is named \"%s\". Installed:\n", mod_name.c_str());
+        for (const ModDisc& m : g_mods) std::fprintf(stderr, "  %s\n", m.path.stem().string().c_str());
+        if (g_mods.empty()) std::fprintf(stderr, "  (none: get one on the launcher's Mods page, or put its .iso in Mods/Discs)\n");
+        return 2;
+      }
+      extra.insert(extra.begin(), {found->kind == "te" ? "--mod-gci" : "--mod-iso", found->path.string(), "--card-dir",
+                                   g_dir + "/User/GC/Mods/" + found->path.stem().string()});
+    }
+    if (!check_ready()) { std::fprintf(stderr, "%s\n", status_text().c_str()); return 2; }
+    auto args = base_args();
+    args.insert(args.end(), extra.begin(), extra.end());
+    std::vector<char*> command;
+    for (auto& arg : args) command.push_back(arg.data());
+    command.push_back(nullptr);
+    if (chdir(g_dir.c_str()) != 0) { std::perror("game folder"); return 1; }
+    if (const std::string why = game_runnable(args[0]); !why.empty()) { std::fprintf(stderr, "%s\n", why.c_str()); return 1; }
+    // Replacing this process lets Steam track the game and receive its real exit status.
+    execv(command[0], command.data());
+    std::perror("Melee Unlocked could not start");
+    return 1;
+  }
   refresh_replays();
   refresh_mods();
   host::updater::check(MELEE_PORT_VERSION);
