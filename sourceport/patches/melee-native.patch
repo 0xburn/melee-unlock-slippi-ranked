@@ -106780,7 +106780,7 @@ index 8bbd8c0c5..d47747183 100644
  /* 187F48 */ void gm_Scene_IntroNormal_OnEnter(UNK_T);
  /* 188364 */ void gm_Scene_IntroNormal_OnLeave(UNK_T);
 diff --git a/src/melee/gm/gm_1884.c b/src/melee/gm/gm_1884.c
-index d2318284a..04e12b701 100644
+index d2318284a..997a996d6 100644
 --- a/src/melee/gm/gm_1884.c
 +++ b/src/melee/gm/gm_1884.c
 @@ -4,8 +4,8 @@
@@ -106879,17 +106879,29 @@ index d2318284a..04e12b701 100644
              }
  
              fn_80188550(sub->menu_values[2] + 1);
-@@ -834,9 +847,6 @@ void fn_801891F4(void)
+@@ -834,8 +847,19 @@ void fn_801891F4(void)
          sub->x01 = 0;
      }
  }
 -#ifdef MUST_MATCH
 -#pragma dont_inline off
--#endif
++
++#ifdef MU_NATIVE
++/* Training's HUD (speed, enemy and the damage panels) is the player's to hide (Settings, Practice:
++ * Training HUD). It still shows while its menu opens or is open, so every setting stays in reach.
++ * Picture only: nothing the game reads changes. */
++static void mu_training_hud_draw(HSD_GObj* gobj, intptr_t code)
++{
++    extern unsigned int mu_display_options(void);
++    if ((mu_display_options() & 0x1u) && gm_80473814.anim_frames[22] >= 30) {
++        return;
++    }
++    HSD_GObj_JObjCallback(gobj, code);
++}
+ #endif
  
  void fn_80189B88(void)
- {
-@@ -853,12 +863,12 @@ void fn_80189B88(void)
+@@ -853,12 +877,16 @@ void fn_80189B88(void)
      HSD_GObj_SetupProc(GObj_Create(0xE, 2, 0), (HSD_GObjEvent) fn_801891F4,
                         0x15);
      gobj = GObj_Create(0xE, 0xF, 0);
@@ -106897,14 +106909,18 @@ index d2318284a..04e12b701 100644
 +    jobj = HSD_JObjLoadJoint(DP(DP(*lbl_804D662C)->joint));
      gm_80473814.gobj = gobj;
      HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
++#ifdef MU_NATIVE
++    GObj_SetupGXLink(gobj, mu_training_hud_draw, 0xB, 0);
++#else
      GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 0xB, 0);
++#endif
      HSD_GObj_SetupProc(gobj, (HSD_GObjEvent) fn_80188EE8, 0x11);
 -    gm_8016895C(jobj, *lbl_804D662C, 0);
 +    gm_8016895C(jobj, DP(*lbl_804D662C), 0);
      HSD_JObjReqAnimAll(jobj, 0.0f);
      HSD_JObjAnimAll(jobj);
      for (i = 0; i < 0x27; i++) {
-@@ -918,7 +928,7 @@ HSD_Text* fn_8018A000(void)
+@@ -918,7 +946,7 @@ HSD_Text* fn_8018A000(void)
      state = &lbl_80473700;
      memzero(state->result_cache, sizeof(state->result_cache));
      lbl_804D6628 = lbArchive_80016DBC("GmTrain", &lbl_804D662C,
@@ -153046,10 +153062,20 @@ index 647a3e6d4..35a9cbfab 100644
  
  #endif
 diff --git a/src/melee/it/itanimlist.c b/src/melee/it/itanimlist.c
-index 0504eb683..dc6145b8f 100644
+index 0504eb683..fda4bd006 100644
 --- a/src/melee/it/itanimlist.c
 +++ b/src/melee/it/itanimlist.c
-@@ -32,7 +32,11 @@ ItCmd it_803F22A8[16] = {
+@@ -9,6 +9,9 @@
+ #include "item.h"
+ #include "ithitbox.h"
+ #include <melee/lb/inlines.h>
++#ifdef MU_NATIVE
++#include <dolphin/os.h>
++#endif
+ #include <melee/lb/lb_013B.h>
+ #include <melee/lb/lbcommand.h>
+ #include <sysdolphin/baselib/gobjproc.h>
+@@ -32,7 +35,11 @@ ItCmd it_803F22A8[16] = {
      it_802798D4, it_8027990C, it_80279958, it_802799A8,
  };
  
@@ -153062,7 +153088,7 @@ index 0504eb683..dc6145b8f 100644
      u16 x0_b0 : 6;
      u16 opcode : 8;
      u16 x0_b14 : 2;
-@@ -48,29 +52,24 @@ void it_80278F2C(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -48,29 +55,24 @@ void it_80278F2C(Item_GObj* item_gobj, CommandInfo* cmd)
      s32 arg6;
      PAD_STACK(4);
  
@@ -153101,7 +153127,7 @@ index 0504eb683..dc6145b8f 100644
  void it_802790C0(Item_GObj* item_gobj, CommandInfo* cmd)
  {
      u8 _padA[16];
-@@ -102,8 +101,8 @@ void it_802790C0(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -102,8 +104,8 @@ void it_802790C0(Item_GObj* item_gobj, CommandInfo* cmd)
          hit->jobj = item_gobj->hsd_obj;
      }
      it_80272460(hit,
@@ -153112,7 +153138,7 @@ index 0504eb683..dc6145b8f 100644
                  item_gobj);
      ++cmd->u;
  
-@@ -133,15 +132,15 @@ void it_802790C0(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -133,15 +135,15 @@ void it_802790C0(Item_GObj* item_gobj, CommandInfo* cmd)
      hit->x40_b3 = cmd->u->it_create_hitbox_4.x40_b3;
      ++cmd->u;
  
@@ -153137,7 +153163,7 @@ index 0504eb683..dc6145b8f 100644
      hit->x42_b4 = (((u8*) cmd->u)[2] >> 7) & 1;
      hit->x42_b5 = (((u8*) cmd->u)[2] >> 6) & 1;
      hit->x42_b6 = (((u8*) cmd->u)[2] >> 5) & 1;
-@@ -158,22 +157,13 @@ void it_802790C0(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -158,22 +160,13 @@ void it_802790C0(Item_GObj* item_gobj, CommandInfo* cmd)
      }
  }
  
@@ -153162,7 +153188,7 @@ index 0504eb683..dc6145b8f 100644
      ++cmd->u;
  }
  
-@@ -189,15 +179,6 @@ void it_802795EC(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -189,15 +182,6 @@ void it_802795EC(Item_GObj* item_gobj, CommandInfo* cmd)
      ++cmd->u;
  }
  
@@ -153178,7 +153204,7 @@ index 0504eb683..dc6145b8f 100644
  void it_80279680(Item_GObj* item_gobj, CommandInfo* cmd)
  {
      it_80272560(item_gobj, cmd->u->set_throw_flags.hit_idx);
-@@ -210,10 +191,6 @@ void it_802796C4(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -210,10 +194,6 @@ void it_802796C4(Item_GObj* item_gobj, CommandInfo* cmd)
      ++cmd->u;
  }
  
@@ -153189,7 +153215,7 @@ index 0504eb683..dc6145b8f 100644
  void it_802796FC(Item_GObj* item_gobj, CommandInfo* cmd)
  {
      Item* it = GET_ITEM(item_gobj);
-@@ -242,10 +219,6 @@ void it_80279768(Item_GObj* gobj, CommandInfo* cmd)
+@@ -242,10 +222,6 @@ void it_80279768(Item_GObj* gobj, CommandInfo* cmd)
      ++cmd->u;
  }
  
@@ -153200,7 +153226,7 @@ index 0504eb683..dc6145b8f 100644
  void it_8027978C(Item_GObj* item_gobj, CommandInfo* cmd)
  {
      Item* item = item_gobj->user_data;
-@@ -256,60 +229,41 @@ void it_8027978C(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -256,60 +232,41 @@ void it_8027978C(Item_GObj* item_gobj, CommandInfo* cmd)
      u8 arg3;
      PAD_STACK(8);
      cmd->u = (union CmdUnion*) (ptr + 1);
@@ -153285,7 +153311,7 @@ index 0504eb683..dc6145b8f 100644
  
  void it_80279888(Item_GObj* item_gobj, CommandInfo* cmd)
  {
-@@ -332,10 +286,6 @@ void it_8027990C(Item_GObj* item_gobj, CommandInfo* cmd)
+@@ -332,10 +289,6 @@ void it_8027990C(Item_GObj* item_gobj, CommandInfo* cmd)
      NEXT_CMD(cmd);
  }
  
@@ -153296,7 +153322,7 @@ index 0504eb683..dc6145b8f 100644
  void it_80279958(Item_GObj* item_gobj, CommandInfo* cmd)
  {
      Item* it = GET_ITEM(item_gobj);
-@@ -366,42 +316,32 @@ void it_802799E4(Item_GObj* item_gobj)
+@@ -366,42 +319,46 @@ void it_802799E4(Item_GObj* item_gobj)
          cmd->timer -= item->x5D0_animFrameSpeed;
      }
  
@@ -153329,6 +153355,20 @@ index 0504eb683..dc6145b8f 100644
 +        opcode = cmd->u->unk0.opcode;
 +        if (Command_Execute(cmd, opcode) == 0) {
 +            opcode -= 10;
++#ifdef MU_NATIVE
++            /* An item script word past the table (an ACE 2.0.0 Fay blade's, 1.0.0 Linux report)
++             * jumped through whatever followed it: end the script there instead. */
++            if (opcode >= sizeof(it_803F22A8) / sizeof(it_803F22A8[0])) {
++                static bool reported;
++                if (!reported) {
++                    reported = true;
++                    OSReport("item kind %d: script command %u is not an item command; its script stops\n",
++                             item->kind, opcode + 10);
++                }
++                cmd->u = NULL;
++                return;
++            }
++#endif
 +            it_803F22A8[opcode](item_gobj, cmd);
 +        }
      }

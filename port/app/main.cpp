@@ -2655,7 +2655,17 @@ static int melee_main(int argc, char** argv) {
 #endif
   // No --user-dir (say, --iso alone), or one inside the game folder: prepare_sys_assets generates the two
   // managed Sys files into the player's own data folder (sysgen::user_data_dir), on every system.
-  host::prepare_sys_assets(sysgen_user_dir, sysgen_data_dir);
+  if (const std::string disc_problem = host::prepare_sys_assets(sysgen_user_dir, sysgen_data_dir); !disc_problem.empty()) {
+    // The player's disc, not a crash: say so and leave without a crash report (as --vanilla-only does).
+    std::fprintf(stderr, "%s\n", disc_problem.c_str());
+    host::log_flush();
+#ifdef _WIN32
+    if (!automated) MessageBoxA(nullptr, disc_problem.c_str(), "Melee Unlocked", MB_ICONINFORMATION | MB_OK);
+    ExitProcess(2);
+#else
+    std::_Exit(2);
+#endif
+  }
 #ifdef MELEE_SOURCE_PORT
   // The profile picked in the settings panel, unless the command line gave its own mod layers. A
   // profile that no longer loads starts the retail game rather than refusing to start.

@@ -2283,6 +2283,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   options.pro_ai_stronger = 0;   // a file without the key: ask
   options.unlock_all = true;   // a file without the key: on
   options.results_screen = true;
+  options.training_hud = true;
   options.offline_delay = false;
   options.offline_delay_frames = 2;
   bool offline_delay_frames_seen = false;
@@ -2423,6 +2424,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "audio_early_keyon") gx::RenderOptions::live_audio_early_keyon() = kShowFasterSoundEffects && value == "1";
       else if (key == "mute_voices") gx::RenderOptions::live_mute_voices() = value == "1";
       else if (key == "quickchat") slippi::online::config().chat = std::clamp(std::atoi(value.c_str()), 0, 2);
+      else if (key == "directpause") slippi::online::config().direct_pause = value != "0";
       else if (key == "blockcode1" || key == "blockcode2" || key == "blockcode3")
         slippi::online::config().blocked_codes[key.back() - '1'] = value.substr(0, 16);
       else if (key == "practicecpu") {
@@ -2564,6 +2566,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "unlock_all") options.unlock_all = value != "0";
       else if (key == "zelda_as_sheik") options.zelda_as_sheik = value == "1";
       else if (key == "results_screen") options.results_screen = value != "0";
+      else if (key == "training_hud") options.training_hud = value != "0";
 #ifndef MELEE_NO_SLIPPI
       else if (key == "slippi_spectator") options.slippi_spectator = value != "0";
       else if (key == "online_return_training") options.online_return_training = value == "1";
@@ -2843,6 +2846,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   RenderOptions::live_unlock_all() = options.unlock_all;
   RenderOptions::live_zelda_as_sheik() = options.zelda_as_sheik;
   RenderOptions::live_results_screen() = options.results_screen;
+  RenderOptions::live_training_hud() = options.training_hud;
   RenderOptions::live_offline_delay() = options.offline_delay;
   // Old files used the online slider for offline play. Preserve that value once, independent
   // of key order, then save separate values so future online changes leave offline play alone.
@@ -5147,6 +5151,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\noffline_delay_frames " << options.offline_delay_frames
        << "\nearly_inputs " << (options.early_inputs ? 1 : 0)
        << "\nquickchat " << slippi::online::config().chat
+       << "\ndirectpause " << (slippi::online::config().direct_pause ? 1 : 0)
        << "\nblockcode1 " << slippi::online::config().blocked_codes[0]
        << "\nblockcode2 " << slippi::online::config().blocked_codes[1]
        << "\nblockcode3 " << slippi::online::config().blocked_codes[2]
@@ -5250,6 +5255,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nunlock_all " << (options.unlock_all ? 1 : 0)
        << "\nzelda_as_sheik " << (options.zelda_as_sheik ? 1 : 0)
        << "\nresults_screen " << (options.results_screen ? 1 : 0)
+       << "\ntraining_hud " << (options.training_hud ? 1 : 0)
 #ifndef MELEE_NO_SLIPPI
        << "\nslippi_spectator " << (options.slippi_spectator ? 1 : 0)
        << "\nslippi_spectator_port " << options.slippi_spectator_port
@@ -10577,6 +10583,13 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImGui::SameLine();
         settings_hint("(applies from the next match)");
       }
+      // Whether Start pauses Direct and Friends matches (Ranked and Unranked never pause).
+      if (settings_toggle("Pause in Direct and Friends", &slippi::online::config().direct_pause)) changed = true;
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Off: Start does not pause Direct (Slippi) or Friends (YouGame) matches. Pausing goes off\n"
+                          "for everyone in the match when any player turns it off, as long as every player has\n"
+                          "Melee Unlocked 1.0.1 or newer. Against older builds or Slippi Dolphin, Start still pauses.\n"
+                          "Applies from your next connection.");
       // Up to three connect codes to skip in Unranked (a match with one is turned down and the
       // search goes on). Ranked, Direct, Teams and Party are not affected.
       {
@@ -11795,6 +11808,13 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("In an online mode, skins and stage mods that could change more than looks show as the\n"
                         "standard ones, and a note says so for 15 seconds. Off: no note (Settings > Mods still lists them).");
+    if (settings_toggle("Show Training mode's HUD", &options.training_hud)) {
+      RenderOptions::live_training_hud() = options.training_hud;
+      changed = true;
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Off: Training mode's Speed, Enemy and damage panels are not drawn, for sparring with nothing\n"
+                        "on screen. They still show while Training's menu is open. Source Port.");
 #ifndef MELEE_NO_SLIPPI   // no matchmaking panel in the build without that layer
     changed |= settings_toggle("Show the Practice menu hint in Training", &options.matchmaking_hint);
     if (ImGui::IsItemHovered())

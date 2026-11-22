@@ -969,9 +969,26 @@ void load_mod_overlay() {
     if (!scan.ok) host::log("mods: alternate stages of %s not listed: %s", stub_disc.filename().u8string().c_str(), scan.message.c_str());
     host::cosmetics::set_session_stage_pack(stub_disc.u8string());
   }
+  // A disc file in place of one of the game's archives (.dat/.usd) whose own header names another size
+  // can never be loaded: HSD_ArchiveParse stops the game (a rebuilt disc's zeroed NtMemAc.usd ended every
+  // boot that showed the memory card notice, 1.0.0 reports). The game's own file stays for it.
+  std::unordered_set<std::string> broken_archives;
+  for (const auto& file : g_mod_overlay.files()) {
+    const auto found = g_paths.find(file.path);
+    if (found == g_paths.end() || g_fst[found->second].dir || stage_stubs.count(file.path)) continue;
+    const std::string& path = file.path;
+    if (path.size() < 4 || (path.compare(path.size() - 4, 4, ".dat") != 0 && path.compare(path.size() - 4, 4, ".usd") != 0)) continue;
+    const FstFile& retail = g_fst[found->second];
+    uint8_t own[4] = {}, game[4] = {};
+    if (retail.length < 0x20 || !host::disc_read(retail.offset, game, 4) || be32(game) != retail.length) continue;
+    if (file.length >= 4 && g_mod_overlay.read(file.start, own, 4) == ModOverlay::Read::Success && be32(own) == file.length) continue;
+    broken_archives.insert(path);
+    host::log("mods: %s in the disc is not a whole archive (header %08X, file %u bytes): the game's own file stays",
+              path.c_str(), be32(own), file.length);
+  }
   uint32_t replaced = 0, added = 0, pack_kept = 0;
   for (const auto& file : g_mod_overlay.files()) {
-    if (stage_stubs.count(file.path)) continue;
+    if (stage_stubs.count(file.path) || broken_archives.count(file.path)) continue;
     if (pack_keeps(file)) { ++pack_kept; continue; }   // retail menus, and no file that carries code
     auto found = g_paths.find(file.path);
     int32_t entry;
@@ -990,7 +1007,7 @@ void load_mod_overlay() {
   // The retail view of every file the layers changed.
   g_view_alias.clear();
   for (const auto& file : g_mod_overlay.files()) {
-    if (pack_keeps(file) || stage_stubs.count(file.path)) continue;   // not served: the disc's own entry, the same in both views
+    if (pack_keeps(file) || stage_stubs.count(file.path) || broken_archives.count(file.path)) continue;   // not served: the disc's own entry, the same in both views
     const auto now = g_paths.find(file.path);
     if (now == g_paths.end()) continue;
     const auto base = base_paths.find(file.path);
@@ -1685,6 +1702,13 @@ void h_hud_combo(int32_t slot, int32_t link_slot, float percent, int32_t stunned
 }
 void h_hud_extras(int32_t slot, int32_t nana_damage, int32_t team) { gx::set_native_hud_extras(slot, nana_damage, team); }
 void h_hud_pro_tag(int32_t slot, float dx, float width) { gx::set_native_hud_pro_tag(slot, dx, width); }
+// Display-only choices (mu_host.h MU_DISPLAY_*): each viewer's own, also online and in replays.
+// MELEE_TEST_TRAINING_HUD=0 (tests) hides Training's HUD without a settings file.
+uint32_t h_display_options() {
+  static const int env = [] { const char* v = host::test_env::getenv("MELEE_TEST_TRAINING_HUD"); return v && *v ? (*v == '0' ? 0 : 1) : -1; }();
+  const bool hud = env >= 0 ? env == 1 : gx::RenderOptions::live_training_hud();
+  return hud ? 0u : MU_DISPLAY_HIDE_TRAINING_HUD;
+}
 void h_hud_player(int32_t slot, int32_t present, int32_t damage, int32_t stocks, float tag_x, float tag_y,
                   int32_t tag_visible) {
   gx::set_native_hud_player(slot, present != 0, damage, stocks, tag_x, tag_y, tag_visible != 0);
@@ -5441,6 +5465,7 @@ MuHostApi make_host() {
   h.hud_extras = h_hud_extras;
   h.native_rtx_semantics = h_native_rtx_semantics;
   h.hud_pro_tag = h_hud_pro_tag;
+  h.display_options = h_display_options;
   return h;
 }
 

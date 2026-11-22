@@ -2153,7 +2153,16 @@ void prepare_online_match_state(std::vector<uint8_t>& q) {
     mu_setup_ports(block.data(), block.size(), uint8_t(ordered.size() - 1), teams ? 1 : 0);
     block[0x8] = teams ? 1 : 0;
     block[0xE] = (uint8_t)(stage_id >> 8); block[0xF] = (uint8_t)stage_id;
-    bool pause_allowed = g_last_search.mode == Matchmaking::DIRECT;
+    // Direct pauses (Slippi's rule) unless a player turned it off and every build reads that (PauseOff).
+    const bool pause_off = g_last_search.mode == Matchmaking::DIRECT && g_netplay && g_netplay->PauseOff();
+    {
+      static int logged = -1;
+      if (g_last_search.mode == Matchmaking::DIRECT && logged != (pause_off ? 1 : 0)) {
+        logged = pause_off ? 1 : 0;
+        host::log("slippi: Direct pause %s", pause_off ? "off (a player turned it off)" : "on");
+      }
+    }
+    bool pause_allowed = g_last_search.mode == Matchmaking::DIRECT && !pause_off;
     block[2] = pause_allowed ? (block[2] & 0xF7) : (block[2] | 0x8);
     bool stage_selection_mode = g_last_search.mode == Matchmaking::DIRECT || g_last_search.mode == Matchmaking::TEAMS;
     if (!stage_selection_mode) alt_stage_mode = 0;

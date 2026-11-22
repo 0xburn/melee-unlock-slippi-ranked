@@ -276,6 +276,10 @@ struct RenderOptions {
   // gecko::option_offline_results (host.cpp); Source Port: MU_GAME_OPTION3_SKIP_RESULTS.
   bool results_screen = true;
   static bool& live_results_screen() { static bool value = true; return value; }
+  // "Show Training mode's HUD" (ini key training_hud, on unless the file says 0). Off, Training's own
+  // speed, enemy and damage panels are not drawn while its menu is closed (MU_DISPLAY_HIDE_TRAINING_HUD).
+  bool training_hud = true;
+  static bool& live_training_hud() { static bool value = true; return value; }
   // Faster sound effects (Audio): each new sound starts in the sound frame mixed now, 5 ms sooner.
   // Offline only (the host gives the game 0 online and in replays).
   static bool& live_audio_early_keyon() { static bool value = false; return value; }

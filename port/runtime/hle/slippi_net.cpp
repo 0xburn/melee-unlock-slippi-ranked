@@ -1021,6 +1021,8 @@ void NetplayClient::OnData(Packet& packet, ENetPeer* peer) {
         remote_build_[pidx].gecko = (caps2 & MU_BUILD_CAPS2_GECKO) != 0 || upstream_gecko;
         remote_build_[pidx].layout = layout;
         remote_build_[pidx].warmup = warmup;
+        remote_build_[pidx].pause_rule = has_caps3 && (caps3 & MU_BUILD_CAPS3_PAUSE_RULE) != 0;
+        remote_build_[pidx].no_pause = remote_build_[pidx].pause_rule && (caps3 & MU_BUILD_CAPS3_NO_PAUSE) != 0;
         if (warmup && remote_warmup_[pidx].load(std::memory_order_relaxed) < 0) remote_warmup_[pidx].store(0, std::memory_order_relaxed);
       }
       host::log("setup hash: opponent %u %s", port, (caps & MU_SETUP_HASH_CAP) ? "sends a setup hash" : "has no setup hash (not checked)");
@@ -1270,8 +1272,12 @@ void NetplayClient::SendBuild() {
   // reads 0x10/0x20/0x40/0x80 as Squad Strike, pick previews, the setup hash and Squad Strike friend rooms.
   const bool squad_cap = (caps & MU_SQUAD_CAP) != 0, squad_friend_cap = (caps & MU_SQUAD_FRIEND_CAP) != 0;
   // caps3 0x10: this side sends and takes warm-up messages (NP_MSG_MU_WARMUP, 0xE9).
+  // caps3 0x20/0x40: the Direct pause rule and this player's "Pause in Direct and Friends" (sent once a
+  // connection; a change applies from the next one, so both sides always decide from the same bytes).
+  const bool no_pause = !online::config().direct_pause;
+  sent_no_pause_.store(no_pause);
   const uint8_t caps3 = (uint8_t)((squad_cap ? 0x01 : 0) | (squad_friend_cap ? 0x02 : 0) | 0x04 | (setup_hash_on ? 0x08 : 0) |
-                                  MU_BUILD_CAPS3_WARMUP);
+                                  MU_BUILD_CAPS3_WARMUP | MU_BUILD_CAPS3_PAUSE_RULE | (no_pause ? MU_BUILD_CAPS3_NO_PAUSE : 0));
   // A YouGame match (owner 11-19): the peer may be one of YouGame's own builds, which reads the first byte
   // its own way, so there the byte keeps those meanings (Squad Strike, pick previews, setup hash, friend
   // rooms). A build with the third byte reads this build's flags from it either way.
@@ -1314,6 +1320,17 @@ void NetplayClient::SendPrematchPing() {
   Packet p;
   p << (uint8_t)NP_MSG_MU_PING << (uint8_t)'M' << (uint8_t)'U' << (uint8_t)'P' << (uint8_t)1 << (uint8_t)0 << player_idx_ << (uint32_t)time_us();
   Send(p);
+}
+
+bool NetplayClient::PauseOff() {
+  std::lock_guard<std::mutex> lk(build_mutex_);
+  if (remote_player_count_ == 0) return false;
+  bool off = sent_no_pause_.load();
+  for (int i = 0; i < remote_player_count_ && i < REMOTE_PLAYER_MAX; ++i) {
+    if (!remote_build_[i].received || !remote_build_[i].pause_rule) return false;
+    off = off || remote_build_[i].no_pause;
+  }
+  return off;
 }
 
 bool NetplayClient::ArenaReady() {

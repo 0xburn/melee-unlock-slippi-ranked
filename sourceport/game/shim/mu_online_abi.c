@@ -44,6 +44,11 @@ void mu_hud_pro_tag_abi(int slot, float dx, float width)
     }
 }
 
+unsigned int mu_display_options(void)
+{
+    return mu_host->version >= 34 && mu_host->display_options != NULL ? mu_host->display_options() : 0u;
+}
+
 void mu_hud_combo_abi(int slot, int link, float percent, int stunned)
 {
     if (mu_host->version >= 21 && mu_host->hud_combo != NULL) {
