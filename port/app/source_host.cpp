@@ -6234,19 +6234,40 @@ int run(void (*shutdown)(int)) {
   // In the YouGame sandbox (an AppContainer) the host maps the image itself into the range held
   // since startup (g_game_image_reservation) and keeps the hold; elsewhere the loader needs it free.
   const bool sandboxed = in_app_container();
-  if (!sandboxed) g_game_image_reservation.release();
+  // MELEE_TEST_RELOCATED_GAME_IMAGE=1 (tests): the range stays held, so Windows places the library
+  // elsewhere, as a relocation policy does, and the mapping below is what loads it.
+  const bool test_relocated = host::test_env::getenv("MELEE_TEST_RELOCATED_GAME_IMAGE") != nullptr;
+  if (!sandboxed && !test_relocated) g_game_image_reservation.release();
   std::string map_error;
   HMODULE module = sandboxed ? map_game_image(g_dll, &map_error) : LoadLibraryA(g_dll.c_str());
   if (!module && sandboxed) host::die("cannot map %s: %s", g_dll.c_str(), map_error.c_str());
   if (!module) host::die("cannot load %s (error %lu)", g_dll.c_str(), GetLastError());
   if (sandboxed) host::log("source port: %s mapped at its base by the host (sandboxed)", g_dll.c_str());
+  // Windows can put the library somewhere else although its range is free: Exploit protection's
+  // "Force randomization for images" (Mandatory ASLR) relocates every image, and it landed at a new
+  // low address each start (1.0.2 reports: 0x70000, 0xE0000, 0x580000). Then the host maps it at its
+  // base itself, as it does in the YouGame sandbox, in the range taken back for it.
+  bool mapped = sandboxed;
+  if (!sandboxed && (uintptr_t)module != GAME_IMAGE_BASE) {
+    host::log("source port: Windows loaded %s at %p, not at its base (a relocation policy); mapping it there instead",
+              g_dll.c_str(), (void*)module);
+    FreeLibrary(module);
+    if (!g_game_image_reservation.base)
+      g_game_image_reservation.base = VirtualAlloc((void*)GAME_IMAGE_BASE, 0x04000000u, MEM_RESERVE, PAGE_NOACCESS);
+    module = g_game_image_reservation.base ? map_game_image(g_dll, &map_error) : nullptr;
+    if (!module)
+      host::die("%s could not be placed at %llX (%s)", g_dll.c_str(), (unsigned long long)GAME_IMAGE_BASE,
+                g_game_image_reservation.base ? map_error.c_str() : "its address range is in use");
+    mapped = true;
+    host::log("source port: %s mapped at its base by the host", g_dll.c_str());
+  }
   if ((uintptr_t)module != GAME_IMAGE_BASE) host::die("%s loaded at %p, not at %llX", g_dll.c_str(), (void*)module, (unsigned long long)GAME_IMAGE_BASE);
   const auto* nt = (const IMAGE_NT_HEADERS*)((const uint8_t*)module + ((const IMAGE_DOS_HEADER*)module)->e_lfanew);
   host::game_image = (uint8_t*)module;
   host::game_image_size = nt->OptionalHeader.SizeOfImage;
 #endif
 #ifdef _WIN32
-  auto game_proc = [&](const char* name) { return sandboxed ? image_export(module, name) : GetProcAddress(module, name); };
+  auto game_proc = [&](const char* name) { return mapped ? image_export(module, name) : GetProcAddress(module, name); };
 #else
   auto game_proc = [&](const char* name) { return GetProcAddress(module, name); };
 #endif
