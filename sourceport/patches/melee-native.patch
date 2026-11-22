@@ -201821,10 +201821,21 @@ index 948c401c4..cb009d266 100644
  #define S32_TO_F32 4503601774854144.0
  
 diff --git a/src/sysdolphin/baselib/aobj.c b/src/sysdolphin/baselib/aobj.c
-index 74b4581ac..eb168e611 100644
+index 74b4581ac..f900f4351 100644
 --- a/src/sysdolphin/baselib/aobj.c
 +++ b/src/sysdolphin/baselib/aobj.c
-@@ -114,11 +114,14 @@ void HSD_AObjStopAnim(HSD_AObj* aobj, void* obj, HSD_ObjUpdateFunc func)
+@@ -6,6 +6,10 @@
+ 
+ #include "cobj.h"
+ #include "debug.h"
++#ifdef MU_NATIVE
++#include <dolphin/os.h>
++#include <stdint.h>
++#endif
+ #include "dobj.h"
+ #include "fog.h"
+ #include "id.h"
+@@ -114,11 +118,14 @@ void HSD_AObjStopAnim(HSD_AObj* aobj, void* obj, HSD_ObjUpdateFunc func)
      aobj->flags |= AOBJ_NO_ANIM;
  }
  
@@ -201844,7 +201855,7 @@ index 74b4581ac..eb168e611 100644
                             HSD_ObjUpdateFunc update_func)
  {
      f32 rate = 0;
-@@ -137,12 +140,8 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
+@@ -137,12 +144,8 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
  
      if ((aobj->flags & AOBJ_LOOP) && aobj->end_frame <= aobj->curr_frame) {
          if (aobj->rewind_frame < aobj->end_frame) {
@@ -201858,7 +201869,7 @@ index 74b4581ac..eb168e611 100644
              HSD_FObjReqAnimAll(aobj->fobj, aobj->curr_frame);
          } else {
              aobj->curr_frame = aobj->end_frame;
-@@ -159,11 +158,8 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
+@@ -159,11 +162,8 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
          HSD_FObjInterpretAnimAll(aobj->fobj, obj, update_func, rate);
      }
  
@@ -201872,7 +201883,7 @@ index 74b4581ac..eb168e611 100644
      }
  
      if (aobj->flags & AOBJ_NO_ANIM) {
-@@ -172,8 +168,9 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
+@@ -172,8 +172,9 @@ void HSD_AObjInterpretAnim(HSD_AObj* aobj, void* obj,
          HSD_AObj_804D7630 += 1;
      }
  }
@@ -201884,7 +201895,7 @@ index 74b4581ac..eb168e611 100644
  #endif
  
  HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
-@@ -184,7 +181,7 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
+@@ -184,15 +185,29 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
      u8 _[4];
  
      HSD_FObj* fobj;
@@ -201892,8 +201903,22 @@ index 74b4581ac..eb168e611 100644
 +    HSD_IDKey id;
      HSD_Obj* phi_r30;
  
++#ifdef MU_NATIVE
++    /* Every animation the game loads lies at a console address (0x80000000 up: MEM1, the game image,
++     * cosmetic overrides). A stage skin converted from another stage can name one below that (address
++     * 1 for a Brinstar skin on Battlefield, 1.0.2 report): read as none, the part just does not
++     * animate, where reading it stopped the game. Melee's own data never names one. */
++    if (aobjdesc != NULL && (uintptr_t) aobjdesc < 0x80000000u) {
++        static bool reported;
++        if (!reported) {
++            reported = true;
++            OSReport("aobj: an animation at %p is not game data; that part does not animate\n", (void*) aobjdesc);
++        }
++        return NULL;
++    }
++#endif
      if (aobjdesc != NULL) {
-@@ -192,7 +189,7 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
+         aobj = HSD_AObjAlloc();
          HSD_AObjSetFlags(aobj, aobjdesc->flags);
          HSD_AObjSetRewindFrame(aobj, 0.0F);
          HSD_AObjSetEndFrame(aobj, aobjdesc->end_frame);
@@ -201902,7 +201927,7 @@ index 74b4581ac..eb168e611 100644
          fobj = HSD_FObjLoadDesc(fobjdesc);
          HSD_AObjSetFObj(aobj, fobj);
          id = aobjdesc->obj_id;
-@@ -202,8 +199,19 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
+@@ -202,8 +217,19 @@ HSD_AObj* HSD_AObjLoadDesc(HSD_AObjDesc* aobjdesc)
              if (hsd_obj != NULL) {
                  ref_INC(hsd_obj);
              } else {
@@ -201923,7 +201948,7 @@ index 74b4581ac..eb168e611 100644
              }
              if (aobj != NULL) {
                  if (aobj->hsd_obj != NULL) {
-@@ -241,7 +249,7 @@ void HSD_AObjRemove(HSD_AObj* aobj)
+@@ -241,7 +267,7 @@ void HSD_AObjRemove(HSD_AObj* aobj)
  
  HSD_AObj* HSD_AObjAlloc(void)
  {
@@ -201932,7 +201957,7 @@ index 74b4581ac..eb168e611 100644
      HSD_ASSERT(489, new);
  
      memset(new, 0, sizeof(HSD_AObj));
-@@ -256,7 +264,7 @@ void HSD_AObjFree(HSD_AObj* aobj)
+@@ -256,7 +282,7 @@ void HSD_AObjFree(HSD_AObj* aobj)
          return;
      }
  
