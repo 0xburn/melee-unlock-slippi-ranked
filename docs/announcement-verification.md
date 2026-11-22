@@ -13,6 +13,16 @@ Measured on an Apple M1 Pro running macOS 26.4.1, using x86-64 hosts under Roset
 
 In a separate loopback game with early inputs enabled and 8 ms of scripted lead, one client sent 154 early-pad packets. Its peer received all 154, used them for four predictions and confirmed all four. The other direction delivered 66 of 67 packets. Both recorded 969 frames, the same winner and zero desyncs. Neither client needed to start a rollback from an early packet during this game.
 
+## What the latency numbers measure
+
+The announcement slide gives 65.69 ms for controller to screen in Melee Unlocked and 67.71 ms in
+Dolphin. The difference is 2.02 ms on the developer's setup. For key press to sound the slide gives
+56 ms and 77 ms. Neither measurement timestamps the simulation frame that consumed a physical
+press. A press close to a polling boundary can land on different ticks if the clients sample at
+different times. Two clients can also consume the press on the same tick and display or play the
+result at different times. An uncapped renderer alone does not change input assignment. These tests
+did not measure physical latency or original GameCube hardware.
+
 ## Local Ranked sets
 
 Two full macOS clients entered Ranked from the game's online menu using separate synthetic accounts and loopback ports. Both completed game 1, returned to setup for counterpicking, completed game 2 and recorded the same winner. The first run recorded 1,224 and 1,213 game frames. A second run recorded 1,344 and 1,229. One peer rolled back three times in its first game of the second run, with maximum depth one. All four games completed with zero reported desyncs. Both clients suppressed result submission for these local fixtures.
@@ -27,6 +37,40 @@ python3 tools/check_local_ranked_set.py --fast \
 ```
 
 The optional `--fast` mode advances the game's network timeout counters faster than wall time. One early unpaced trial hit a peer stall and abandoned the set. Omit the option to run at the normal game clock.
+
+## Official matchmaking and reporting
+
+The fork implements the client side of the [Slippi matchmaking protocol](https://github.com/project-slippi/slippi-rust-extensions/blob/934f373d3cbcbca9ea3ceb68b53bda875c96abfb/matchmaking/src/protocol.rs).
+Slippi runs the production queue and leaderboard. On November 22, 2026 the Mac transport completed
+TLS and validated the HTTP 101 WebSocket upgrade at `wss://matchmaking.slippi.gg/v1/queue`.
+It sent a close frame before any account or matchmaking request.
+
+The [queue test](../tools/check_slippi_ranked_queue.py) runs the fork and Dolphin's shipped
+matchmaking library against a local server, verifies their Ranked requests and assigns opposite
+seats. The [peer test](../port/tests/slippi_ranked_peer_interop.py) exchanges Ranked setup and recovery
+packets in both directions over ENet. The [reporting test](../port/tests/slippi_ranked_report_test.py)
+uses a local HTTP fixture to check game reports, compressed uploads, set completion and rating-result
+parsing. Official queue admission, result acceptance and a real rating change require a live set.
+
+## Stock Dolphin interoperability
+
+A signed, unmodified Slippi Dolphin netplay 3.7.0 client and the packaged fork each selected Ranked from the online menu, loaded local fixture profiles, and requested mode 0. A loopback WebSocket fixture assigned two UDP endpoints. The games negotiated their own peer connection, exchanged stage selections and controller input, and wrote independent recordings. The macOS network sandbox blocked external connections for both processes, including production result submission.
+
+**The final build completed a 2–0 Ranked set against stock Dolphin.** Both clients reported 1,498 frames on Final Destination and 1,256 frames on Dream Land. They agreed on the winner, stage and normal game-end event in both games. All 5,472 finalized per-fighter records across their four recordings matched byte for byte. The fork reported zero desyncs in both games. Stock Dolphin sent the reverse-order stage strikes 28 and 8 during game 1, and the fork accepted them. An earlier build had rejected that valid stock input.
+
+In an earlier trial, both completed a 1,298-frame game on Battlefield. The fork rolled back once by one frame. Of 2,578 per-fighter records, one differed in Bowser's offscreen flag at frame 783. During game 2 on Yoshi's Story, stock Dolphin's Ranked quality guard stopped the match at frame 420, reporting a performance ratio of 2.29 and average ping of 1.0 ms. The clients recorded different final frames following that disconnect. One of 840 overlapping per-fighter records differed in the same offscreen flag. Coordinates, action states, damage and stocks matched for all overlapping records in both games. The stock specification maps this flag to mask 0x80 of post-frame byte 0x2A. [Slippi post-frame specification](https://github.com/project-slippi/slippi-wiki/blob/3a85ce8b1f2dae1b487b2529a43c80f5de5885a3/SPEC.md#state-bit-flags-5)
+
+The successful set used extra A and Start presses through Dolphin's test controller on its character
+select screen. The harness now issues those presses automatically. The menu automation timing was
+adjusted after that run.
+
+Run the stock-client check on macOS with Python 3.11+, the `melee` and `websockets>=14` Python packages (verified with 0.47.6 and 17.4 respectively), and the signed stock netplay app. The harness gives Dolphin a named-pipe controller and enables libmelee's menu observation code only in a temporary profile. It prints both clients' game reports and compares every byte of their finalized per-fighter records.
+
+```sh
+python3 tools/check_stock_ranked_set.py \
+  --dolphin "/path/to/Slippi Dolphin.app" --fork build-mac-full/MeleeUnlocked.app \
+  --iso "/path/to/Melee.iso" --output /tmp/stock-ranked-set
+```
 
 ## Reproduce
 

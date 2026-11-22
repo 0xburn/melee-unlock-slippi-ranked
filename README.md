@@ -318,9 +318,10 @@ Add `--hidden` to play it without a window, and `--volume 0` for no sound.
 
 The native client sends matchmaking requests to Slippi and connects directly to the assigned opponents. Slippi runs the queue and checks Ranked eligibility for the signed-in account. The client handles peer input, rollback and match reporting.
 
-Ranked has been exercised against a local matchmaking fixture using the stock Dolphin 3.7 client
-and through complete local sets between two instances of the fork. Slippi's production service
-has not yet accepted a set from this fork in our tests.
+The Mac fork and stock Slippi Dolphin 3.7 finished a local Ranked best-of-three set, 2–0.
+Both recordings agreed on every finalized fighter and game-end record in that set. The Mac client
+also connected to the production matchmaking endpoint and closed before joining a queue. A live
+ladder result remains unverified. See the [test results](docs/announcement-verification.md).
 
 On macOS, sign in through Slippi Launcher, open the packaged MeleeUnlocked.app and choose your
 NTSC 1.02 disc on the first launch. Select **Online → Ranked** in the game. The fork reads the

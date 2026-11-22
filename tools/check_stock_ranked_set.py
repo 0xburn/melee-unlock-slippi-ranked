@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import re
-import socket
 import subprocess
 import sys
 import tempfile
@@ -124,11 +123,17 @@ class Queue:
         seat = next(i for i in range(2) if join["user"]["uid"] == local_user(i)["uid"])
         if (ws.request.path, join["type"], join["appVersion"], join["search"]["mode"]) != ("/v1/queue", "join", "3.7.0", 0):
             raise ValueError("Expected a 3.7.0 Ranked join")
+        if seat in self.joins:
+            raise ValueError("Unexpected second join by the same client")
         self.joins[seat] = join
+        print(f"Ranked join from {local_user(seat)['displayName']}, peer port {join['port']}", flush=True)
         await ws.send(json.dumps({"type": "joined", "token": "local", "ticketId": str(seat)}))
         if len(self.joins) == 2:
             self.ready.set()
+        until = time.monotonic() + 90
         while not self.ready.is_set():
+            if time.monotonic() >= until:
+                raise TimeoutError("The second local client did not join")
             await ws.send(json.dumps({"type": "status", "queuePosition": 1}))
             try:
                 await asyncio.wait_for(self.ready.wait(), 2)
@@ -159,7 +164,10 @@ def drive_stock(pipe, state, tick):
         commands.append("PRESS START")
     elif scene == melee.Menu.SLIPPI_ONLINE_CSS and 1 in state.players:
         player = state.players[1]
-        if player.coin_down or (player.character != melee.Character.UNKNOWN_CHARACTER and tick % 27 == 0):
+        # A can pick the character token back up. Leave several Start pulses
+        # between A presses so the two transitions can be observed at 60 Hz.
+        locked_or_hovering = player.coin_down or player.character != melee.Character.UNKNOWN_CHARACTER
+        if locked_or_hovering and tick // 9 % 11:
             commands.append("PRESS START")
         elif player.cursor.y < 15:
             commands.append("SET MAIN 0.5 1")
@@ -214,21 +222,21 @@ def compare_game(native_path, stock_path):
     return fields
 
 
-async def run(args, work):
+async def run(args, work, stock_app):
     native = work / "fork"
     (native / "user").mkdir(parents=True)
     (native / "user/user.json").write_text(json.dumps(local_user(0)))
     (native / "pad.txt").write_text(controller(0))
     stock = work / "stock"
     peer_port, spectator_port = two_ports()
-    fifo = prepare_stock(args.dolphin, stock, spectator_port, peer_port)
+    fifo = prepare_stock(stock_app, stock, spectator_port, peer_port)
     queue = Queue()
     async with serve(queue.handle, "127.0.0.1", 0) as server:
         url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/v1/queue"
         with ExitStack() as stack:
             pipe = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
             stack.callback(os.close, pipe)
-            old = start_game(stack, [args.dolphin / "Contents/MacOS/Slippi Dolphin", "-u", stock / "User",
+            old = start_game(stack, [stock_app / "Contents/MacOS/Slippi Dolphin", "-u", stock / "User",
                                      "-b", "-c", "False", "-e", args.iso, "-v", "OGL", "--slippi-spectator-port",
                                      str(spectator_port), "-a", "HLE"], stock, url)
             new = start_game(stack, [args.fork / "Contents/MacOS/MeleeUnlocked", "--iso", args.iso, "--headless",
@@ -243,7 +251,8 @@ async def run(args, work):
             spectator = melee.Console(is_remote=True, slippi_port=spectator_port, polling_mode=True, setup_gecko_codes=False)
             if not await asyncio.to_thread(spectator.connect):
                 raise RuntimeError("Could not connect to the stock spectator port")
-            stack.callback(spectator.stop)
+            stack.callback(spectator._slippstream.shutdown)
+            last_scene = None
             state, tick = None, 0
             deadline = time.monotonic() + 420
             while time.monotonic() < deadline:
@@ -252,12 +261,17 @@ async def run(args, work):
                 fresh = spectator.step()
                 if fresh is not None:
                     state = fresh
+                    if state.menu_state != last_scene:
+                        print(f"Stock scene: {state.menu_state.name}", flush=True)
+                        last_scene = state.menu_state
                 tick += 1
                 drive_stock(pipe, state, tick)
                 if tick % 45 == 0:
                     host = (native / "host.log").read_text(errors="replace")
                     if "ranked set: over" in host:
                         break
+                    if "opponent step invalid" in host or "left before both seats finished" in host:
+                        raise RuntimeError("Ranked setup ended before both players completed stage selection")
                     if "ranked set: abandoned" in host:
                         raise RuntimeError("Ranked set was abandoned")
                 await asyncio.sleep(.015)
@@ -275,12 +289,14 @@ async def run(args, work):
             if len(native_games) != len(stock_games) or len(native_games) != len(fork_reports):
                 raise ValueError("A game recording is missing")
             for a, b in zip(native_games, stock_games):
-                compare_game(a, b)
+                differences = compare_game(a, b)
+                if any(field != (0x2A, 0x80) for field in differences):
+                    raise ValueError("Final fighter state differs outside the recorded offscreen bit")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dolphin", required=True, type=Path, help="Installed/copied Slippi 3.7.0 netplay .app, outside its DMG")
+    parser.add_argument("--dolphin", required=True, type=Path, help="Signed Slippi 3.7.0 netplay .app")
     parser.add_argument("--fork", required=True, type=Path, help="Packaged MeleeUnlocked.app")
     parser.add_argument("--iso", required=True, type=Path)
     parser.add_argument("--output", type=Path, help="New directory for isolated profiles, logs and recordings")
@@ -292,7 +308,13 @@ def main():
     if args.output:
         work.mkdir(parents=True, exist_ok=False)
     print(f"Profiles and results in {work}", flush=True)
-    asyncio.run(run(args, work))
+    # Dolphin refuses to run on its installer volume. A private copy also lets
+    # the sandbox protect the Launcher's real profile when it contains the app.
+    with tempfile.TemporaryDirectory(prefix="stock-dolphin-") as directory:
+        stock_app = Path(directory) / "Slippi Dolphin.app"
+        subprocess.run(["/usr/bin/ditto", args.dolphin, stock_app], check=True)
+        subprocess.run(["/usr/bin/codesign", "--verify", "--deep", stock_app], check=True)
+        asyncio.run(run(args, work, stock_app))
 
 
 if __name__ == "__main__":
