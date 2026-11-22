@@ -20,22 +20,21 @@ class CommunityCodesOnlineTest(unittest.TestCase):
 #include <stdlib.h>
 #define OSReport(...) ((void)0)
 %s
-static unsigned int opts; static int online, pending, console;
+static unsigned int opts; static int online, pending;
 unsigned int mu_display_options(void) { return opts; }
 int mu_online_active(void) { return online; }
 int mu_online_pending(void) { return pending; }
-int mu_console_rollback_active(void) { return console; }
 %s
 #define CHECK(x) do { if (!(x)) { printf("FAIL %%s\n", #x); abort(); } } while (0)
 int main(void) {
   opts = MU_DISPLAY_CODES_ALL;
   CHECK(mu_code_feature(MU_DISPLAY_HQ_FOD_REFLECTIONS) && mu_code_feature(MU_DISPLAY_VCANCEL_SOUND));
-  for (int i = 0; i < 3; ++i) {
-    online = i == 0; pending = i == 1; console = i == 2;
+  for (int i = 0; i < 2; ++i) {
+    online = i == 0; pending = i == 1;
     CHECK(!mu_code_feature(MU_DISPLAY_HQ_FOD_REFLECTIONS) && !mu_code_feature(MU_DISPLAY_VCANCEL_SOUND));
     CHECK(mu_code_feature(MU_DISPLAY_HUD_FADE) && mu_code_feature(MU_DISPLAY_NO_GO_TEXT));
   }
-  online = pending = console = 0;
+  online = pending = 0;
   CHECK(mu_code_feature(MU_DISPLAY_HQ_FOD_REFLECTIONS));
   puts("ok");
   return 0;

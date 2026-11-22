@@ -24,16 +24,6 @@
 #include <memory>
 #include <string>
 #include <cctype>
-#ifdef __APPLE__
-#include "../../mac/embed_mac.h"
-#endif
-
-// macOS has no X11 embed: window_embedded() is declared only with MELEE_LINUX_X11_EMBED.
-#ifdef MELEE_LINUX_X11_EMBED
-static bool mu_window_embedded() { return host::window_embedded(); }
-#else
-static bool mu_window_embedded() { return false; }
-#endif
 
 namespace gx {
 
@@ -68,9 +58,7 @@ Backend* create_render_backend(void* hwnd, int client_w, int client_h, const Ren
     VulkanWindow vw;
     vw.window = window;
     vw.drawable_size = [window](int* w, int* h) {
-      // The app can resize its X11 child without updating SDL's stored window size.
-      if (host::window_embedded()) host::window_client_size(w, h);
-      else SDL_Vulkan_GetDrawableSize(window, w, h);
+      SDL_Vulkan_GetDrawableSize(window, w, h);
     };
     vw.instance_extensions = [window] {
       unsigned n = 0;
@@ -103,7 +91,7 @@ Backend* create_render_backend(void* hwnd, int client_w, int client_h, const Ren
     if (std::string(e.what()).find("OpenGL context") != std::string::npos) {
       host::log("opengl: no OpenGL 4.5 context (%s); the game needs OpenGL 4.5 on Linux", e.what());
       host::log_flush();
-      if (!host::options.no_gc_adapter && !mu_window_embedded())   // hidden/headless/boxed: never wait on a dialog
+      if (!host::options.no_gc_adapter)   // hidden/headless/boxed: never wait on a dialog
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Melee Unlocked",
             "Melee Unlocked cannot start OpenGL 4.5 on this graphics card or driver.\n\n"
             "Update the graphics driver (Mesa on most systems) and start the game again. Graphics cards older "
@@ -125,9 +113,7 @@ Backend* create_render_backend(void* hwnd, int client_w, int client_h, const Ren
     if (lower.find("llvmpipe") != std::string::npos || lower.find("softpipe") != std::string::npos ||
         lower.find("software rasterizer") != std::string::npos || lower.find("swrast") != std::string::npos) {
       host::log("opengl: WARNING software rendering (%s): no graphics driver for the GPU is in use", gl_renderer.c_str());
-      // Never inside the YouGame app's player box: SDL's X11 message box, shown from this render thread over a
-      // reparented child window, waits for a map that never comes (122.28, an Xvfb seat hung here for good).
-      if (!host::options.no_gc_adapter && !mu_window_embedded())   // hidden/headless runs: never wait on a dialog
+      if (!host::options.no_gc_adapter)   // hidden/headless runs: never wait on a dialog
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Melee Unlocked",
             ("OpenGL is running in software on your processor (" + gl_renderer + "), so the game will run very slowly.\n\n"
              "Install or enable the graphics driver for your GPU (on Linux Mint: Driver Manager), then restart the game.").c_str(),
@@ -138,13 +124,6 @@ Backend* create_render_backend(void* hwnd, int client_w, int client_h, const Ren
   if (opts.pc_settings) g_presentation->settings = std::make_unique<PcSettingsUIGL>(hwnd, opts);
   linux_renderer::Hooks hooks;
   hooks.options = &opts;
-#ifndef __APPLE__
-  if (host::window_embedded()) hooks.drawable_size = [](int* w, int* h) {
-    if (host::window_closed() || host::exit_requested()) return false;
-    host::window_client_size(w, h);
-    return *w > 0 && *h > 0;
-  };
-#endif
   hooks.frame_begin = [](const Frame& frame) {
     auto& p = *g_presentation;
 #ifdef __APPLE__
@@ -174,14 +153,7 @@ Backend* create_render_backend(void* hwnd, int client_w, int client_h, const Ren
     auto& p = *g_presentation;
     if (p.settings) p.settings->draw();
   };
-#ifdef __APPLE__
-  hooks.after_swap = [window](uint64_t frame) {
-    mac_embed::frame_presented(window);
-    host::window_presented(frame);
-  };
-#else
   hooks.after_swap = [](uint64_t frame) { host::window_presented(frame); };
-#endif
   linux_renderer::set_hooks(*renderer, std::move(hooks));
   return record_started_backend(renderer.release(), "OpenGL");
 }

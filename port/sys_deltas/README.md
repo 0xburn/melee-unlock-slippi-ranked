@@ -3,7 +3,7 @@
 These three VCDIFF patches reconstruct `GameSetup_gui.dat`, `slpCSS.dat` and
 `SlippiCSS_gui.dat` (Slippi 3.7.0, upstream v0.9.207) using files from the player's
 own GALE01 revision 2 retail disc. The compliance ruling
-prohibits shipping these Nintendo-derived whole files from YouGame in production.
+prohibits shipping these Nintendo-derived whole files in release packages.
 The four other whole `.dat` files remain eligible to ship. This spike leaves all
 Sys files untouched; packaging must exclude the prohibited originals later.
 

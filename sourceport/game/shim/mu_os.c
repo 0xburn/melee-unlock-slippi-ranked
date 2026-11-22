@@ -67,14 +67,9 @@ void mu_post(MuEventFn fn, void* a, intptr_t b)
 
 static void mu_run_events(void)
 {
-    int console_clock;
     if (mu_delivering)
         return;
     mu_delivering = 1;
-    /* Deferred hardware callbacks retain their clock domain even when delivered after poll/VI
-     * returned to the game, or when a checkpoint is being replayed. OFF/Slippi does nothing. */
-    console_clock = mu_host->version >= 25 && mu_host->console_rollback &&
-                    mu_host->console_rollback(MU_CONSOLE_SERVICE, 1, NULL);
     while (mu_event_count) {
         MuEventFn fn = mu_events[mu_event_head].fn;
         void* a = mu_events[mu_event_head].a;
@@ -86,7 +81,6 @@ static void mu_run_events(void)
         fn(a, b);
         mu_interrupt_level = 1;
     }
-    if (console_clock) mu_host->console_rollback(MU_CONSOLE_SERVICE, 0, NULL);
     mu_delivering = 0;
 }
 

@@ -46,7 +46,7 @@ sources = ['port/mac/main.cpp','port/mac/mac_gl.mm','port/mac/elf_loader.cpp','p
            'port/linux/renderer_gl.cpp','port/linux/gx_host_compat.cpp','port/linux/renderer_presenter.cpp',
            'build-mac/generated/FObjHost.cpp']
 sources += [f'port/runtime/gx/{name}.cpp' for name in
-            ['gx_core','gx_shader','gx_texture','native_draw_audit','native_pose_bridge','authored_pose','subframe']]
+            ['gx_core','gx_shader','gx_texture','rtx_semantics','native_draw_audit','native_pose_bridge','authored_pose','subframe']]
 fingerprint = hashlib.sha256(repr(flags).encode()).hexdigest()
 object_paths = []
 for source in sources:
@@ -66,7 +66,7 @@ for source in sources:
 exe = build/'MeleeUnlocked'
 memory_gate()
 subprocess.run(['/usr/bin/clang++','-arch','x86_64','-mmacosx-version-min=15.0',*object_paths,
-                '-L'+str(sdl/'lib'),'-lSDL2-2.0.0','-framework','OpenGL','-framework','AppKit',
+                '-L'+str(sdl/'lib'),'-lSDL2-2.0.0','-framework','OpenGL','-framework','AppKit','-framework','CoreFoundation',
                 '-Wl,-rpath,@executable_path/../Frameworks','-Wl,-rpath,'+str(sdl/'lib'),
                 '-Wl,-pagezero_size,0x10000','-o',str(exe)],check=True)
 app = build/'MeleeUnlocked.app'
@@ -85,7 +85,7 @@ for tool in ['glslangValidator','spirv-cross']:
 if (root/'spike/shader-seed').is_dir():
     shutil.copytree(root/'spike/shader-seed',resources/'shader-seed',symlinks=False)
 (resources/'EXPERIMENTAL.txt').write_text('Experimental, not tested yet\n')
-info = dict(CFBundleIdentifier='co.yougame.meleeunlocked',CFBundleName='Melee Unlocked',
+info = dict(CFBundleIdentifier='io.github.0xburn.melee-unlocked',CFBundleName='Melee Unlocked',
             CFBundleDisplayName='Melee Unlocked - Experimental, not tested yet',
             CFBundleShortVersionString='0.9.52',CFBundleVersion='0.9.52',
             CFBundleExecutable='MeleeUnlocked',CFBundlePackageType='APPL',

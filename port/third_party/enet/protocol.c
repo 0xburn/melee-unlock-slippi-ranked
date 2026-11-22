@@ -8,8 +8,6 @@
 #include "enet/utility.h"
 #include "enet/time.h"
 #include "enet/enet.h"
-#include "enet/yg_enet_socket.h"
-#include <stddef.h>
 
 static size_t commandSizes [ENET_PROTOCOL_COMMAND_COUNT] =
 {
@@ -366,7 +364,7 @@ enet_protocol_handle_connect (ENetHost * host, ENetProtocolHeader * header, ENet
     if (mtu > ENET_PROTOCOL_MAXIMUM_MTU)
       mtu = ENET_PROTOCOL_MAXIMUM_MTU;
 
-    peer -> mtu = yg_enet_mtu (host -> socket, mtu);
+    peer -> mtu = mtu;
 
     if (host -> outgoingBandwidth == 0 &&
         peer -> incomingBandwidth == 0)
@@ -433,10 +431,11 @@ enet_protocol_handle_send_reliable (ENetHost * host, ENetPeer * peer, const ENet
       return -1;
 
     dataLength = ENET_NET_TO_HOST_16 (command -> sendReliable.dataLength);
-    if (dataLength > host -> maximumPacketSize ||
-        dataLength > (size_t) (& host -> receivedData [host -> receivedDataLength] - * currentData))
-      return -1;
     * currentData += dataLength;
+    if (dataLength > host -> maximumPacketSize ||
+        * currentData < host -> receivedData ||
+        * currentData > & host -> receivedData [host -> receivedDataLength])
+      return -1;
 
     if (enet_peer_queue_incoming_command (peer, command, (const enet_uint8 *) command + sizeof (ENetProtocolSendReliable), dataLength, ENET_PACKET_FLAG_RELIABLE, 0) == NULL)
       return -1;
@@ -455,10 +454,11 @@ enet_protocol_handle_send_unsequenced (ENetHost * host, ENetPeer * peer, const E
       return -1;
 
     dataLength = ENET_NET_TO_HOST_16 (command -> sendUnsequenced.dataLength);
-    if (dataLength > host -> maximumPacketSize ||
-        dataLength > (size_t) (& host -> receivedData [host -> receivedDataLength] - * currentData))
-      return -1;
     * currentData += dataLength;
+    if (dataLength > host -> maximumPacketSize ||
+        * currentData < host -> receivedData ||
+        * currentData > & host -> receivedData [host -> receivedDataLength])
+      return -1;
 
     unsequencedGroup = ENET_NET_TO_HOST_16 (command -> sendUnsequenced.unsequencedGroup);
     index = unsequencedGroup % ENET_PEER_UNSEQUENCED_WINDOW_SIZE;
@@ -499,10 +499,11 @@ enet_protocol_handle_send_unreliable (ENetHost * host, ENetPeer * peer, const EN
       return -1;
 
     dataLength = ENET_NET_TO_HOST_16 (command -> sendUnreliable.dataLength);
-    if (dataLength > host -> maximumPacketSize ||
-        dataLength > (size_t) (& host -> receivedData [host -> receivedDataLength] - * currentData))
-      return -1;
     * currentData += dataLength;
+    if (dataLength > host -> maximumPacketSize ||
+        * currentData < host -> receivedData ||
+        * currentData > & host -> receivedData [host -> receivedDataLength])
+      return -1;
 
     if (enet_peer_queue_incoming_command (peer, command, (const enet_uint8 *) command + sizeof (ENetProtocolSendUnreliable), dataLength, 0, 0) == NULL)
       return -1;
@@ -529,10 +530,11 @@ enet_protocol_handle_send_fragment (ENetHost * host, ENetPeer * peer, const ENet
       return -1;
 
     fragmentLength = ENET_NET_TO_HOST_16 (command -> sendFragment.dataLength);
-    if (fragmentLength > host -> maximumPacketSize ||
-        fragmentLength > (size_t) (& host -> receivedData [host -> receivedDataLength] - * currentData))
-      return -1;
     * currentData += fragmentLength;
+    if (fragmentLength > host -> maximumPacketSize ||
+        * currentData < host -> receivedData ||
+        * currentData > & host -> receivedData [host -> receivedDataLength])
+      return -1;
 
     channel = & peer -> channels [command -> header.channelID];
     startSequenceNumber = ENET_NET_TO_HOST_16 (command -> sendFragment.startSequenceNumber);
@@ -638,10 +640,11 @@ enet_protocol_handle_send_unreliable_fragment (ENetHost * host, ENetPeer * peer,
       return -1;
 
     fragmentLength = ENET_NET_TO_HOST_16 (command -> sendFragment.dataLength);
-    if (fragmentLength > host -> maximumPacketSize ||
-        fragmentLength > (size_t) (& host -> receivedData [host -> receivedDataLength] - * currentData))
-      return -1;
     * currentData += fragmentLength;
+    if (fragmentLength > host -> maximumPacketSize ||
+        * currentData < host -> receivedData ||
+        * currentData > & host -> receivedData [host -> receivedDataLength])
+      return -1;
 
     channel = & peer -> channels [command -> header.channelID];
     reliableSequenceNumber = command -> header.reliableSequenceNumber;
@@ -950,7 +953,6 @@ enet_protocol_handle_verify_connect (ENetHost * host, ENetEvent * event, ENetPee
     if (mtu > ENET_PROTOCOL_MAXIMUM_MTU)
       mtu = ENET_PROTOCOL_MAXIMUM_MTU;
 
-    mtu = yg_enet_mtu (host -> socket, mtu);
     if (mtu < peer -> mtu)
       peer -> mtu = mtu;
 
@@ -983,7 +985,7 @@ enet_protocol_handle_incoming_commands (ENetHost * host, ENetEvent * event)
     enet_uint16 peerID, flags;
     enet_uint8 sessionID;
 
-    if (host -> receivedDataLength < offsetof (ENetProtocolHeader, sentTime))
+    if (host -> receivedDataLength < (size_t) & ((ENetProtocolHeader *) 0) -> sentTime)
       return 0;
 
     header = (ENetProtocolHeader *) host -> receivedData;
@@ -993,13 +995,9 @@ enet_protocol_handle_incoming_commands (ENetHost * host, ENetEvent * event)
     flags = peerID & ENET_PROTOCOL_HEADER_FLAG_MASK;
     peerID &= ~ (ENET_PROTOCOL_HEADER_FLAG_MASK | ENET_PROTOCOL_HEADER_SESSION_MASK);
 
-    headerSize = (flags & ENET_PROTOCOL_HEADER_FLAG_SENT_TIME ? sizeof (ENetProtocolHeader) : offsetof (ENetProtocolHeader, sentTime));
+    headerSize = (flags & ENET_PROTOCOL_HEADER_FLAG_SENT_TIME ? sizeof (ENetProtocolHeader) : (size_t) & ((ENetProtocolHeader *) 0) -> sentTime);
     if (host -> checksum != NULL)
       headerSize += sizeof (enet_uint32);
-
-    /* Check before checksum reads, decompression, or subtracting headerSize. */
-    if (headerSize > host -> receivedDataLength)
-      return 0;
 
     if (peerID == ENET_PROTOCOL_MAXIMUM_PEER_ID)
       peer = NULL;
@@ -1070,7 +1068,7 @@ enet_protocol_handle_incoming_commands (ENetHost * host, ENetEvent * event)
 
        command = (ENetProtocol *) currentData;
 
-       if ((size_t) (& host -> receivedData [host -> receivedDataLength] - currentData) < sizeof (ENetProtocolCommandHeader))
+       if (currentData + sizeof (ENetProtocolCommandHeader) > & host -> receivedData [host -> receivedDataLength])
          break;
 
        commandNumber = command -> header.command & ENET_PROTOCOL_COMMAND_MASK;
@@ -1078,7 +1076,7 @@ enet_protocol_handle_incoming_commands (ENetHost * host, ENetEvent * event)
          break;
        
        commandSize = commandSizes [commandNumber];
-       if (commandSize == 0 || commandSize > (size_t) (& host -> receivedData [host -> receivedDataLength] - currentData))
+       if (commandSize == 0 || currentData + commandSize > & host -> receivedData [host -> receivedDataLength])
          break;
 
        currentData += commandSize;
@@ -1212,17 +1210,16 @@ enet_protocol_receive_incoming_commands (ENetHost * host, ENetEvent * event)
                                              & buffer,
                                              1);
 
-       if (receivedLength < 0 && receivedLength != ENET_SOCKET_RECEIVE_EMPTY &&
-           receivedLength != ENET_SOCKET_RECEIVE_TRUNCATED)
+       if (receivedLength < 0)
          return -1;
 
        if (receivedLength == 0)
          return 0;
 
        host -> receivedData = host -> packetData [0];
-       host -> receivedDataLength = receivedLength > 0 ? (size_t) receivedLength : 0;
+       host -> receivedDataLength = receivedLength;
       
-       host -> totalReceivedData += host -> receivedDataLength;
+       host -> totalReceivedData += receivedLength;
        host -> totalReceivedPackets ++;
 
        if (host -> intercept != NULL)
@@ -1243,9 +1240,6 @@ enet_protocol_receive_incoming_commands (ENetHost * host, ENetEvent * event)
           }
        }
         
-       if (receivedLength < 0) /* empty/truncated: ingress ran, never parse a prefix */
-         continue;
-
        switch (enet_protocol_handle_incoming_commands (host, event))
        {
        case 1:
@@ -1687,7 +1681,7 @@ enet_protocol_send_outgoing_commands (ENetHost * host, ENetEvent * event, int ch
             host -> buffers -> dataLength = sizeof (ENetProtocolHeader);
         }
         else
-          host -> buffers -> dataLength = offsetof (ENetProtocolHeader, sentTime);
+          host -> buffers -> dataLength = (size_t) & ((ENetProtocolHeader *) 0) -> sentTime;
 
         shouldCompress = 0;
         if (host -> compressor.context != NULL && host -> compressor.compress != NULL)

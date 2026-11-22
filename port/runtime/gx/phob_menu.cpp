@@ -16,7 +16,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "phob_menu.h"
 #include "phob_adapter_input.h"
-#include "yougame_link.h"
 #include "host.h"
 #include "phob.h"
 #include "phobscope.h"
@@ -1074,7 +1073,7 @@ void draw_card(ImDrawList* dl, int port, MenuState& m, float x0, float y0, float
   static host::phob::MenuDiagnostic limiter;
   if (limiter.due(diag, g_in.time))
     host::log("ui diag: phob menu socket %d source %s connected %d stick %d,%d", port + 1,
-              yougame::stdio_bridge() ? "mirror" : have ? "direct" : "none", have ? 1 : 0, (int)s.ax, (int)s.ay);
+              have ? "direct" : "none", have ? 1 : 0, (int)s.ax, (int)s.ay);
   const Card c = card(dl, x0, y0, x1, y1, u, m.screen == PHOBCHECK ? "HOLD A NOTCH" : "LIVE STICK", a);
   char sub[64];
   std::snprintf(sub, sizeof sub, "Socket %d   Adapter %d Hz", port + 1, (int)std::lround(host::gcadapter_poll_rate_hz()));

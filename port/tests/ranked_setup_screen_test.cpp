@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-#include "yougame_ranked_policy.h"
+#include "mu_ranked_wire.h"
 extern "C" {
 #include <mu_native.h>
 #include <mu_ranked_setup_online.h>
@@ -17,7 +17,7 @@ extern "C" {
 void mu_online_abi_log(const char*) {}
 MuRankedSet* mu_ranked_set_mut() {return &state;}
 const MuRankedSet* mu_ranked_set() {return &state;}
-int mu_ranked_read_policy(MuRankedPolicy* out) {*out=yougame::ranked_policy::slippi_v1();return 1;}
+int mu_ranked_read_policy(MuRankedPolicy* out) {*out=mu_slippi_ranked_policy();return 1;}
 const MuMatchState* mu_slippi_match_state() {return &match;}
 int mu_slippi_load_match_state(MuMatchState* out) {if(out)*out=match;return 0;}
 void gm_801A4B60() {++exits;}
@@ -45,7 +45,7 @@ static void start(unsigned seat) {
   match.local_index=seat;match.remote_index=!seat;
   std::strcpy(match.match_id,"agent-ranked-cpu");
   match.game_info[0x60]=2;match.game_info[0x84]=20;
-  mu_yg_put16(match.game_info+0xE,31);exits=sends=overwrites=cleanups=0;
+  mu_rank_put16(match.game_info+0xE,31);exits=sends=overwrites=cleanups=0;
 }
 static void press(MuRankedSetupView& v,unsigned down,unsigned repeat=0) {
   const auto* m=mu_ranked_setup_model();

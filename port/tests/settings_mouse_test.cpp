@@ -126,34 +126,6 @@ void handoff(bool old_input, bool move, bool fast_click, float dt, bool keyboard
   }
 }
 
-void scripted_click() {
-  for (float scale : {1.f, 1.25f, 2.f}) {
-    Menu menu(false, 1.f / 60.f);
-    auto& io = ImGui::GetIO();
-    const int x = scale == 1.f ? 121 : scale == 1.25f ? 151 : 241;
-    const int y = scale == 1.f ? 105 : scale == 1.25f ? 131 : 211;
-    io.AddMousePosEvent(480, 105); // A backend NewFrame position precedes injection.
-    const auto click = gx::settings_input::click(io, x, y, scale);
-    const ImVec2 pos = click.pos;
-    CHECK(pos.x == 121 && pos.y == (scale == 2.f ? 106 : 105));
-    CHECK(!io.MouseDown[0]); // Only the event queue was changed.
-    menu.frame();
-    CHECK(io.MouseClicked[0] && !io.MouseReleased[0]);
-    CHECK(gx::settings_input::click_event_seen(click.down));
-    CHECK(!gx::settings_input::click_event_seen(click.up));
-    CHECK(io.MousePos.x == pos.x && io.MousePos.y == pos.y);
-    CHECK(menu.clicked[0] && menu.clicks[0] == 0);
-    menu.frame();
-    CHECK(io.MouseReleased[0] && !io.MouseDown[0]);
-    CHECK(!gx::settings_input::click_event_seen(click.down));
-    CHECK(gx::settings_input::click_event_seen(click.up));
-    CHECK(menu.clicks[0] == 1 && menu.clicks[1] == 0 && menu.clicks[2] == 0);
-    menu.frame(); menu.frame();
-    CHECK(menu.clicks[0] == 1);
-    CHECK(!gx::settings_input::click_event_seen(click.up));
-  }
-}
-
 void held_stick_handoff() {
   Menu menu(false, 1.f / 60.f);
   menu.navigate();
@@ -272,7 +244,6 @@ int main() {
         handoff(false, move, fast, dt, true);
       }
   held_stick_handoff();
-  scripted_click();
   page_entry(false);
   page_entry(true);
   std::printf("settings_mouse: %d checks; mouse handoff; 256 keyboard/pad page entries across 8 styles and 8 categories; first focus, Down, A, stale scroll and deduplicated labels\n", checks);

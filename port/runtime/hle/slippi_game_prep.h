@@ -17,6 +17,7 @@ class GamePrepQueue {
   }
   void receive(const GamePrepStep& step) {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (steps_.size() >= 32) steps_.pop_front(); // SlippiNetplay.cpp queue bound
     steps_.push_back(step);
   }
   std::array<uint8_t, 6> fetch(uint8_t index) {

@@ -1,6 +1,6 @@
 """Unsigned M3 app; package existing inputs only, never fetch/build game or dependencies."""
 from pathlib import Path
-from build_full import GAME_LIBRARY, build_dir
+from build_full import GAME_LIBRARY
 import argparse, hashlib, json, os, plistlib, runpy, shutil, subprocess, sys
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT/'build-mac-full'
@@ -20,10 +20,8 @@ def copy(src, dst):
 def main():
     global BUILD, APP
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--agent-test-hook', action='store_true', help='Package the STAGING ONLY hook variant')
     parser.add_argument('--output-dir', type=Path, help='Destination containing MeleeUnlocked.app (default: build directory)')
     args = parser.parse_args()
-    BUILD = build_dir(args.agent_test_hook)
     APP = (args.output_dir.resolve() if args.output_dir else BUILD)/'MeleeUnlocked.app'
     if not (BUILD/'MeleeUnlocked').is_file():
         raise SystemExit('Build the full host first: bash port/mac/build-full.sh')
@@ -37,12 +35,6 @@ def main():
         raise SystemExit('Packaging requires build_full.py with port/app/main.cpp; dev spike hosts cannot ship')
     if built.get('version') != version or built.get('host_sha256') != hashlib.sha256((BUILD/'MeleeUnlocked').read_bytes()).hexdigest():
         raise SystemExit('Full host does not match the current version/build manifest; rebuild first')
-    artifact_hook = b'agent-test.json' in (BUILD/'MeleeUnlocked').read_bytes()
-    if built.get('agent_test_hook') != args.agent_test_hook or artifact_hook != args.agent_test_hook:
-        raise SystemExit('Agent-test variant does not match the build manifest/binary; rebuild first')
-    if not artifact_hook:
-        subprocess.run(['sh', str(ROOT/'port/tests/agent_test_hook_absent.sh'),
-                        str(BUILD/'MeleeUnlocked')], check=True)
     for needed in [GAME_LIBRARY, GAME_LIBRARY.with_suffix('.snapexcl'), GAME_ASSETS/'Sys/GC/dsp_coef.bin']:
         if not needed.is_file():
             raise SystemExit(f'Missing native build input: {needed}')
@@ -60,10 +52,10 @@ def main():
         # copy2 follows the glslang symlink (equivalent to cp -L).
         copy(ROOT.parent/'deps/tools/bin'/tool,res/'bin'/tool)
     # Linux release's runtime asset list, mapped to Resources. All mutable state lives in --user-dir.
+    shutil.copytree(GAME_ASSETS/'Sys',res/'Sys',dirs_exist_ok=True,symlinks=False)
     for src, dst in [('port/slippi_sys','Sys'), ('port/slippi_sys_playback','SysPlayback'),
                      ('port/slippi_sys_general','slippi_sys_general'),('lang','lang')]:
-        copy(ROOT/src, res/dst)
-    shutil.copytree(GAME_ASSETS/'Sys',res/'Sys',dirs_exist_ok=True,symlinks=False)
+        shutil.copytree(ROOT/src, res/dst, dirs_exist_ok=True, symlinks=False)
     copy(GAME_ASSETS/'Sys/GC/dsp_coef.bin',res/'Sys/GC/dsp_coef.bin')
     copy(GAME_ASSETS/'Sys/GC/dsp_coef.bin',res/'SysPlayback/GC/dsp_coef.bin')
     # Two of Slippi's Sys files are mostly Nintendo's own disc assets (compliance review, 10-25): they never ship. The
@@ -100,12 +92,11 @@ def main():
                 raise SystemExit('Unsupported source in Linux release license list')
             for pair in node.iter.elts:
                 copy(rooted_path(pair.elts[0]), res/'licenses'/ast.literal_eval(pair.elts[1]))
-    (res/'EXPERIMENTAL.txt').write_text('M7 0.9.56 full macOS host spike; unsigned. See port/mac/README.md for measured limitations.\n')
-    staging = 'STAGING ONLY: STAGING AGENT-TEST BUILD. NOT FOR PRODUCTION\n\n' if artifact_hook else ''
-    (res/'README.txt').write_text(staging + 'Melee Unlocked macOS experimental build; unsigned.\n', encoding='utf-8')
+    (res/'EXPERIMENTAL.txt').write_text('Experimental macOS build. See port/mac/README.md.\n')
+    (res/'README.txt').write_text('Melee Unlocked macOS experimental build; unsigned.\n', encoding='utf-8')
     (res/'build-manifest.json').write_text(json.dumps(built, indent=2)+'\n')
     version = (ROOT/'VERSION').read_text().strip()
-    info = dict(CFBundleIdentifier='co.yougame.meleeunlocked', CFBundleName='Melee Unlocked',
+    info = dict(CFBundleIdentifier='io.github.0xburn.melee-unlocked', CFBundleName='Melee Unlocked',
                 CFBundleDisplayName='Melee Unlocked - Experimental', CFBundleExecutable='MeleeUnlocked',
                 CFBundlePackageType='APPL',CFBundleShortVersionString=version, CFBundleVersion=version,
                 LSMinimumSystemVersion='15.0',LSArchitecturePriority=['x86_64'],

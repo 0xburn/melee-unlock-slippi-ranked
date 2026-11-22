@@ -1,13 +1,7 @@
 # Native Melee port: recompiled guest code + host runtime.
 cmake_minimum_required(VERSION 3.15)
-include(tests/friends_retire.cmake)
-include(tests/handoff_state.cmake)
 include(cmake/squad.cmake)
-include(cmake/yougame_build.cmake)
 
-if(WIN32)
-  include(tests/yougame_agent_root_win.cmake)
-endif()
 
 # The RTX Remix bridge (runtime/gx/remix_bridge.cpp), against NVIDIA's Remix C API headers (MIT,
 # third_party/remix). The runtime itself is not part of the game: it comes with the optional RTX Pack
@@ -42,20 +36,6 @@ endfunction()
 # When a setting of the runtime or of melee_source changes below, change it here as well.
 # The launchers read Dolphin RVZ/WIA disc images through this (port/app/disc_rvz.cpp).
 include("${CMAKE_CURRENT_SOURCE_DIR}/app/disc_rvz.cmake")
-# YouGame's own sign-in page in the launcher's browser view (app/launcher_yougame_web.cpp): Microsoft
-# Edge WebView2, its SDK header and static loader in third_party/webview2 (BSD-style, LICENSE.txt there).
-# Every target that compiles app/launcher_yougame.cpp takes this.
-# Also the installed YouGame app as the launcher's sign-in (app/launcher_yougame_app.cpp): the app's own local
-# channel, with the game's transport and checks (runtime/hle/yougame_channel.cpp).
-function(melee_yougame_web target)
-  target_sources(${target} PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/app/launcher_yougame_web.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/app/launcher_yougame_app.cpp"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/runtime/hle/yougame_channel.cpp")
-  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/third_party/webview2/include"
-    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/third_party" "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/runtime/hle")
-  target_link_libraries(${target} PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/third_party/webview2/x64/WebView2LoaderStatic.lib"
-    ole32 shlwapi version advapi32 user32)
-endfunction()
 option(MELEE_NO_SLIPPI "Build only melee_source, without the Slippi layer" OFF)
 if(MELEE_NO_SLIPPI)
   message(STATUS "melee: CPU baseline ${MELEE_CPU_BASELINE}, Source Port without the Slippi layer")
@@ -118,8 +98,7 @@ if(MELEE_NO_SLIPPI)
     third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)   # mu_net: keys, signatures, packet sealing
   mu_squad_target(runtime_ns)
   target_include_directories(runtime_ns PUBLIC third_party/monocypher)
-  target_compile_definitions(runtime_ns PRIVATE MELEE_NO_SLIPPI YOUGAME_COMPAT_TAG="${YOUGAME_COMPAT_TAG}" MELEE_PORT_VERSION="${MELEE_PORT_VERSION}"
-    MELEE_YOUGAME_BUILD="${MELEE_YOUGAME_BUILD}"
+  target_compile_definitions(runtime_ns PRIVATE MELEE_NO_SLIPPI MELEE_PORT_VERSION="${MELEE_PORT_VERSION}"
     MELEE_PLAYBACK_GCT_BASE=0u MELEE_PLAYBACK_GCT_SIZE=0u)
   if(WIN32)
     set(MELEE_ASIO_SOURCES third_party/asio/asio.cpp third_party/asio/asiodrivers.cpp third_party/asio/asiolist.cpp)
@@ -133,7 +112,6 @@ if(MELEE_NO_SLIPPI)
   target_compile_features(runtime_ns PUBLIC cxx_std_17)
   target_compile_options(runtime_ns PRIVATE /EHsc ${MELEE_ARCH_FLAG} /fp:precise /W3)
   target_compile_definitions(runtime_ns PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING)
-  # advapi32 wintrust crypt32: the local channel's pipe, token and signer checks (runtime/hle/yougame_channel.cpp).
   target_link_libraries(runtime_ns PUBLIC port_disc_rvz native_animation port_enet port_libusb bcrypt comdlg32 d3d12 d3d11 dxgi d3dcompiler xinput9_1_0 winmm user32 gdi32 setupapi winusb hid mfplat mfreadwrite mfuuid ole32 shell32 advapi32 wintrust crypt32)
 
   add_executable(melee_source WIN32 app/main.cpp app/settings_window.cpp app/source_host.cpp app/source_guest_boundary.cpp
@@ -305,20 +283,16 @@ ${melee_dxc_err}")
   # further down, plus MELEE_NO_SLIPPI. With it the lobby needs no Slippi account, an accepted match
   # starts melee_source with --p2p-* (a peer-to-peer session), and automatic pairing is offered.
   # When the normal target's sources or settings change below, change them here as well.
-  add_executable(melee_unlocked WIN32 app/launcher_mod_catalog.cpp runtime/host/mod_scan.cpp runtime/host/mod_profile.cpp app/launcher.cpp app/launcher_replay_data.cpp app/launcher_lobby.cpp app/launcher_lobby_p2p.cpp app/launcher_yougame.cpp
+  add_executable(melee_unlocked WIN32 app/launcher_mod_catalog.cpp runtime/host/mod_scan.cpp runtime/host/mod_profile.cpp app/launcher.cpp app/launcher_replay_data.cpp app/launcher_lobby.cpp app/launcher_lobby_p2p.cpp
     third_party/dht/dht.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c
     runtime/host/updater.cpp runtime/host/net_trace_read.cpp app/launcher_trace_view.cpp app/launcher.rc)
   set_target_properties(melee_unlocked PROPERTIES OUTPUT_NAME MeleeUnlockedLauncher)
-  melee_yougame_web(melee_unlocked)
   target_include_directories(melee_unlocked PRIVATE runtime/host runtime/ppc runtime/hle runtime/gx "${PORT_GEN}" third_party third_party/dht third_party/monocypher)
   target_compile_features(melee_unlocked PRIVATE cxx_std_17)
   target_compile_options(melee_unlocked PRIVATE /EHsc)
   target_compile_definitions(melee_unlocked PRIVATE MELEE_NO_SLIPPI NOMINMAX UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS MELEE_PORT_VERSION="${MELEE_PORT_VERSION}"
     MELEE_VERSION_COMMAS=${MELEE_VERSION_COMMAS})
   target_link_libraries(melee_unlocked PRIVATE port_disc_rvz comctl32 winhttp ws2_32 bcrypt user32 gdi32 shell32 comdlg32 msimg32 uxtheme winmm)
-  if(MELEE_YOUGAME_NO_UPSTREAM_UPDATES)
-    target_compile_definitions(melee_unlocked PRIVATE MELEE_YOUGAME_NO_UPSTREAM_UPDATES=1)
-  endif()
 
   # The lobby's peer-to-peer match flow, as two (and three) peer lobbies in one process over
   # loopback: the match setup both launchers agree on, automatic pairing, the block list, and the
@@ -363,7 +337,6 @@ ${melee_dxc_err}")
   target_compile_options(port_user_gecko_ns_test PRIVATE /EHsc)
   target_compile_definitions(port_user_gecko_ns_test PRIVATE MELEE_NO_SLIPPI NOMINMAX _CRT_SECURE_NO_WARNINGS)
   add_test(NAME port_user_gecko_ns COMMAND port_user_gecko_ns_test)
-  # A double-click finds the disc an earlier run used, the YouGame app's runs included.
   add_executable(port_disc_memory_ns_test tests/disc_memory_test.cpp)
   target_compile_features(port_disc_memory_ns_test PRIVATE cxx_std_17)
   target_compile_options(port_disc_memory_ns_test PRIVATE /EHsc)
@@ -462,78 +435,17 @@ target_include_directories(port_stage_read_pin_test PRIVATE runtime/host)
 target_compile_features(port_stage_read_pin_test PRIVATE cxx_std_17)
 add_test(NAME port_stage_read_pin COMMAND port_stage_read_pin_test)
 
-add_executable(port_yougame_agent_fight_test tests/yougame_agent_fight_test.cpp)
-target_include_directories(port_yougame_agent_fight_test PRIVATE runtime/hle third_party)
-target_compile_features(port_yougame_agent_fight_test PRIVATE cxx_std_17)
-target_compile_definitions(port_yougame_agent_fight_test PRIVATE YOUGAME_AGENT_TEST_HOOK)
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/yougame-agent-fight-test")
-add_test(NAME port_yougame_agent_fight COMMAND port_yougame_agent_fight_test "${CMAKE_CURRENT_BINARY_DIR}/yougame-agent-fight-test")
-add_executable(port_yougame_agent_fight_off_test tests/yougame_agent_fight_test.cpp)
-target_include_directories(port_yougame_agent_fight_off_test PRIVATE runtime/hle)
-target_compile_features(port_yougame_agent_fight_off_test PRIVATE cxx_std_17)
-add_test(NAME port_yougame_agent_fight_off COMMAND port_yougame_agent_fight_off_test)
-add_executable(port_yougame_ranked_test tests/yougame_ranked_test.cpp)
-target_include_directories(port_yougame_ranked_test PRIVATE runtime/hle third_party)
-target_compile_features(port_yougame_ranked_test PRIVATE cxx_std_20)
-add_test(NAME port_yougame_ranked COMMAND port_yougame_ranked_test)
-add_executable(port_yougame_relay_pads_test tests/yougame_relay_pads_test.cpp)
-target_include_directories(port_yougame_relay_pads_test PRIVATE runtime/hle third_party)
-target_compile_features(port_yougame_relay_pads_test PRIVATE cxx_std_17)
-add_test(NAME port_yougame_relay_pads COMMAND port_yougame_relay_pads_test)
-add_executable(port_yougame_ranked_rules_test tests/yougame_ranked_rules_test.cpp)
-target_include_directories(port_yougame_ranked_rules_test PRIVATE runtime/hle third_party)
-target_compile_features(port_yougame_ranked_rules_test PRIVATE cxx_std_17)
-add_test(NAME port_yougame_ranked_rules COMMAND port_yougame_ranked_rules_test)
 
 add_executable(port_host_stub_policy_test tests/host_stub_policy_test.cpp)
 target_include_directories(port_host_stub_policy_test PRIVATE runtime/ppc)
 target_compile_features(port_host_stub_policy_test PRIVATE cxx_std_17)
 add_test(NAME port_host_stub_policy COMMAND port_host_stub_policy_test)
-add_test(NAME port_yougame_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_merge_test.py")
-add_test(NAME port_yougame_0956_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0956_merge_test.py")
-add_test(NAME port_yougame_0962_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0962_merge_test.py")
-add_test(NAME port_yougame_0963_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0963_merge_test.py")
-add_test(NAME port_yougame_0968_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0968_merge_test.py")
-add_test(NAME port_yougame_0969_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0969_merge_test.py")
-add_test(NAME port_yougame_0971_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0971_merge_test.py")
-add_test(NAME port_yougame_0981_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0981_merge_test.py")
-add_test(NAME port_yougame_0982_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0982_merge_test.py")
-add_test(NAME port_yougame_0983_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_0983_merge_test.py")
-add_test(NAME port_yougame_1000_merge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_1000_merge_test.py")
 # The online menu's split rows on a synthetic menu archive (no game data).
-add_executable(port_online_rows_test tests/online_rows_test.cpp runtime/hle/online_rows.cpp)
-target_include_directories(port_online_rows_test PRIVATE runtime/hle)
-target_compile_features(port_online_rows_test PRIVATE cxx_std_17)
-add_test(NAME port_online_rows COMMAND port_online_rows_test)
-set_tests_properties(port_online_rows PROPERTIES TIMEOUT 10)
-# The launcher's YouGame bridge: parsing, checks and answers, with a stand-in for YouGame's site.
-add_executable(port_launcher_yougame_test tests/launcher_yougame_test.cpp app/launcher_yougame.cpp)
-melee_yougame_web(port_launcher_yougame_test)
-target_include_directories(port_launcher_yougame_test PRIVATE app third_party)
-target_compile_features(port_launcher_yougame_test PRIVATE cxx_std_17)
-target_compile_options(port_launcher_yougame_test PRIVATE /EHsc)
-add_test(NAME port_launcher_yougame COMMAND port_launcher_yougame_test)
-set_tests_properties(port_launcher_yougame PROPERTIES TIMEOUT 10)
-add_executable(port_yougame_mod_online_test tests/yougame_mod_online_test.cpp)
-target_include_directories(port_yougame_mod_online_test PRIVATE runtime/hle)
-target_compile_features(port_yougame_mod_online_test PRIVATE cxx_std_17)
-add_test(NAME port_yougame_mod_online COMMAND port_yougame_mod_online_test)
-add_executable(port_yougame_mod_online_noslippi_test tests/yougame_mod_online_test.cpp)
-target_include_directories(port_yougame_mod_online_noslippi_test PRIVATE runtime/hle runtime/host)
-target_compile_features(port_yougame_mod_online_noslippi_test PRIVATE cxx_std_17)
-target_compile_definitions(port_yougame_mod_online_noslippi_test PRIVATE MELEE_NO_SLIPPI)
-add_test(NAME port_yougame_mod_online_noslippi COMMAND port_yougame_mod_online_noslippi_test)
 
 add_executable(port_native_online_policy_test tests/native_online_policy_test.cpp)
 target_include_directories(port_native_online_policy_test PRIVATE runtime/hle)
 target_compile_features(port_native_online_policy_test PRIVATE cxx_std_17)
 add_test(NAME port_native_online_policy COMMAND port_native_online_policy_test)
-add_executable(port_static_mod_online_test tests/static_mod_online_test.cpp runtime/host/mod_profile.cpp)
-target_include_directories(port_static_mod_online_test PRIVATE runtime/hle runtime/host)
-target_compile_features(port_static_mod_online_test PRIVATE cxx_std_17)
-target_compile_options(port_static_mod_online_test PRIVATE /EHsc)
-target_link_libraries(port_static_mod_online_test PRIVATE bcrypt)
-add_test(NAME port_static_mod_online COMMAND port_static_mod_online_test)
 add_executable(port_native_slippi_bridge_test tests/native_slippi_bridge_test.cpp)
 target_include_directories(port_native_slippi_bridge_test PRIVATE runtime/hle)
 target_compile_features(port_native_slippi_bridge_test PRIVATE cxx_std_17)
@@ -571,15 +483,8 @@ target_include_directories(port_prewarm_only_test PRIVATE app)
 target_compile_features(port_prewarm_only_test PRIVATE cxx_std_17)
 add_test(NAME port_prewarm_only COMMAND port_prewarm_only_test)
 add_test(NAME port_prewarm_only_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/prewarm_only_wiring_test.py")
-add_test(NAME port_game_state_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/game_state_wiring_test.py")
 add_test(NAME port_search_keep_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/search_keep_wiring_test.py")
-add_test(NAME port_restart_keeps_signin_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/restart_keeps_signin_wiring_test.py")
-add_test(NAME port_socket_open_retry_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/socket_open_retry_wiring_test.py")
 add_test(NAME port_slow_load_start_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/slow_load_start_wiring_test.py")
-add_test(NAME port_yougame_app_button_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_app_button_wiring_test.py")
-add_test(NAME port_build106_fixes_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/build106_fixes_wiring_test.py")
-add_test(NAME port_standalone_update_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/standalone_update_wiring_test.py")
-add_test(NAME port_yougame_open_connect_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/yougame_open_connect_wiring_test.py")
 add_test(NAME port_launcher_recomp_missing_wiring COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher_recomp_missing_wiring_test.py")
 add_executable(port_pipeline_cache_store_test tests/pipeline_cache_store_test.cpp)
 target_include_directories(port_pipeline_cache_store_test PRIVATE runtime/gx)
@@ -795,19 +700,6 @@ target_include_directories(port_box_melee_test PRIVATE runtime/host runtime/ppc)
 target_compile_features(port_box_melee_test PRIVATE cxx_std_17)
 target_compile_definitions(port_box_melee_test PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 add_test(NAME port_box_melee COMMAND port_box_melee_test)
-add_executable(port_controller_relay_test tests/controller_relay_test.cpp)
-target_include_directories(port_controller_relay_test PRIVATE runtime/host runtime/ppc)
-target_compile_features(port_controller_relay_test PRIVATE cxx_std_17)
-target_compile_definitions(port_controller_relay_test PRIVATE NOMINMAX)
-add_test(NAME port_controller_relay COMMAND port_controller_relay_test)
-add_executable(port_yougame_controller_relay_test tests/yougame_controller_relay_test.cpp)
-target_include_directories(port_yougame_controller_relay_test PRIVATE runtime/hle runtime/host runtime/ppc third_party)
-target_compile_features(port_yougame_controller_relay_test PRIVATE cxx_std_17)
-target_compile_definitions(port_yougame_controller_relay_test PRIVATE NOMINMAX)
-add_test(NAME port_yougame_controller_relay COMMAND port_yougame_controller_relay_test)
-add_test(NAME port_yougame_relay_gap COMMAND port_yougame_controller_relay_test gap)
-add_test(NAME port_yougame_relay_virtual COMMAND port_yougame_controller_relay_test virtual)
-add_test(NAME port_yougame_relay_ps_fixture COMMAND port_yougame_controller_relay_test ps-fixture)
 add_executable(port_gc_adapter_reset_test tests/gc_adapter_reset_test.cpp runtime/host/phob.cpp)
 target_include_directories(port_gc_adapter_reset_test PRIVATE runtime/host runtime/ppc runtime/hle third_party/libusb/libusb)
 target_compile_features(port_gc_adapter_reset_test PRIVATE cxx_std_17)
@@ -953,8 +845,8 @@ list(SUBLIST MELEE_VERSION_PARTS 0 4 MELEE_VERSION_PARTS)
 list(JOIN MELEE_VERSION_PARTS "," MELEE_VERSION_COMMAS)
 add_library(runtime STATIC ${RUNTIME_SOURCES} third_party/slippilib/SlippiGame.cpp)
 mu_squad_target(runtime)
-target_compile_definitions(runtime PRIVATE YOUGAME_COMPAT_TAG="${YOUGAME_COMPAT_TAG}" MELEE_PORT_VERSION="${MELEE_PORT_VERSION}"
-  MELEE_YOUGAME_BUILD="${MELEE_YOUGAME_BUILD}")
+target_compile_definitions(runtime PRIVATE MELEE_PORT_VERSION="${MELEE_PORT_VERSION}"
+)
 # ASIO output (audio mode 3): the Steinberg ASIO SDK host files only, under the SDK's GPL Version 3
 # option (asio.cpp, asiodrivers.cpp, asiolist.cpp; see third_party/asio/README.txt). Windows only. The
 # SDK's registry helpers use the ANSI API, so these three build without UNICODE.
@@ -979,7 +871,6 @@ target_compile_features(runtime PUBLIC cxx_std_17)
 target_compile_options(runtime PRIVATE /EHsc ${MELEE_ARCH_FLAG} /fp:precise /W3)
 target_compile_definitions(runtime PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING)
 include(runtime/ppc/ram_translator.cmake)
-# advapi32 wintrust crypt32: the local channel's pipe, token and signer checks (runtime/hle/yougame_channel.cpp).
 target_link_libraries(runtime PUBLIC port_disc_rvz native_animation port_enet port_libusb bcrypt comdlg32 d3d12 d3d11 dxgi d3dcompiler xinput9_1_0 winmm user32 gdi32 setupapi winusb hid mfplat mfreadwrite mfuuid ole32 shell32 advapi32 wintrust crypt32)
 
 # mu_net: the project's own peer-to-peer session (no Slippi code). Keys, signatures and packet
@@ -1031,30 +922,7 @@ target_compile_options(melee_source PRIVATE /EHsc)
 target_compile_definitions(melee_source PRIVATE MELEE_SOURCE_PORT NOMINMAX _CRT_SECURE_NO_WARNINGS
   MELEE_PORT_VERSION="${MELEE_PORT_VERSION}" MELEE_CPU_BASELINE_NAME="${MELEE_CPU_BASELINE}"
   MELEE_VERSION_COMMAS=${MELEE_VERSION_COMMAS})
-# Staging test builds only: read agent-test.json (runtime/hle/yougame_agent_test.h) in app-launched YouGame mode.
 # Off by default; never on for a build that goes to a production listing (tests/agent_test_hook_absent.sh checks it).
-option(YOUGAME_RANKED_BRANCH "Ranked: visible Ranked and local CPU practice" ON)   # ON in the main staging build (10-31: Friends + Ranked on the main build)
-if(YOUGAME_RANKED_BRANCH)
-  target_compile_definitions(melee_source PRIVATE YOUGAME_RANKED_BRANCH=1)
-  if(TARGET melee_port)
-    target_compile_definitions(melee_port PRIVATE YOUGAME_RANKED_BRANCH=1)
-  endif()
-  target_compile_definitions(runtime PRIVATE YOUGAME_RANKED_BRANCH=1)
-endif()
-option(YOUGAME_AGENT_TEST_HOOK "Staging test builds: read agent-test.json in app-launched YouGame mode" OFF)
-option(YOUGAME_FRIENDS_HANDOFF_DEFAULT "Experimental Friends live handoff agreement" OFF)  # off again: the copy never starts the match (no start-at-N), so joins relaunch at once
-if(YOUGAME_FRIENDS_HANDOFF_DEFAULT)
-  target_compile_definitions(melee_source PRIVATE YOUGAME_FRIENDS_HANDOFF_DEFAULT=1)
-  if(TARGET melee_port)   # the Windows source-only build has no melee_port
-    target_compile_definitions(melee_port PRIVATE YOUGAME_FRIENDS_HANDOFF_DEFAULT=1)
-  endif()
-  target_compile_definitions(runtime PRIVATE YOUGAME_FRIENDS_HANDOFF_DEFAULT=1)
-endif()
-if(YOUGAME_AGENT_TEST_HOOK)
-  target_compile_definitions(melee_source PRIVATE YOUGAME_AGENT_TEST_HOOK)
-  target_compile_definitions(melee_port PRIVATE YOUGAME_AGENT_TEST_HOOK)
-  target_compile_definitions(runtime PRIVATE YOUGAME_AGENT_TEST_HOOK)
-endif()
 add_test(NAME source_card_roundtrip COMMAND melee_source --hidden --volume 0
   --log-file "${CMAKE_CURRENT_BINARY_DIR}/source-card-roundtrip.log"
   --card-self-test "${CMAKE_CURRENT_BINARY_DIR}/source-card-roundtrip")
@@ -1183,11 +1051,10 @@ if(MELEE_CPU_BASELINE STREQUAL "AVX2")
 endif()
 
 # Melee Unlocked client: Win32 launcher (Play page, Build tab, self-update). No runtime dependency.
-add_executable(melee_unlocked WIN32 app/launcher_mod_catalog.cpp runtime/host/mod_scan.cpp runtime/host/mod_profile.cpp app/launcher.cpp app/launcher_replay_data.cpp app/launcher_lobby.cpp app/launcher_lobby_p2p.cpp app/launcher_yougame.cpp
+add_executable(melee_unlocked WIN32 app/launcher_mod_catalog.cpp runtime/host/mod_scan.cpp runtime/host/mod_profile.cpp app/launcher.cpp app/launcher_replay_data.cpp app/launcher_lobby.cpp app/launcher_lobby_p2p.cpp
   third_party/dht/dht.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c
   runtime/host/updater.cpp runtime/host/net_trace_read.cpp app/launcher_trace_view.cpp app/launcher.rc)
 set_target_properties(melee_unlocked PROPERTIES OUTPUT_NAME MeleeUnlockedLauncher)
-melee_yougame_web(melee_unlocked)
 add_executable(port_launcher_replay_data_test tests/launcher_replay_data_test.cpp app/launcher_replay_data.cpp)
 target_include_directories(port_launcher_replay_data_test PRIVATE app third_party)
 target_compile_features(port_launcher_replay_data_test PRIVATE cxx_std_17)
@@ -1277,9 +1144,6 @@ target_compile_options(melee_unlocked PRIVATE /EHsc)
 target_compile_definitions(melee_unlocked PRIVATE NOMINMAX UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS MELEE_PORT_VERSION="${MELEE_PORT_VERSION}"
   MELEE_VERSION_COMMAS=${MELEE_VERSION_COMMAS})
 target_link_libraries(melee_unlocked PRIVATE port_disc_rvz comctl32 winhttp ws2_32 bcrypt user32 gdi32 shell32 comdlg32 msimg32 uxtheme winmm)
-if(MELEE_YOUGAME_NO_UPSTREAM_UPDATES)
-  target_compile_definitions(melee_unlocked PRIVATE MELEE_YOUGAME_NO_UPSTREAM_UPDATES=1)
-endif()
 
 # Run via lobby/test_client.py, which owns a temporary HTTP/UDP service and database.
 add_executable(port_launcher_lobby_client_test tests/launcher_lobby_client_test.cpp app/launcher_lobby_p2p.cpp
@@ -1461,15 +1325,6 @@ target_compile_features(port_lab_view_test PRIVATE cxx_std_17)
 target_compile_definitions(port_lab_view_test PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 add_test(NAME port_lab_view COMMAND port_lab_view_test)
 set_tests_properties(port_lab_view PROPERTIES TIMEOUT 30)
-
-add_executable(port_coming_soon_overlay_test tests/coming_soon_overlay_test.cpp runtime/gx/coming_soon_overlay.cpp
-  third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
-  third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp)
-target_include_directories(port_coming_soon_overlay_test PRIVATE runtime/gx third_party/imgui)
-target_compile_features(port_coming_soon_overlay_test PRIVATE cxx_std_17)
-target_compile_definitions(port_coming_soon_overlay_test PRIVATE MELEE_COMING_SOON_TEST_CLOCK=1)
-add_test(NAME port_coming_soon_overlay COMMAND port_coming_soon_overlay_test)
-set_tests_properties(port_coming_soon_overlay PROPERTIES TIMEOUT 10)
 
 # NVIDIA Streamline (DLSS): optional, enabled only when the headers, import library, and core
 # redistributable DLLs are all present. A source archive may intentionally omit proprietary runtime

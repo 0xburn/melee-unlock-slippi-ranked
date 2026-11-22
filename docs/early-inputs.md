@@ -2,7 +2,7 @@
 
 Online, each game sends the other player's game one pad per frame, and when a pad has not arrived in time the game guesses by repeating the last one it has. A press that happens right after a poll waits almost a whole frame before it is even sent, and the other side guesses wrong for every frame in between. Early inputs close most of that gap: the moment the controller changes in a way the game acts on, the new pad is sent at once, stamped with the frame it will first appear in. The other game predicts from it until the real pad arrives. The real pad always decides, so nothing about the match's result, replay or checksums changes; only how often the other side guesses right.
 
-Setting: PC settings, Online, "Early inputs" (on by default; ini key `early_inputs`). Test override for hidden runs: `MELEE_EARLY_INPUTS=0|1`.
+Enable **Early inputs** under PC settings → Online. Fresh settings leave it off. The saved key is `early_inputs2`. Hidden tests can override the setting with `MELEE_EARLY_INPUTS=0|1`. Early correction of an existing prediction is separately opt-in through `MELEE_EARLY_ROLLBACK=1`.
 
 ## Credit
 
@@ -14,10 +14,7 @@ the audio DMA at once) also shaped the port's input and audio paths. Thanks, Art
 
 ## Trust
 
-Early pads are optional data a peer volunteers. A remote whose early guesses are mostly wrong (over
-60% after 64 guesses; honest play measured under 26% in every such run) has its early pads ignored
-for the rest of the match, logged once. Test switch: `MELEE_TEST_EARLY_LIE=1` makes a game send
-made-up early pads.
+The native prediction code starts evaluating a peer's accuracy after 24 scored early predictions. If more than half are wrong, the game ignores that peer's early pads for the remainder of the match and logs the decision. The test switch `MELEE_TEST_EARLY_LIE=1` generates incorrect early pads.
 
 ## What is sent
 
@@ -51,7 +48,7 @@ The host owns the controller poll, so the frame is exact: the pad polled at fram
 
 ## Who sends, who uses
 
-- Both engines send: the sampler is host code (`port/runtime/host/early_input.cpp`, a thread reading the controllers every millisecond while a match runs).
+- Both engines send: the sampler is host code (`port/runtime/host/early_input.cpp`, a sampling thread that waits one millisecond between reads while a match runs).
 - The Source Port uses them: its online code is native (`sourceport/game/shim/mu_online.c`). The host appends the other players' early pads after Slippi's fixed inputs reply, and `load_opponent_inputs` predicts a not-yet-confirmed frame from the newest early pad for a frame up to it.
 - The Static Recomp does not use them: its prediction is Slippi's own game code, which reads the fixed reply. It still sends, so a Static Recomp player helps a Source Port opponent.
 

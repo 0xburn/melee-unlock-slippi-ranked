@@ -3,9 +3,6 @@
 // between 60 Hz simulation frames from re-posed geometry (see subframe.h); the simulation is never
 // touched. The bounded source queue can back-pressure simulation when rendering is slow.
 // SPDX-License-Identifier: GPL-2.0-or-later
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_paths.h"
-#endif
 #include "threaded_backend.h"
 #include "frame_queue.h"
 #include "gx_backend.h"
@@ -17,7 +14,6 @@
 #include "authored_pose.h"
 #include "window.h"
 #include "test_env.h"
-#include "yougame_link.h"
 #include "gx_core.h"
 #include "vrr_detect.h"
 #include "replay_control.h"
@@ -86,11 +82,7 @@ class ThreadedBackend final : public Backend {
       FILE* file = nullptr;
       explicit Trace(const std::string& path) {
         if (!path.empty()) {
-          #ifdef YOUGAME_AGENT_TEST_HOOK
-          file = yougame::agent_paths::output(path, false, false, "w");
-#else
           file = std::fopen(path.c_str(), "w");
-#endif
           if (!file) throw std::runtime_error("cannot open frame timing CSV");
           std::setvbuf(file, nullptr, _IOFBF, 1024 * 1024);
           std::fputs("presentation,simulation,phase,source_age_ms,interval_ms,solver_ms,submit_ms,present_wait_ms,authored_draws,paired_draws,sim_ms,draws,missing,hud,state,geometry,projection,state_register,skinned,posed,posed_skinned,source_retrace,source_scene_major,source_scene_minor,source_match_frame\n", file);
@@ -256,7 +248,7 @@ class ThreadedBackend final : public Backend {
         refresh_check = host::now_seconds() + 1.0;
       }
       // The rate asked for: the cap, the monitor (-1), or uncapped (0), held at twice the monitor's
-      // rate (see above) unless MELEE_PRESENT_UNCAPPED=1.
+      // rate only when the measurement override MELEE_UNCAPPED_HOLD=1 is set.
       double wanted = live_options.fps_cap > 0 ? live_options.fps_cap
                     : live_options.fps_cap < 0 ? last_refresh
                     : present_uncapped ? 0.0 : 2.0 * last_refresh;
@@ -499,7 +491,7 @@ class ThreadedBackend final : public Backend {
         should_render = current.sequence != rendered_sequence;   // once per simulation frame
         // A paused replay sends no new frames, but its bar and the settings panel still have to be
         // drawn: the frame on screen is submitted again, 60 times a second.
-        if (!should_render && !queue.drained() && (replay_control::repaint_wanted() || yougame::update_handoff_visible()) && host::now_seconds() >= idle_repaint)
+        if (!should_render && !queue.drained() && (replay_control::repaint_wanted()) && host::now_seconds() >= idle_repaint)
           should_render = true;
         // Lag test ledger, "report": the fill changed with an adapter report; the frame on screen goes out again with it.
         static int flash_drawn = -1;
@@ -910,9 +902,6 @@ class ThreadedBackend final : public Backend {
   // a restart, while the same PC was fine in Big Picture, which runs games borderless. Exclusive
   // fullscreen is left for runs without the overlay.
   static RenderOptions without_exclusive_under_overlay(RenderOptions options) {
-#ifdef _WIN32
-    if (yougame::embedded()) options.exclusive_fullscreen = false;
-#endif
     if (options.fullscreen && options.exclusive_fullscreen && GetModuleHandleW(L"GameOverlayRenderer64.dll")) {
       options.exclusive_fullscreen = false;
       host::log("display: the Steam overlay is loaded; using borderless fullscreen instead of exclusive");
@@ -943,8 +932,7 @@ class ThreadedBackend final : public Backend {
         int client_w = options.window_w, client_h = options.window_h;
         host::window_client_size(&client_w, &client_h);
         // DLSS, the graphics device and the shaders start on a worker while this thread keeps the window
-        // answering (window.h window_responsive): a window silent for seconds read as hung, and the
-        // YouGame app hid its button over it until the first frame.
+        // answering OS events during startup.
         std::unique_ptr<Backend> renderer;
         host::window_responsive([&] {
           // MELEE_TEST_STARTUP_STALL_MS (hidden test runs): a slow DLSS or driver start, in milliseconds.

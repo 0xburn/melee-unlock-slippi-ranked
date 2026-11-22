@@ -1,4 +1,4 @@
-"""Every WinHTTP WebSocket call the room socket makes has a Linux stand-in, the close status included."""
+"""Every WinHTTP WebSocket call matchmaking makes has a Linux stand-in, the close status included."""
 from pathlib import Path
 import re
 import unittest
@@ -7,8 +7,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class LinuxWinHttpCloseStatusTest(unittest.TestCase):
-    def test_room_socket_calls_exist_on_linux(self):
-        link = (ROOT / "port/runtime/hle/yougame_link.cpp").read_text(encoding="utf-8")
+    def test_matchmaking_socket_calls_exist_on_linux(self):
+        link = (ROOT / "port/runtime/hle/slippi_mm_service.cpp").read_text(encoding="utf-8")
         header = (ROOT / "port/linux/compat/winhttp.h").read_text(encoding="utf-8")
         for name in sorted(set(re.findall(r"\b(WinHttpWebSocket\w+)\(", link))):
             self.assertRegex(header, rf"\b{name}\(", f"{name} has no Linux declaration")

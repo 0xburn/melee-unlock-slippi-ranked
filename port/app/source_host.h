@@ -41,9 +41,8 @@ bool has_mod_layers();
 // game as a new .slp to --replay-dir. Returns false when the file cannot be read.
 bool set_replay(const char* path);
 // --online-test mode[:character[:color]]: automated tests only. The game boots straight into an
-// online match (no menus) found through --local-peer, or through YouGame when the app (or its dev
-// bridge) launched it. Mode is direct, unranked, ranked or teams. Ranked (YouGame mode only) plays
-// the whole best-of-3 set, locking the same character in for each game, then ends the run.
+// online match using the configured peer. Ranked plays the whole best-of-three set,
+// locking the same character in for each game.
 // Returns false for a malformed spec.
 bool set_online_test(const char* spec);
 #if MU_SQUAD

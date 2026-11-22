@@ -62,22 +62,7 @@
 namespace gecko { int option_screen_shake_percent = 100; }
 #include "lag_test_codes.h"
 #include "gecko_data.h"
-#include "yougame_link.h"
-#include "yougame_game_state.h"
-#include "yougame_parity.h"
-#include "yougame_embed_fullscreen.h"
-#include "yougame_friends.h"
-#include "yougame_console_entry.h"
 #include <chrono>
-#include "yougame_mode_policy.h"
-#include "yougame_update.h"
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_test.h"
-#endif
-#include "yougame_display_defaults.h"
-#include "yougame_blend.h"
-#include "yougame_search.h"
-#include "signin_overlay.h"
 #include "hid_pad.h"
 #include "phob_menu.h"
 #include "updater.h"
@@ -97,7 +82,6 @@ static constexpr bool kShowFasterSoundEffects = true;
 #include "lab_view.h"
 #include "training_overlay.h"
 #include "net_overlay.h"
-#include "coming_soon_overlay.h"
 #include "replay_bar.h"
 #include "replay_control.h"
 #include "replay_coach.h"
@@ -549,11 +533,6 @@ static void draw_pro_tag_robots() {
   draw->PopClipRect();
 }
 
-// Under the YouGame app, between matches: how to get back to YouGame. The game keeps running after an
-// online result (Melee Unlocked's own rematch menu), and the app's page is right behind it.
-static void draw_back_to_yougame_hint() {
-  screen_label::draw_corner_hint(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y, g_overlay_game_aspect);
-}
 
 // Names used both when drawing the Controls list and when saving/loading bindings
 // to port-settings.ini (as "key_<name>" / "pad<idx>_<name>" / "gc<idx>_<name>" lines).
@@ -1271,8 +1250,6 @@ static bool gecko_add_code_button() {
       }
   return changed;
 }
-
-
 
 // The Advanced group at the bottom of Video ([0]) and Overlays ([1]): diagnostics, pack making and
 // the DLSS 5 internals, out of the way of the everyday settings. Closed until the player opens it,
@@ -2127,7 +2104,7 @@ static void draw_lcancel_overlays() {
       for (char& c : lower) c = (char)std::tolower((unsigned char)c);
       const OverlayBounds bounds = overlay_bounds();
       // Left of center: the top-center band holds Ranked setup's game boxes, the top-left corner the
-      // FPS counter and the top-right the YouGame menu hint.
+      // FPS counter.
       ImGui::SetNextWindowPos(ImVec2(bounds.left + (bounds.right - bounds.left) * 0.28f, bounds.top + 10), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
       ImGui::SetNextWindowBgAlpha(0.75f);
       ImGui::Begin("LCancelModeNotice", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -2227,21 +2204,7 @@ static void draw_skin_online_notice() {
   ImGui::End();
 }
 
-// App-installed update: centered in the game picture, independent of optional HUD readouts.
-static void draw_update_handoff_notice() {
-  if (!yougame::update_handoff_visible()) return;
-  const OverlayBounds bounds = overlay_bounds();
-  ImGui::SetNextWindowPos(ImVec2((bounds.left + bounds.right) * 0.5f,
-                               (bounds.top + bounds.bottom) * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-  ImGui::SetNextWindowBgAlpha(0.9f);
-  ImGui::Begin("YouGameUpdatingNotice", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
-  ImGui::TextUnformatted("Updating...");
-  ImGui::End();
-  yougame::update_notice_presented();
-}
-
-// The volume the settings file holds. state.volume is only assigned while the Audio tab is being
+// The volume loaded from settings. The Audio tab runs only when it is being
 // drawn, and ImGui runs a tab's body only when it is the selected one, so saving from any other
 // tab used to write whatever that field happened to start as, which is zero. Players saw the
 // volume set itself to 0 on a later launch.
@@ -2257,13 +2220,6 @@ static void dlss5_float(const std::string& value, float& target, float lo, float
 }
 #endif
 
-// V-Sync and the FPS counter inside YouGame (yougame_display_defaults.h): the old keys' values as the
-// file held them, so a save inside YouGame writes those back unchanged and keeps its own choice in
-// "vsync_yougame" / "showfps_yougame"; a save outside YouGame keeps the YouGame keys as they were.
-static struct {
-  bool yougame = false, own_vsync = false, vsync = true, show_fps = false;
-  int saved_vsync_yougame = -1, saved_showfps_yougame = -1;
-} g_display_keys;
 
 static void apply_practice_tools(RenderOptions& options);   // below, with the Practice page
 void load_pc_settings(RenderOptions& options, int& volume) {
@@ -2310,8 +2266,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   std::vector<std::string> texture_packs_off;
   bool gecko_chosen = false;           // the panel has saved a choice (even "none")
   int saved_lcancel_flash = -1, saved_lcancel_success = -1;
-  int saved_vsync_yougame = -1, saved_showfps_yougame = -1;   // -1: never saved inside YouGame
-  bool vsync_seen = false, showfps_seen = false, vsync_choice_seen = false;
+  bool vsync_seen = false, vsync_choice_seen = false;
   bool lowspec_look = false;   // "lowspec_look 1": written by builds that migrate Low spec to the image only
   int dlss5_defaults_version = 0;   // 2 from 0.9.60: NVIDIA's own DLSS 5 defaults
   bool saved_true_widescreen = false, truewsfit_seen = false;
@@ -2371,7 +2326,6 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "vsync") { options.vsync = value == "1"; vsync_seen = true; }
       else if (key == "vsyncchoice") vsync_choice_seen = value == "1";
       else if (key == "vrrfound") options.vrr_found = value == "1";
-      else if (key == "vsync_yougame") saved_vsync_yougame = value == "1";
       else if (key == "widescreen") options.widescreen = value == "1";
       else if (key == "fodreflections") options.fod_reflections = value != "0";
       else if (key == "cssbackgroundfree") options.css_background_free = value == "1";
@@ -2448,10 +2402,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       // early_inputs, the old key saved on by default, is not read (render_options.h).
       else if (key == "early_inputs2" || key == "early_inputs") { if (key == "early_inputs2") options.early_inputs = value == "1"; }
       else if (key == "performance") options.performance_overlay = value == "1";
-      else if (key == "showfps") { options.show_fps = value == "1"; showfps_seen = true; }
-      // showfps_yougame2: builds before 10-31 saved showfps_yougame 1 on every save (the old default),
-      // so a new key lets every player start from today's default (off; on for agent runs) once.
-      else if (key == "showfps_yougame2") saved_showfps_yougame = value == "1";
+      else if (key == "showfps") options.show_fps = value == "1";
       else if (key == "showvram") options.show_vram = value == "1";
       else if (key == "showping") options.show_ping = value == "1";
       else if (key == "netoverlay") net_overlay::set_enabled(value == "1");
@@ -2754,32 +2705,13 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   // A controller saved before L and R were split into the click and the travel keeps playing as it
   // did. After the whole file, since a binding and its level can come in either order.
   split_old_trigger_tables();
-  // Inside YouGame (yougame::start() has run before any settings load), V-Sync and the FPS counter
-  // follow their own keys; outside it the old keys, unchanged.
-#ifdef _WIN32
-  constexpr bool kWindows = true;
-#else
-  constexpr bool kWindows = false;
-#endif
-  // A key the file lacks is captured as its fresh-install value, never as what an earlier load
-  // inside YouGame left in `options`.
-  const RenderOptions fresh{};
-  g_display_keys = {yougame::stdio_bridge(), yougame::display_defaults::own_vsync_key(yougame::stdio_bridge(), kWindows),
-                    vsync_seen ? options.vsync : fresh.vsync, showfps_seen ? options.show_fps : fresh.show_fps,
-                    saved_vsync_yougame, saved_showfps_yougame};
-  options.vsync = yougame::display_defaults::vsync(g_display_keys.yougame, kWindows, options.vsync, saved_vsync_yougame);
   // Every save before this wrote "vsync 1" for players who never touched it, so only "vsync 0" (the
-  // default was on) or the new "vsyncchoice 1" is a choice. Inside the YouGame app its own keys decide.
-  options.vsync_auto = !g_display_keys.yougame && !vsync_choice_seen && (!vsync_seen || options.vsync);
+  // default was on) or the new "vsyncchoice 1" is a choice.
+  options.vsync_auto = !vsync_choice_seen && (!vsync_seen || options.vsync);
   if (options.vsync_auto) {
     options.vsync = false;
     host::log("present: vsync off from the start (automatic)");
   }
-  options.show_fps = yougame::display_defaults::show_fps(g_display_keys.yougame, options.show_fps, saved_showfps_yougame);
-  if (g_display_keys.yougame)
-    host::log("settings: vsync %s%s, fps counter %s (%s)", options.vsync ? "on" : "off",
-              g_display_keys.own_vsync && saved_vsync_yougame < 0 ? " (YouGame default)" : "", options.show_fps ? "on" : "off",
-              yougame::display_defaults::fps_source(saved_showfps_yougame));
   // The old Ultra preset (4x supersampling under DLAA) becomes the new one (DLAA alone); see the
   // presets. Only that exact combination is changed.
   if (options.efb_scale == 0 && options.ssaa == 2 && options.anisotropy == 16 && options.dlss_mode == 1) options.ssaa = 1;
@@ -4488,11 +4420,11 @@ static bool search_banner_test(RenderOptions& options, const slippi::native_prac
   game_picture(options, &x0, &y0, &x1, &y1);
   struct Shot { const char* name; int stage; const char* service; const char* mode; uint32_t shown, elapsed, found; int countdown; float hold; int notice; };
   static const Shot kShots[] = {
-      {"1-slide-in", 1, "YouGame", "Unranked", 150, 41000, 0, -1, 0, 0},
-      {"2-searching-0-42", 1, "YouGame", "Unranked", 2000, 42000, 0, -1, 0, 0},
-      {"3-squad-12-34", 1, "YouGame", "Squad Strike", 9000, 754000, 0, -1, 0, 0},
-      {"4-holding-L+R", 1, "YouGame", "Squad Strike", 9500, 754500, 0, -1, 0.55f, 0},
-      {"5-found", 2, "YouGame", "Squad Strike", 10000, 755000, 400, 2600, 0, 0},
+      {"1-slide-in", 1, "Slippi", "Unranked", 150, 41000, 0, -1, 0, 0},
+      {"2-searching-0-42", 1, "Slippi", "Unranked", 2000, 42000, 0, -1, 0, 0},
+      {"3-ranked-12-34", 1, "Slippi", "Ranked", 9000, 754000, 0, -1, 0, 0},
+      {"4-holding-L+R", 1, "Slippi", "Ranked", 9500, 754500, 0, -1, 0.55f, 0},
+      {"5-found", 2, "Slippi", "Ranked", 10000, 755000, 400, 2600, 0, 0},
       {"6-notice-search-again", 0, "", "", 0, 0, 0, -1, 0, 1},
       {"7-notice-disconnected", 0, "", "", 0, 0, 0, -1, 0, 2},
   };
@@ -4864,8 +4796,7 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     ImGui::End();
     return;
   }
-  if (yougame::stdio_bridge()) ImGui::TextUnformatted(yougame::parity::kMenuHint);
-  else ImGui::Text("Tab or %s: return to the game", host::window_menu_key());
+  ImGui::Text("Tab or %s: return to the game", host::window_menu_key());
   ImGui::Separator();
   practice_ui::heading("Search while you practice", "The match starts as soon as one is found.");
 
@@ -5092,11 +5023,9 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
   std::ofstream file(temporary);
   file << "fps " << options.fps_cap << "\nscale " << options.efb_scale << "\nfullscreen " << options.fullscreen
        << "\nexclusivefullscreen " << options.exclusive_fullscreen
-       << "\nvsync " << (g_display_keys.own_vsync ? g_display_keys.vsync : (options.vsync || options.vsync_auto))
+       << "\nvsync " << (options.vsync || options.vsync_auto)
        << (options.vsync_auto ? "" : "\nvsyncchoice 1")
        << (options.vrr_found ? "\nvrrfound 1" : "")
-       << (g_display_keys.own_vsync ? std::string("\nvsync_yougame ") + (options.vsync ? "1" : "0")
-           : g_display_keys.saved_vsync_yougame >= 0 ? "\nvsync_yougame " + std::to_string(g_display_keys.saved_vsync_yougame) : std::string())
        << "\nwidescreen " << options.widescreen
        << "\nfodreflections " << options.fod_reflections << "\ncssbackgroundfree " << options.css_background_free
        << "\ntruewidescreen " << options.true_widescreen << "\ntruewsaspect " << (int)options.true_aspect << "\ntruewsfit 1"
@@ -5107,9 +5036,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nmute_voices " << (gx::RenderOptions::live_mute_voices() ? 1 : 0)
        << "\naudio_mode " << options.audio_mode << "\naudio_buffer_ms " << options.audio_buffer_ms << "\naudio_device " << options.audio_device
        << "\naudio_asio_driver " << options.audio_asio_driver << "\naudio_asio_buffer " << options.audio_asio_buffer
-       << "\nshowfps " << (g_display_keys.yougame ? g_display_keys.show_fps : options.show_fps)
-       << (g_display_keys.yougame ? std::string("\nshowfps_yougame2 ") + (options.show_fps ? "1" : "0")
-           : g_display_keys.saved_showfps_yougame >= 0 ? "\nshowfps_yougame2 " + std::to_string(g_display_keys.saved_showfps_yougame) : std::string())
+       << "\nshowfps " << options.show_fps
        << "\nshowvram " << (options.show_vram ? 1 : 0) << "\nshowping " << options.show_ping
        << "\nnetoverlay " << (net_overlay::enabled() ? 1 : 0)
        << "\ndlss " << options.dlss_mode << "\nframegen " << options.frame_generation_mode
@@ -5595,10 +5522,7 @@ static bool binding_press_at_slider(host::CaptureDevice kind, int index, int act
 }
 
 static void game_mods_panel(const RenderOptions& options) {
-  if (!yougame::mode_policy::mod_sources(yougame::active()).folders) {
-    ImGui::TextWrapped("Game mods come from the YouGame listing. Launch a remix to play its mods.");
-    return;
-  }
+
   namespace mods = source_port::mods;
   auto view = mods::panel_view();
   if (!view.scanned && !view.scanning && !view.importing && mods::auto_detect()) mods::rescan_async();
@@ -5774,53 +5698,15 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       }
     }
   };
-  const auto fullscreen_clock = [] {
-    return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
-  };
-  const auto fullscreen_emit = [](int request) {
-    if (request < 0) return;
-    yougame::parity::signals.emit(request ? "yg {\"fullscreen\":1}" : "yg {\"fullscreen\":0}");
-    host::log("yougame: fullscreen request %d", request);
-  };
-  // Runs with the overlay closed too, on every renderer and both engines.
-  fullscreen_emit(yougame::embed_fullscreen::state.flush(yougame::embedded(), fullscreen_clock()));
   state.page_navigation.active = false;
   settings_page::observer = nullptr;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  bool agent_open_video = false;
-  static int agent_settings_frame = 0;
-  static int agent_click_diag_until = 0;
-  static settings_input::Click agent_click;
-  yougame::parity::Signals::Clock::time_point first_present;
-  if (!state.fill_window && yougame::parity::signals.first_present(first_present))
-    ++agent_settings_frame;
-  if (!state.fill_window && yougame::parity::signals.first_present(first_present) &&
-      yougame::agent_test::open_settings_video.exchange(false)) {
-    state.open = true;
-    agent_open_video = true;
-    host::log("agent-test: openSettings video");
-  }
-  ImGuiID agent_menu_focus = 0;
-  const char* agent_menu_label = "none";
-  const auto agent_menu_state = [&state] {
-    static bool was_open = false;
-    if (state.menu_open != was_open) {
-      host::log("[yougame] agent test: menu %s", state.menu_open ? "opened" : "closed");
-      was_open = state.menu_open;
-    }
-  };
-#endif
   slippi::native_practice::Snapshot practice = slippi::native_practice::snapshot();
   const bool practice_forced = practice.phase == slippi::native_practice::Phase::Handoff ||
                                practice.phase == slippi::native_practice::Phase::Failure ||
                                practice.phase == slippi::native_practice::Phase::ReturningToPractice;
-  // YouGame's Sign in by code panel (signin_overlay.cpp) takes the controllers like the Practice menu:
-  // the game gets none of them, and the panel's buttons move on the routed pad.
-  const bool signin_up = signin_overlay::open();
   const bool practice_force_capture =
-      slippi::native_practice::phase_forces_input_capture(practice.phase) || signin_up;
-  const bool practice_nav = state.practice_open || practice.phase == slippi::native_practice::Phase::Failure || signin_up;
+      slippi::native_practice::phase_forces_input_capture(practice.phase);
+  const bool practice_nav = state.practice_open || practice.phase == slippi::native_practice::Phase::Failure;
   // Platform gamepad polling is disabled (Win32 at build time, SDL in settings_context_create).
   // ImGui 1.92.8 polls even with NavEnableGamepad off: clearing that flag alone did not stop
   // XInput's X/menu key or its competing events. Keep the window-switcher fix and practice's
@@ -5829,9 +5715,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   {
     auto& io = ImGui::GetIO();
     settings_input::navigation(io, state.open || state.menu_open || practice_nav || state.fill_window);
-    // The YouGame button shows over MU's own menus (gameState "menu"), as overlay_visible() counts them.
-    yougame::game_state::overlay_menu_open.store(state.open || state.menu_open || state.practice_open ||
-                                                 settings_fills_window(), std::memory_order_relaxed);
     io.BackendFlags &= ~ImGuiBackendFlags_HasGamepad;
   }
 #ifdef _WIN32
@@ -5856,20 +5739,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     io.DisplayFramebufferScale = ImVec2(ui_scale, ui_scale);
     g_frame_ui_scale.store(ui_scale, std::memory_order_relaxed);
   }
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  if (const int frame = yougame::agent_test::ui_click_frame.load(std::memory_order_acquire);
-      frame > 0 && frame == agent_settings_frame) {
-    yougame::agent_test::ui_click_frame.store(0);
-    const int x = yougame::agent_test::ui_click_x.load(), y = yougame::agent_test::ui_click_y.load();
-    agent_click = settings_input::click(ImGui::GetIO(), x, y,
-        g_frame_ui_scale.load(std::memory_order_relaxed));
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    host::log("agent-test: uiClick frame %d at %d,%d (ui %.0f,%.0f) ms %lld",
-              frame, x, y, agent_click.pos.x, agent_click.pos.y, (long long)ms);
-    agent_click_diag_until = agent_settings_frame + 5;
-  }
-#endif
   // UI navigation is armed only after the selected pad has returned to neutral. A held A that
   // opened no UI cannot click Start, Cancel, or acknowledge a later disconnect.
   host::PadState pads[4]{};
@@ -5936,14 +5805,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                 have_pad ? pad.stick_x : 0, have_pad ? pad.stick_y : 0, have_pad ? pad.sub_x : 0, have_pad ? pad.sub_y : 0);
     }
   }
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  if (const int socket = yougame::agent_test::phob_menu_socket.exchange(0)) {
-    state.open = true;
-    state.active_tab = 3; // Controls
-    state.settings_controller_port = socket - 1;
-    phob_native_request(socket - 1);
-  }
-#endif
   // Test runs (MELEE_TEST_PHOB): the PhobGCC menu opens on adapter socket 1 with the panel
   // ("panel": only the Controls tab on that socket, with its Controller test and PhobGCC entries).
   {
@@ -5986,94 +5847,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
   }
   ImGui::NewFrame();
-  // A copy the player started itself reaches YouGame only through the local channel (active() is false
-  // there), and its search lines (a lone seat's paused line) must show all the same.
-  if (yougame::active() || yougame::channel_connected() || slippi::online::online_status_visible()) {
-    const auto now = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    const auto toast = yougame::friends::events.toast(now);
-    const auto console_status = yougame::console::waiting_status();
-    const auto status = console_status.empty() ? yougame::status_line() : console_status;
-    const auto screen = ImGui::GetIO().DisplaySize;
-    const auto passive_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing;
-    // A new notice also brings the corner hint back at the picture's top-right; start below it.
-    float notice_bottom = std::max(16.0f, screen_label::corner_hint_bottom() + 8.0f);
-    if (!toast.empty()) {
-      ImGui::SetNextWindowPos(ImVec2(screen.x - 16, notice_bottom), ImGuiCond_Always, ImVec2(1, 0));
-      ImGui::SetNextWindowBgAlpha(0.85f);
-      ImGui::Begin("##yougame_invite_notice", nullptr, passive_flags);
-      ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::min(380.0f, screen.x - 64));
-      ImGui::TextUnformatted(toast.c_str());
-      ImGui::PopTextWrapPos();
-      notice_bottom = ImGui::GetWindowPos().y + ImGui::GetWindowSize().y + 8.0f;
-      ImGui::End();
-    }
-    if (const auto message = yougame::friends::events.message(now); !message.empty()) {
-      // Under the invite toast when both show, so a chat line never hides an invite.
-      ImGui::SetNextWindowPos(ImVec2(screen.x - 16, notice_bottom), ImGuiCond_Always, ImVec2(1, 0));
-      ImGui::SetNextWindowBgAlpha(0.85f);
-      ImGui::Begin("##yougame_message_notice", nullptr, passive_flags);
-      ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::min(380.0f, screen.x - 64));
-      ImGui::TextUnformatted(message.c_str());
-      ImGui::PopTextWrapPos();
-      ImGui::End();
-    }
-#ifdef MELEE_DOUBLES
-    // The Doubles home's own box, larger than the pill and over the picture's middle: what is happening,
-    // then what each button does. While it shows, the home owns the pads, so it hides nothing playable.
-    if (const auto doubles_line = yougame::doubles::ui.shown(now, slippi::online::is_online_match());
-        !doubles_line.empty()) {
-      const float picture = std::min(screen.y, screen.x / std::max(0.1f, g_overlay_game_aspect));
-      const float font = std::max(12.0f, picture * 0.042f);
-      ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.5f + picture * 0.12f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-      ImGui::SetNextWindowBgAlpha(0.88f);
-      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(font * 0.9f, font * 0.6f));
-      ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, font * 0.4f);
-      ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * font / ImGui::GetFontSize());
-      ImGui::Begin("##yougame_doubles_home", nullptr, passive_flags);
-      ImGui::TextUnformatted(doubles_line.c_str());
-      ImGui::End();
-      ImGui::PopFont();
-      ImGui::PopStyleVar(2);
-    }
-#endif
-    // Online menu/CSS visibility alone must not create an empty or version-only pill.
-    // The room's paused line (a lone standalone seat, a test build's pool) replaces a YouGame-only search
-    // line, plain "searching" included; "Searching Slippi + YouGame" keeps its own line (Slippi may still find one).
-    const auto paused = console_status.empty() && (status == "searching" || status == yougame::blend::kSearchYouGameOnly)
-        ? yougame::search_paused_line() : std::string();
-    const bool show_status = !console_status.empty() || status == yougame::update::kMessage ||
-        status == yougame::friends::kWaiting || status == yougame::friends::kJoined ||
-        status == yougame::friends::kFailed || status == yougame::friends::kVersion ||
-        status == yougame::search_policy::kLinkRetry || status == yougame::search_policy::kOwnUdpRetry ||
-        status == yougame::blend::kSearchBoth || status == yougame::blend::kSearchYouGameOnly || !paused.empty();
-    if (!slippi::online::is_online_match() && show_status) {
-      // One row on the picture's bottom edge, sized to the picture: 60 px up it sat on the retail menus'
-      // description box (VS. Mode, Name Entry) and on the CSS name cards.
-      const float picture = std::min(screen.y, screen.x / std::max(0.1f, g_overlay_game_aspect));
-      const float font = std::min(ImGui::GetFontSize(), std::max(8.0f, picture * 0.026f));
-      ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, (screen.y + picture) * 0.5f - std::max(2.0f, picture * 0.006f)),
-                              ImGuiCond_Always, ImVec2(0.5f, 1));
-      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(font * 0.6f, font * 0.3f));
-      ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * font / ImGui::GetFontSize());
-      ImGui::Begin("##yougame_friend_waiting", nullptr, passive_flags);
-      screen_label::reserve_bottom(ImGui::GetWindowPos().y);
-      if (paused.empty()) ImGui::TextUnformatted(yougame::slippi_link_status(status).c_str());
-      else {
-        const auto text = yougame::slippi_link_status(status);
-        const auto nl = text.find('\n');   // keep a second line (why Slippi stopped) under the room's line
-        ImGui::TextUnformatted((paused + (nl == std::string::npos ? "" : text.substr(nl))).c_str());
-      }
-      if (status == yougame::friends::kWaiting || !console_status.empty()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("Z: cancel");
-      }
-      ImGui::End();
-      ImGui::PopFont();
-      ImGui::PopStyleVar();
-    }
-  }
   ImGuiStyle launcher_saved_style;
   const bool launcher_old_look = g_fill_window.load(std::memory_order_relaxed) && test_menu_style() < 0;
   if (launcher_old_look) {
@@ -6146,11 +5919,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       options.overlay_style = state.legacy_saved_appearance;
       state.legacy_presentation = false;
     }
-    if (yougame::stdio_bridge() && !state.open && !state.fill_window) {
-      // Under the YouGame app the chord opens and closes the small menu, as F1 does there.
-      if (state.menu_open) state.menu_open = false;
-      else open_menu();
-    } else {
+    {
       state.open = !state.open;
       if (state.open) {
         state.practice_open = false;
@@ -6222,11 +5991,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       }
     }
   }
-  // YouGame's box (Shift+Tab, signin_overlay.cpp) owns every key while it shows: Tab (and the
-  // controller's Practice chord) used to open the Practice menu over it in Training, the one mode with
-  // tab_available, and the menu then took A, Enter and Esc from the box (122.20).
   if (tab_pressed && !state.open && !state.menu_open && !state.fill_window && practice.tab_available &&
-      !signin_up && !replay_bar::active()) {   // while a replay plays, Tab is its fast forward
+      !replay_bar::active()) {   // while a replay plays, Tab is its fast forward
     const bool was_open = state.practice_open;
     state.practice_open = !state.practice_open;
     if (state.practice_open) state.practice_focus_code = practice.phase == slippi::native_practice::Phase::Idle;
@@ -6414,14 +6180,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                              !state.fill_window,
                          ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
   if (!clean_replay) net_overlay::draw(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-  {   // YouGame's Coming soon stickers over the online menu (drawn only while its first page shows)
-    const ImVec2 screen = ImGui::GetIO().DisplaySize;
-    const float aspect = presented_aspect(options, (int)screen.x, (int)screen.y, true);
-    float gw = screen.x, gh = gw / std::max(aspect, 0.1f);
-    if (gh > screen.y) { gh = screen.y; gw = gh * aspect; }
-    const float gx0 = (screen.x - gw) * 0.5f, gy0 = (screen.y - gh) * 0.5f;
-    coming_soon_overlay::draw(gx0, gy0, gx0 + gw, gy0 + gh);
-  }
   if (!host::options.spectate)   // the room's live match window: no replay bar (see replay_hud above)
     replay_bar::draw(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y, state.open || state.menu_open || state.practice_open || state.fill_window);
   if (!clean_replay) screen_label::draw(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y, g_overlay_game_aspect);
@@ -6439,11 +6197,10 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     else if (options.overlay_style == 4 && state.wide_detail_open) state.wide_detail_open = false;
     else state.open = false;
   }
-  // The menu key (F1 under YouGame, Esc standalone) leaves Settings safely at the main menu.
+  // Esc leaves Settings safely at the main menu.
   // Only selecting its quit row may open the confirmation. Legacy/launcher settings keep close.
   // On a settings page Esc goes back to the category screen (upstream 0.9.210).
   // While rebinding, Escape cancels the capture without also changing the panel.
-  if (signin_up && !state.open && !state.menu_open && host::window_take_escape()) signin_overlay::back();   // Esc: Back
   if (phob_native_open() && host::window_take_escape()) {
     phob_native_close();   // Esc leaves the PhobGCC menu for the Controls tab
   } else if (host::window_take_escape() && state.rebind_action < 0) {
@@ -6456,9 +6213,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     else if (state.open) { state.open = false; open_menu(); }
     else if (state.practice_open) { state.practice_open = false; state.practice_release_capture = true; }
     else if (state.menu_open) { state.menu_open = false; state.menu_quit = false; }
-    // Under the YouGame app the small menu comes first (Back to game / Settings / Back to YouGame), so
-    // leaving for YouGame is one press away and Settings is its second button.
-    else if (!state.fill_window && yougame::stdio_bridge()) open_menu();
     else if (!state.fill_window) { state.open = true; reset_settings_home("Esc"); }
   }
   if (launcher_window && !state.open) {
@@ -6486,12 +6240,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   if (state.menu_open) state.practice_open = false;
   // The box opened over the Practice menu (Shift+Tab with it up): the box takes over, the menu shuts.
   // The controllers stay with the box; when it closes, its own release hold keeps them from the game.
-  if (signin_up && !state.open && !state.menu_open) state.practice_open = false;
   if (!state.menu_open) state.menu_quit = false;
   if (!state.menu_open || !state.menu_quit) state.menu_quit_focus_pending = false;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  agent_menu_state();
-#endif
   if (practice_forced || practice.phase == slippi::native_practice::Phase::OnlineFlow ||
       practice.phase == slippi::native_practice::Phase::InMatch)
     state.practice_open = false;
@@ -6616,7 +6366,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Appearing);
       ImGui::Begin("PC settings###legacy_old_settings", &state.open, ImGuiWindowFlags_NoCollapse |
                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-      ImGui::TextUnformatted(yougame::stdio_bridge() ? yougame::parity::kMenuHint : "F1 or Esc: return to game");
+      ImGui::TextUnformatted("F1 or Esc: return to game");
     } else {
       const float width = options.overlay_style == 0 ? std::min(560.0f, std::max(390.0f, display.x * 0.38f)) :
                           options.overlay_style == 1 ? std::min(1040.0f, display.x - 24.0f) :
@@ -6652,15 +6402,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
     static bool screenshot_tab_set = false;
     if (!screenshot_tab_set
-#ifdef YOUGAME_AGENT_TEST_HOOK
-        || agent_open_video
-#endif
         ) {
       screenshot_tab_set = true;
       const char* requested = std::getenv("MELEE_SETTINGS_TAB");
-#ifdef YOUGAME_AGENT_TEST_HOOK
-      if (agent_open_video) requested = "Video";
-#endif
       static constexpr const char* tabs[] = {
           "Video", "Audio", "Game", "Controls", "Overlays", "Customize", "Gecko Codes", "Mods"};
       if (requested) for (int i = 0; i < 8; ++i)
@@ -7216,20 +6960,14 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // other off; the same two settings are written, so the renderers see no difference.
     {
       const char* displays[] = {"Window", "Borderless fullscreen", "Exclusive fullscreen (experimental)"};
-      const int app_display = yougame::embed_fullscreen::state.shown(yougame::embedded(), fullscreen_clock());
-      int display = app_display >= 0 ? app_display : options.exclusive_fullscreen ? 2 : options.fullscreen ? 1 : 0;
+      int display = options.exclusive_fullscreen ? 2 : options.fullscreen ? 1 : 0;
       if (settings_combo("Display", &display, displays, 3)) {
-        if (app_display >= 0) {
-          fullscreen_emit(yougame::embed_fullscreen::state.request(yougame::embedded(), display != 0, fullscreen_clock()));
-        } else {
           options.fullscreen = display == 1;
           options.exclusive_fullscreen = display == 2;
           changed = true;
-        }
       }
       if (ImGui::IsItemHovered()) {
-        if (app_display >= 0) ImGui::SetTooltip("Full screen is the YouGame app's window. Shift+Esc leaves.");
-        else ImGui::SetTooltip("Borderless fullscreen: the game's window covers the whole screen.\n"
+        ImGui::SetTooltip("Borderless fullscreen: the game's window covers the whole screen.\n"
                                "Exclusive fullscreen: the game takes the display over, or falls back to\n"
                                "borderless when Windows does not allow it.\n%s", kExperimentalNote);
       }
@@ -7390,9 +7128,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // One click each: the authors' own download, checked against its published file and built from the
     // player's own disc (host::cosmetics::install_official_look). Open until all three are installed; once
     // an Animelee is built the Mods folder is scanned again and it is switched on.
-    // Not in the YouGame app: nothing is downloaded or run beside a verified build there (the
-    // Mediafire files and the patch tool), and its Mods folder panel is hidden as well.
-    if (!yougame::active()) {
+    {
       namespace mods = source_port::mods;
       const std::string mods_dir = mods::mods_folder().u8string();
       {
@@ -7832,8 +7568,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
     const bool d3d11 = true;   // the upscaler row below stays disabled
     const bool vk_fsr = false;   // AMD FSR's Vulkan build is Windows only
-    if (false)
-#endif
+#else
     {
     // Vulkan is offered only where a Vulkan 1.3 GPU is present; it draws without DLSS and XeSS (FSR upscaling runs on it).
     const char* backends[] = {"Direct3D 12 (default)", "Direct3D 11 (older GPUs and drivers)", "Vulkan (experimental)"};
@@ -7844,7 +7579,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
     settings_hint("Takes effect at the next launch: save settings, then restart.");
     }
-#ifdef _WIN32
     const bool d3d11 = options.api == RenderApi::D3D11 || options.api == RenderApi::Vulkan;   // no DLSS or XeSS on either
     const bool vk_fsr = options.api == RenderApi::Vulkan;   // but FSR runs on Vulkan
 #endif
@@ -7879,10 +7613,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       } else if (xs == ModelState::Present && !xess::available() && !host::updater::xess_message().empty()) {
         settings_hint("Intel XeSS is installed. Restart the game to use it.");
         restart_now_button("xess");
-      } else if (xs != ModelState::Present && yougame::active()) {
-        // Not in the YouGame app: its builds carry libxess.dll in the verified build folder, and nothing
-        // is downloaded beside the game there.
-        settings_hint("Intel XeSS isn't available in this build.");
       } else if (xs != ModelState::Present) {
         char label[64];
         std::snprintf(label, sizeof label, "Download Intel XeSS (%s)", host::updater::kXessSize);
@@ -7899,9 +7629,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       } else if (fs == ModelState::Present && !fsr::available() && !host::updater::fsr_message().empty()) {
         settings_hint("AMD FSR is installed. Restart the game to use it.");
         restart_now_button("fsr");
-      } else if (fs != ModelState::Present && yougame::active()) {
-        // Not in the YouGame app, as with XeSS above: nothing is downloaded beside a verified build there.
-        settings_hint("AMD FSR isn't available in this build.");
       } else if (fs != ModelState::Present) {
         char fsr_label[64];
         std::snprintf(fsr_label, sizeof fsr_label, "Download AMD FSR (%s)", host::updater::kFsrSize);
@@ -7969,8 +7696,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImGui::SetTooltip("AMD FSR Frame Generation: a generated frame between each pair of rendered frames,\n"
                           "in matches. It adds input delay, so use it for solo play rather than competitive\n"
                           "online matches. Needs an FSR upscaling mode; menus are shown as rendered.");
-      if (!fsr_installed) settings_hint("%s", yougame::active() ? "AMD FSR frame generation isn't available in this build."
-                                                         : "Frame generation with FSR needs the AMD FSR download above.");
+      if (!fsr_installed) settings_hint("%s", "Frame generation with FSR needs the AMD FSR download above.");
       else if (fg_unsupported) settings_hint("AMD's frame generation did not start on this graphics card.");
       else if (!fsr_loaded && options.frame_generation_mode > 0) settings_hint("Frame generation starts with the game.");
       else if (options.frame_generation_mode > 0 && !fg_name.empty())
@@ -8481,12 +8207,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         }
       }
       if (nr_blocked) ImGui::EndDisabled();
-      // NVIDIA's model is a separate download: one button fetches it from the release, checks it and
-      // puts it beside the game (host/updater.cpp), where updates leave it alone. Not in the YouGame app:
-      // there every file beside the game comes from the verified build, and the model is not part of it.
-      if (!dlss5::model_found() && yougame::active()) {
-        settings_hint("The DLSS 5 model isn't offered in the YouGame app yet.");
-      } else if (!dlss5::model_found()) {
+      // Download and verify the model beside the game.
+      if (!dlss5::model_found()) {
         std::string game_dir;
         {
           wchar_t module[MAX_PATH]{};
@@ -8870,21 +8592,17 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     // ---- Graphics backend change ----
     // Lightweight 4 and up may pick Direct3D 11 (apply_low_spec), which needs a new device and so a
     // new launch: say so here.
+#ifdef _WIN32
     {
       // The backend is the one thing here that cannot change while the game is running.
       const RenderApi running = state.running_d3d11 ? RenderApi::D3D11 : state.running_vulkan ? RenderApi::Vulkan : RenderApi::D3D12;
-#ifdef _WIN32
-      if (options.api != running)
-#else
-      (void)running;
-      if (false)
-#endif
-      {
+      if (options.api != running) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Graphics backend: %s at the next launch. Save settings, then restart.",
                            options.api == RenderApi::D3D11 ? "Direct3D 11" : options.api == RenderApi::Vulkan ? "Vulkan" : "Direct3D 12");
         restart_now_button("backend");
       }
     }
+#endif
 
     // ---- Advanced ----
     // Diagnostics, texture dumping for pack makers and the DLSS 5 internals: nothing a player needs
@@ -9162,223 +8880,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           {"Blue","Magenta","Mint","Amber"},
           {"Blue","Graphite","Forest","Warm"},
           {"Blue","Steel","Pine","Sepia"}};
-        if (false) { // Superseded by the compact appearance controls below.
-        ImGui::TextUnformatted("Color palette for this appearance");
-        ImGui::TextDisabled(options.overlay_style==2 ?
-            "Classic Gold is GD Melee's original palette." :
-            "Each layout remembers its own color choice.");
-        int& palette = options.overlay_palettes[std::clamp(options.overlay_style, 0, 5)];
-        const float palette_gap=ImGui::GetStyle().ItemSpacing.x;
-        const float palette_w=(ImGui::GetContentRegionAvail().x-3*palette_gap)/4.0f;
-        for (int variant=0;variant<4;++variant) {
-          if (variant) ImGui::SameLine();
-          ImGui::PushID(variant);
-          const bool palette_pressed=settings_hit_button("##palette",ImVec2(palette_w,52));
-          if (palette_pressed) {
-            if (palette!=variant) { palette=variant; changed=true; }
-          }
-          const ImVec2 a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();
-          const bool hover=ImGui::IsItemHovered()||ImGui::IsItemFocused();
-          ImDrawList* draw=ImGui::GetWindowDrawList();
-          const ImU32 swatch=settings_accent_for(options.overlay_style,variant);
-          draw->AddRectFilled(a,b,IM_COL32(18,28,42,242),8.0f);
-          draw->AddRectFilled(ImVec2(a.x+5,a.y+5),ImVec2(b.x-5,a.y+23),swatch,6.0f);
-          draw->AddLine(ImVec2(a.x+13,a.y+8),ImVec2(b.x-13,a.y+8),
-                        IM_COL32(255,255,255,125),2.0f);
-          draw->AddText(ImGui::GetFont(),12.0f,ImVec2(a.x+7,a.y+29),
-                        IM_COL32(245,248,253,255),palette_short[std::clamp(options.overlay_style, 0, 5)][variant]);
-          if (palette==variant||hover)
-            draw->AddRect(a,b,palette==variant?swatch:IM_COL32(230,238,252,150),
-                          8.0f,0,palette==variant?2.5f:1.5f);
-          if (hover) ImGui::SetTooltip("%s",palette_names[std::clamp(options.overlay_style, 0, 5)][variant]);
-          ImGui::PopID();
-        }
-        ImGui::Spacing();
-        }
-        if (false) { // Retained as design reference only; selectable options below are live styles, not painted mockup screenshots.
-        const float available = ImGui::GetContentRegionAvail().x;
-        const float gap = ImGui::GetStyle().ItemSpacing.x;
-        const int per_row = std::clamp((int)((available + gap) / (145.0f + gap)), 1, 5);
-        const float card_w = (available - (per_row - 1) * gap) / per_row;
-        const ImVec2 card_size(card_w, 140.0f);
-        for (int style = 0; style < 5; ++style) {
-          if (style % per_row != 0) ImGui::SameLine();
-          ImGui::PushID(style);
-          const bool selected = options.overlay_style == style;
-          settings_hit_button("##appearance_preview", card_size);
-          const ImVec2 a = ImGui::GetItemRectMin();
-          const ImVec2 b = ImGui::GetItemRectMax();
-          const bool hovered = ImGui::IsItemHovered();
-          ImDrawList* draw = ImGui::GetWindowDrawList();
-          const ImU32 bg = ImGui::GetColorU32(selected ? ImGuiCol_FrameBgActive :
-                                               hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
-          draw->AddRectFilled(a, b, bg, 5.0f);
-          // Both 5x4 reference sheets have 334x235 cells. Preserve their proportions instead
-          // of stretching each mockup to whichever card width a window happens to allow.
-          const float preview_h = 105.0f;
-          const float preview_w = std::min(card_w - 10.0f, preview_h * 334.0f / 235.0f);
-          const ImVec2 p(a.x + (card_w - preview_w) * 0.5f, a.y + 5.0f);
-          const ImVec2 q(p.x + preview_w, p.y + preview_h);
-          // The source sheet for #02 contains Japanese labels. Draw the implemented English
-          // layout here so the appearance picker previews what the player will actually see.
-          if (style == 0) {
-            draw->AddRectFilled(p,q,IM_COL32(13,20,43,255));
-            draw->AddRectFilled(ImVec2(p.x+3,p.y+8),ImVec2(p.x+preview_w*.46f,q.y-7),
-                                IM_COL32(24,39,75,255));
-            const float left_w=preview_w*.46f;
-            for(int line=0;line<7;++line)
-              draw->AddLine(ImVec2(p.x+6+line*5,p.y+6),ImVec2(p.x+6+line*5,q.y-5),
-                            IM_COL32(46,71,126,115));
-            draw->AddRectFilled(ImVec2(p.x+8,p.y+preview_h*.43f),
-                                ImVec2(p.x+left_w-3,p.y+preview_h*.57f),
-                                IM_COL32(255,196,25,255),2.0f);
-#ifdef MELEE_NO_SLIPPI   // the game menu behind the panel in this thumbnail: a retail menu entry here
-            draw->AddText(ImGui::GetFont(),9.0f,ImVec2(p.x+12,p.y+preview_h*.455f),
-                          IM_COL32(20,19,16,255),"Vs. Mode");
-#else
-            draw->AddText(ImGui::GetFont(),9.0f,ImVec2(p.x+12,p.y+preview_h*.455f),
-                          IM_COL32(20,19,16,255),"Unranked");
-#endif
-            const float x=p.x+left_w;
-            draw->AddRectFilled(ImVec2(x,p.y),q,IM_COL32(17,18,29,250));
-            const ImVec2 banner[]={ImVec2(x,p.y),ImVec2(q.x,p.y),
-                ImVec2(q.x,p.y+20),ImVec2(x,p.y+20)};
-            draw->AddConvexPolyFilled(banner,4,IM_COL32(184,17,104,255));
-            draw->AddText(ImGui::GetFont(),10.0f,ImVec2(x+5,p.y+4),
-                          IM_COL32(255,255,255,255),"SETTINGS");
-            static const char* labels[]={"VIDEO","AUDIO","GAME","CONTROLS",
-                                          "OVERLAYS","CUSTOMIZE","CODES", "MODS"};
-            for(int line=0;line<7;++line) {
-              const float y=p.y+23+line*11.0f;
-              const ImVec2 quad[]={ImVec2(x+4,y),ImVec2(q.x-4,y-1),
-                                   ImVec2(q.x-7,y+9),ImVec2(x+1,y+10)};
-              draw->AddConvexPolyFilled(quad,4,line==0?IM_COL32(244,20,137,255):
-                                                       IM_COL32(28,30,43,255));
-              draw->AddText(ImGui::GetFont(),7.0f,ImVec2(x+10,y+1),
-                            IM_COL32(255,255,255,255),labels[line]);
-            }
-          } else if (style == 1) {
-            draw->AddRectFilled(p,q,IM_COL32(18,38,68,255));
-            for(int col=0;col<8;++col)
-              draw->AddLine(ImVec2(p.x+col*21.0f,p.y),ImVec2(p.x+col*21.0f,q.y),
-                            IM_COL32(64,98,145,65));
-            draw->AddText(ImGui::GetFont(),11.0f,ImVec2(p.x+6,p.y+5),
-                          IM_COL32(255,255,255,255),"Settings");
-            const float gap=3.0f,tile=(preview_w-12.0f-3.0f*gap)/4.0f;
-            static const char* tiny[]={"V","A","G","C","O","M","<>"};
-            for(int i=0;i<7;++i) {
-              const int row=i<4?0:1,col=i<4?i:i-4;
-              const ImVec2 lo(p.x+6.0f+col*(tile+gap),p.y+23.0f+row*35.0f);
-              const ImVec2 hi(lo.x+tile,lo.y+31.0f);
-              draw->AddRectFilled(ImVec2(lo.x+1,lo.y+4),ImVec2(hi.x+1,hi.y+4),
-                                  IM_COL32(3,8,25,150),7.0f);
-              draw->AddRectFilled(lo,hi,
-                  settings_dashboard_tile_color(i,options.overlay_palettes[1]),7.0f);
-              draw->AddRect(ImVec2(lo.x+1,lo.y+1),ImVec2(hi.x-1,hi.y-1),
-                            IM_COL32(255,255,255,175),6.0f);
-              const ImVec2 size=ImGui::GetFont()->CalcTextSizeA(10.0f,FLT_MAX,0,tiny[i]);
-              draw->AddText(ImGui::GetFont(),10.0f,
-                  ImVec2((lo.x+hi.x-size.x)*.5f,(lo.y+hi.y-size.y)*.5f),
-                  IM_COL32(20,35,58,255),tiny[i]);
-            }
-          } else if (style == 2) {
-            draw->AddRectFilled(p,q,IM_COL32(25,33,42,255));
-            const float k=preview_w/640.0f;
-            auto pt=[&](float x,float y) {
-              return ImVec2(p.x+(x+(240-y)*.25f)*k,p.y+y*(preview_h/480.0f));
-            };
-            auto quad=[&](float x0,float y0,float x1,float y1,ImU32 color) {
-              const ImVec2 v[]={pt(x0,y0),pt(x1,y0),pt(x1,y1),pt(x0,y1)};
-              draw->AddConvexPolyFilled(v,4,color);
-            };
-            quad(84,24,343,52,style==options.overlay_style?settings_accent(2):IM_COL32(240,180,41,255));
-            quad(340,46,550,52,IM_COL32(10,14,24,255));
-            for(int row=0;row<5;++row)
-              quad(96.0f,84.0f+34.0f*row,540.0f,114.0f+34.0f*row,
-                   row==0&&style==options.overlay_style?settings_accent(2):
-                   row==0?IM_COL32(240,180,41,255):IM_COL32(46,54,64,255));
-            draw->AddText(ImVec2(p.x+15,p.y+7),IM_COL32(10,14,24,255),"SETTINGS");
-            draw->AddText(ImVec2(p.x+27,p.y+35),IM_COL32(10,14,24,255),"VIDEO");
-          } else if (style == 3) {
-            draw->AddRectFilled(p,q,IM_COL32(12,24,43,255));
-            const ImVec2 c((p.x+q.x)*.5f,p.y+preview_h*.56f);
-            const float outer=std::min(43.0f,preview_h*.42f), hub=outer*.39f;
-            draw->AddCircleFilled(ImVec2(c.x+2,c.y+4),outer+3,IM_COL32(0,4,13,125),72);
-            draw->AddCircleFilled(c,outer+1,IM_COL32(8,15,25,255),72);
-            for(int i=0;i<7;++i) {
-              const float center=-1.57079632679f+i*6.28318530718f/7.0f;
-              const float half=3.14159265359f/7.0f*.93f;
-              const ImVec2 a(c.x+std::cos(center-half)*outer,c.y+std::sin(center-half)*outer);
-              const ImVec2 b(c.x+std::cos(center+half)*outer,c.y+std::sin(center+half)*outer);
-              draw->AddTriangleFilled(c,a,b,i==0?settings_accent_for(3,options.overlay_palettes[3]):
-                                                   IM_COL32(31,45,62,255));
-              draw->AddLine(a,c,IM_COL32(3,9,17,225),1.1f);
-              const ImVec2 icon(c.x+std::cos(center)*outer*.67f,
-                                c.y+std::sin(center)*outer*.67f);
-              settings_symbol_icon(i,icon,.38f,IM_COL32(238,246,253,255));
-            }
-            draw->AddCircleFilled(c,hub,IM_COL32(11,22,36,255),48);
-            draw->AddCircle(c,hub,IM_COL32(119,153,179,220),48,1.8f);
-            draw->AddCircleFilled(ImVec2(c.x,c.y-2),5,IM_COL32(195,224,242,255),24);
-            draw->AddText(ImGui::GetFont(),7.0f,ImVec2(p.x+6,p.y+5),
-                          IM_COL32(238,245,252,255),"SETTINGS  /  A SELECT  ·  B BACK");
-          } else if (style == 4) {
-            draw->AddRectFilled(p,q,IM_COL32(11,23,37,255));
-            draw->AddText(ImGui::GetFont(),10.0f,ImVec2(p.x+7,p.y+4),
-                          IM_COL32(239,245,252,255),"SETTINGS");
-            static const char* tabs[]={"VIDEO","AUDIO","GAME","CTRL","HUD","MODS","CODES", "MODS"};
-            const float tab_top=p.y+21.0f, tab_h=13.0f, tab_gap=2.0f;
-            const float tab_w=(preview_w-12.0f-6.0f*tab_gap)/7.0f;
-            for(int i=0;i<7;++i) {
-              const float x=p.x+6.0f+i*(tab_w+tab_gap);
-              draw->AddRectFilled(ImVec2(x,tab_top),ImVec2(x+tab_w,tab_top+tab_h),
-                  i==0?settings_accent_for(4,options.overlay_palettes[4]):IM_COL32(24,40,57,255),3.0f);
-              draw->AddText(ImGui::GetFont(),5.5f,ImVec2(x+2,tab_top+3),
-                            IM_COL32(244,248,253,255),tabs[i]);
-            }
-            const ImVec2 panel_min(p.x+6,p.y+39), panel_max(q.x-6,q.y-5);
-            draw->AddRectFilled(panel_min,panel_max,IM_COL32(17,31,46,245),4.0f);
-            draw->AddText(ImGui::GetFont(),8.0f,ImVec2(panel_min.x+6,panel_min.y+3),
-                          settings_accent_for(4,options.overlay_palettes[4]),"VIDEO");
-            static const char* rows[]={"Quality","Frame rate","VSync","Window size"};
-            for(int i=0;i<4;++i) {
-              const float y=panel_min.y+16+i*10.0f;
-              draw->AddText(ImGui::GetFont(),6.5f,ImVec2(panel_min.x+6,y+1),
-                            IM_COL32(217,228,238,255),rows[i]);
-              draw->AddRectFilled(ImVec2(panel_min.x+64,y),ImVec2(panel_max.x-5,y+8),
-                                  IM_COL32(32,54,77,255),2.0f);
-              if(i<2) draw->AddText(ImGui::GetFont(),5.0f,
-                  ImVec2(panel_min.x+69,y+1),IM_COL32(239,245,252,255),i==0?"High":"Match monitor");
-              else draw->AddCircleFilled(ImVec2(panel_max.x-12,y+4),2.4f,
-                  i==2?settings_accent_for(4,options.overlay_palettes[4]):IM_COL32(172,186,200,255),12);
-            }
-          } else {
-            draw->AddRectFilled(p, q, IM_COL32(17, 29, 61, 255));
-          }
-          draw->AddText(ImVec2(a.x + 6.0f, a.y + 115.0f),
-                        ImGui::GetColorU32(selected ? ImGuiCol_Text : ImGuiCol_TextDisabled),
-                        appearance_names[style]);
-          if (selected) {
-          draw->AddRect(a, b, style == 2 ? settings_accent(2) :
-                                    IM_COL32(133, 184, 255, 255), 5.0f, 0, 2.0f);
-            draw->AddText(ImVec2(b.x - 48.0f, a.y + 8.0f),
-                          IM_COL32(255, 255, 255, 255), "ACTIVE");
-          }
-          if (hovered) ImGui::SetTooltip("%s", appearance_hints[style]);
-          if (ImGui::IsItemClicked()) {
-            if (options.overlay_style != style) {
-              options.overlay_style = style;
-              state.clean_detail_open=false; state.clean_home_frames=0;
-              state.dashboard_detail_open=false; state.dashboard_home_frames=0;
-              state.gd_detail_open=false; state.gd_screen_frames=0;
-              state.radial_detail_open=false; state.wide_detail_open=false;
-              state.content_anim_tab=-1;
-              changed = true;
-            }
-          }
-          ImGui::PopID();
-        }
-        }
+
+
         {
           ImGui::TextUnformatted("Menu style");
           ImGui::TextDisabled("Choose a picture to change the menu layout.");
@@ -9501,108 +9004,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
             ImGui::TreePop();
           }
         }
-        if (false) { // Superseded by the screenshot picker above.
-          const float available = ImGui::GetContentRegionAvail().x;
-          const float gap = ImGui::GetStyle().ItemSpacing.x;
-          const int per_row = std::clamp((int)((available + gap) / (145.0f + gap)), 1, 4);
-          const float card_w = (available - (per_row - 1) * gap) / per_row;
-          static constexpr const char* style_names[] = {
-            "Clean side", "Icon tiles", "GD Melee", "Radial", "Wide tabs", "Simple", "Classic"};
-          for (int style = 0; style < 7; ++style) {
-            if (style % per_row != 0) ImGui::SameLine();
-            ImGui::PushID(style);
-            const bool active = options.overlay_style == style;
-            const bool pressed = settings_hit_button("##appearance_style", ImVec2(card_w, 76.0f));
-            const bool hovered = ImGui::IsItemHovered() || ImGui::IsItemFocused();
-            const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-            ImDrawList* draw = ImGui::GetWindowDrawList();
-            draw->AddRectFilled(a, b, IM_COL32(15, 24, 38, 248), 8.0f);
-            const ImU32 accent = settings_accent_for(style, options.overlay_palettes[style]);
-            draw->AddRectFilled(ImVec2(a.x + 5, a.y + 5), ImVec2(b.x - 5, a.y + 9), accent, 2.0f);
-            const ImVec2 mark(a.x + 12, a.y + 19), mark_end(b.x - 12, a.y + 45);
-            if (style == 0) {
-              draw->AddRectFilled(mark, ImVec2(mark.x + 12, mark_end.y), IM_COL32(36, 53, 78, 255), 2.0f);
-              draw->AddRectFilled(ImVec2(mark.x + 17, mark.y), mark_end, IM_COL32(31, 42, 59, 255), 2.0f);
-              draw->AddRectFilled(ImVec2(mark.x + 17, mark.y + 7), ImVec2(mark_end.x, mark.y + 11), accent, 1.0f);
-            } else if (style == 1) {
-              const float tile = std::min(21.0f, (card_w - 39.0f) / 4.0f);
-              for (int i = 0; i < 4; ++i)
-                draw->AddRectFilled(ImVec2(mark.x + i * (tile + 3), mark.y),
-                                    ImVec2(mark.x + i * (tile + 3) + tile, mark.y + tile),
-                                    settings_dashboard_tile_color(i, options.overlay_palettes[1]), 5.0f);
-            } else if (style == 2) {
-              const ImVec2 row1[] = {mark, ImVec2(mark_end.x, mark.y - 3), ImVec2(mark_end.x - 5, mark.y + 7), ImVec2(mark.x - 4, mark.y + 10)};
-              const ImVec2 row2[] = {ImVec2(mark.x + 3, mark.y + 14), ImVec2(mark_end.x - 3, mark.y + 12), ImVec2(mark_end.x - 7, mark.y + 23), ImVec2(mark.x - 1, mark.y + 25)};
-              draw->AddConvexPolyFilled(row1, 4, accent);
-              draw->AddConvexPolyFilled(row2, 4, IM_COL32(48, 58, 72, 255));
-            } else if (style == 3) {
-              const ImVec2 center((a.x + b.x) * 0.5f, mark.y + 13.0f);
-              draw->AddCircleFilled(center, 16.0f, IM_COL32(29, 43, 60, 255), 48);
-              draw->AddCircle(center, 16.0f, IM_COL32(107, 131, 154, 220), 48, 1.3f);
-              for (int i = 0; i < 7; ++i) {
-                const float angle = -1.5707963f + 6.2831853f * i / 7.0f;
-                draw->AddCircleFilled(ImVec2(center.x + std::cos(angle) * 10.0f,
-                                             center.y + std::sin(angle) * 10.0f), 3.1f,
-                                      i == 0 ? accent : IM_COL32(188, 204, 220, 255), 16);
-              }
-              draw->AddCircleFilled(center, 4.0f, IM_COL32(230, 240, 248, 255), 20);
-            } else if (style == 4) {
-              draw->AddRectFilled(mark, ImVec2(mark_end.x, mark.y + 7), IM_COL32(31, 48, 67, 255), 3.0f);
-              draw->AddRectFilled(mark, ImVec2(mark.x + (mark_end.x - mark.x) / 4.0f, mark.y + 7), accent, 3.0f);
-              draw->AddRectFilled(ImVec2(mark.x, mark.y + 12), mark_end, IM_COL32(25, 37, 53, 255), 3.0f);
-              for (int i = 1; i < 7; ++i)
-                draw->AddLine(ImVec2(mark.x + (mark_end.x - mark.x) * i / 7.0f, mark.y + 13),
-                              ImVec2(mark.x + (mark_end.x - mark.x) * i / 7.0f, mark_end.y),
-                              IM_COL32(90, 113, 136, 180), 1.0f);
-            } else if (style == 5) {
-              draw->AddRectFilled(mark, ImVec2(mark_end.x, mark_end.y), IM_COL32(23, 31, 41, 255));
-              draw->AddRectFilled(mark, ImVec2(mark_end.x, mark.y + 7), IM_COL32(42, 57, 72, 255));
-              draw->AddText(ImGui::GetFont(), 8.0f, ImVec2(mark.x + 5, mark.y + 1),
-                            IM_COL32(239, 245, 252, 255), "VIDEO");
-              for (int i = 0; i < 3; ++i)
-                draw->AddRectFilled(ImVec2(mark.x + 4, mark.y + 11 + i * 5),
-                                    ImVec2(mark_end.x - 4, mark.y + 14 + i * 5),
-                                    i == 0 ? accent : IM_COL32(54, 67, 81, 255), 1.0f);
-            } else {
-              draw->AddRectFilled(mark, ImVec2(mark_end.x, mark_end.y), IM_COL32(192, 192, 192, 255));
-              draw->AddRectFilled(mark, ImVec2(mark_end.x, mark.y + 7), IM_COL32(0, 0, 128, 255));
-              draw->AddText(ImGui::GetFont(), 7.0f, ImVec2(mark.x + 4, mark.y + 1),
-                            IM_COL32(255, 255, 255, 255), "Settings");
-              draw->AddRectFilled(ImVec2(mark.x + 5, mark.y + 11),
-                                  ImVec2(mark_end.x - 5, mark_end.y - 4),
-                                  IM_COL32(226, 226, 226, 255));
-              draw->AddRect(ImVec2(mark.x + 5, mark.y + 11),
-                            ImVec2(mark_end.x - 5, mark_end.y - 4),
-                            IM_COL32(90, 90, 90, 255), 0.0f, 0, 1.0f);
-              draw->AddRectFilled(ImVec2(mark.x + 8, mark.y + 14),
-                                  ImVec2(mark.x + 17, mark.y + 17), accent);
-            }
-            draw->AddText(ImVec2(a.x + 9, a.y + 51), IM_COL32(239, 245, 252, 255), style_names[style]);
-            if (active || hovered)
-              draw->AddRect(a, b, active ? accent : IM_COL32(226, 236, 247, 155), 8.0f, 0, active ? 2.3f : 1.3f);
-            if (active) {
-              const ImVec2 badge(b.x - 15.0f, a.y + 21.0f);
-              draw->AddCircleFilled(ImVec2(badge.x + 1.0f, badge.y + 1.0f), 7.0f,
-                                    IM_COL32(0, 4, 10, 150), 24);
-              draw->AddCircleFilled(badge, 6.0f, accent, 24);
-              draw->AddLine(ImVec2(badge.x - 2.5f, badge.y), ImVec2(badge.x - 0.5f, badge.y + 2.0f),
-                            IM_COL32(255,255,255,255), 1.6f);
-              draw->AddLine(ImVec2(badge.x - 0.5f, badge.y + 2.0f), ImVec2(badge.x + 3.0f, badge.y - 2.5f),
-                            IM_COL32(255,255,255,255), 1.6f);
-            }
-            if (hovered) ImGui::SetTooltip("%s", appearance_hints[style]);
-            if (pressed && !active) {
-              options.overlay_style = style;
-              state.clean_detail_open = false; state.clean_home_frames = 0;
-              state.dashboard_detail_open = false; state.dashboard_home_frames = 0;
-              state.gd_detail_open = false; state.gd_screen_frames = 0;
-              state.radial_detail_open = false; state.wide_detail_open = false;
-              state.content_anim_tab = -1;
-              changed = true;
-            }
-            ImGui::PopID();
-          }
-        }
+
         ImGui::Spacing();
         ImGui::Separator();
       }
@@ -9615,7 +9017,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           const auto& mod_status = source_port::mods::status();
           // Command-line mods (no profile name) are a test setup: nothing to compare against.
           const bool from_command_line = !mod_status.detected && mod_status.profile.empty() && !mod_status.identity.empty();
-          if (!yougame::active() && !mod_status.detected && !from_command_line && options.mod_profile != mod_status.requested) {
+          if (!mod_status.detected && !from_command_line && options.mod_profile != mod_status.requested) {
             ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Profile changed. Restart to apply it.");
             if (!state.fill_window) {
               if (settings_widgets::Button("Restart to apply profile")) state.confirm = SettingsState::Confirm::Restart;
@@ -10423,7 +9825,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     ImGui::TextUnformatted("In-game overlay");
     changed |= settings_toggle("Auto-open in-game overlay on startup", &options.settings_open);
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("%s", yougame::stdio_bridge() ? yougame::parity::kSettingsHint : "Off starts directly in the game. Press F1 to open the overlay anytime.");
+      ImGui::SetTooltip("%s", "Off starts directly in the game. Press F1 to open the overlay anytime.");
 
     // ---- Input ----
     settings_section("Input");
@@ -10611,7 +10013,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         }
       }
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Off: Start does not pause Direct (Slippi) or Friends (YouGame) matches. Pausing goes off\n"
+        ImGui::SetTooltip("Off: Start does not pause Direct matches. Pausing goes off\n"
                           "for everyone in the match when any player turns it off, as long as every player has\n"
                           "Melee Unlocked 1.0.1 or newer. Against older builds or Slippi Dolphin, Start still pauses.\n"
                           "Applies from your next connection.");
@@ -10771,7 +10173,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                           "the game goes to Training mode's character select instead of staying online.");
       // Slippi Dolphin's spectator server (its Slippi settings: Enable spectator, Spectator port),
       // read once at start as Dolphin does.
-      ImGui::BeginDisabled(yougame::active());
+      ImGui::BeginDisabled(false);
       if (settings_toggle("Spectator server (Slippi Launcher broadcast, overlays, experimental)", &options.slippi_spectator)) {
         RenderOptions::live_slippi_spectator() = options.slippi_spectator;
         changed = true;
@@ -10791,9 +10193,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       }
       if (ImGui::IsItemHovered()) ImGui::SetTooltip("51441 is Slippi Dolphin's port, the one the Slippi Launcher looks at.");
       ImGui::EndDisabled();
-      if (yougame::active())
-        settings_hint("Slippi spectator listener off (YouGame mode).");
-      else if (slippi::spectate::running())
+      if (slippi::spectate::running())
         settings_hint(("Serving on port " + std::to_string(slippi::spectate::port()) + ".").c_str());
       else if (options.slippi_spectator)
         settings_hint("Not serving: starts with the game (see the log if the port is taken).");
@@ -10821,9 +10221,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         settings_end_combo();
       }
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("The Arena card beside the Direct character select (YouGame Friends under YouGame), out of a room.\n"
+        ImGui::SetTooltip("The Arena card beside the Direct character select, out of a room.\n"
                           "Show briefly: for ten seconds the first time, then when your hand or mouse comes near the right side.\n"
-                          "Never: no card. Friends can still bring you into their room (a code, or a YouGame invite).");
+                          "Never: no card. Friends can still bring you into their room with a connect code.");
       bool room_tabs = arena_panel::tabs();
       if (settings_toggle("Hide the room panels until the hand comes near", &room_tabs)) arena_panel::set_tabs(room_tabs);
       if (ImGui::IsItemHovered())
@@ -11545,9 +10945,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       else settings_hint("Adapter polling rate: --");
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Incoming USB reports per second, shared by all four adapter sockets.\nThe game reads controller state once per frame.");
-      if (yougame::stdio_bridge()) {
-        settings_hint("Managed by the YouGame app");
-      } else {
+      {
         const bool resetting = host::gcadapter_reset_pending();
         ImGui::BeginDisabled(resetting);
         if (settings_widgets::Button(resetting ? "Resetting adapter..." : "Reset GameCube adapter"))
@@ -11842,7 +11240,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     changed |= settings_toggle("Show player nicknames above fighters", &options.show_player_nicknames);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shows each online player's name at Melee's player-tag anchor. Local display only.");
     changed |= settings_toggle("Show the \"Settings: F1\" reminder in menus", &options.settings_hint);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", yougame::stdio_bridge() ? yougame::parity::kSettingsHint : "F1, or Start + D-pad Down + Z on a GameCube controller, opens settings.");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", "F1, or Start + D-pad Down + Z on a GameCube controller, opens settings.");
     changed |= settings_toggle("Show the note when skins are off online", &options.skin_online_notice);
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("In an online mode, skins and stage mods that could change more than looks show as the\n"
@@ -12234,13 +11632,11 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImVec4(accent_f.x * .48f, accent_f.y * .48f, accent_f.z * .48f, 1.0f));
     draw->AddRectFilled(p, ImVec2(p.x + width, p.y + height), IM_COL32(8, 10, 20, 242), 8.0f * k);
     draw->AddRectFilled(p, ImVec2(p.x + width, p.y + 4.0f * k), accent);
-    // Under the YouGame app, quitting is going back to YouGame: its page is right behind this window.
-    const bool app = yougame::stdio_bridge();
     draw->AddText(label_font, label_size, ImVec2(p.x + 20 * k, p.y + 14 * k), IM_COL32(250, 244, 248, 255),
-                  state.menu_quit ? (app ? "BACK TO YOUGAME?" : "QUIT MELEE UNLOCKED?") : "MELEE UNLOCKED");
+                  state.menu_quit ? "QUIT MELEE UNLOCKED?" : "MELEE UNLOCKED");
     if (state.menu_quit)
       draw->AddText(body_font, body_size, ImVec2(p.x + 20 * k, p.y + 41 * k), IM_COL32(183, 174, 190, 255),
-                    !app || g_hud_match ? "The current match will end." : "Melee closes and your YouGame page is right behind it.");
+                    "The current match will end.");
     const float gap = 10.0f * k;
     const int count = state.menu_quit ? 2 : 3;
     const float button_w = (width - 40.0f * k - gap * (count - 1)) / count;
@@ -12270,14 +11666,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       // when neither quit button has navigation focus; it must never override CANCEL.
       const bool activated = pressed || (state.menu_quit && enter &&
           (ImGui::IsItemFocused() || (index == 0 && !quit_button_focused)));
-#ifdef YOUGAME_AGENT_TEST_HOOK
-      if (ImGui::IsItemFocused()) {
-        agent_menu_focus = ImGui::GetItemID();
-        agent_menu_label = label;
-      }
-      if (activated)
-        host::log("[yougame] agent test: menu activated %s (%s)", label, id);
-#endif
       if (activated)
         host::log("menu: activated %s", label);
       const bool hot = ImGui::IsItemHovered() || ImGui::IsItemFocused();
@@ -12310,33 +11698,22 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         state.open = true;
         reset_settings_home("Esc menu SETTINGS");
       }
-      if (action("##quit", app ? "BACK TO YOUGAME" : "QUIT GAME", 2)) {
+      if (action("##quit", "QUIT GAME", 2)) {
         state.menu_quit = true;
         state.menu_quit_focus_pending = true;
       }
       draw->AddText(body_font, body_size, hint_at, hint_color,
-                    app ? yougame::parity::kMenuHint : "ESC  BACK TO GAME     F1  SETTINGS");
+                    "ESC  BACK TO GAME     F1  SETTINGS");
     } else {
-      if (action("##confirm_quit", app ? "BACK TO YOUGAME" : "QUIT", 0)) { state.menu_open = false; state.menu_quit = false; host::request_user_exit(); }
+      if (action("##confirm_quit", "QUIT", 0)) { state.menu_open = false; state.menu_quit = false; host::request_user_exit(); }
       ImGui::SetItemDefaultFocus();
       if (action("##cancel_quit", "CANCEL", 1)) { state.menu_open = false; state.menu_quit = false; }
       draw->AddText(body_font, body_size, hint_at, hint_color,
-                    app ? yougame::parity::kMenuHint : "ENTER  SELECT     ESC  CANCEL");
+                    "ENTER  SELECT     ESC  CANCEL");
     }
     ImGui::End();
   }
   const bool practice_was_open = state.practice_open;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  agent_menu_state();
-  {
-    static ImGuiID last_focus = 0;
-    if (!state.menu_open) { agent_menu_focus = 0; agent_menu_label = "none"; }
-    if (agent_menu_focus != last_focus) {
-      host::log("[yougame] agent test: menu focused %s", agent_menu_label);
-      last_focus = agent_menu_focus;
-    }
-  }
-#endif
   if (host::test_env::getenv("MELEE_TEST_SEARCH_BANNER")) {   // tests: whether the practice overlays are drawn at all
     static int n = 0;
     if (n++ % 600 == 0) host::log("search banner test: overlay frame %d (fill %d open %d menu %d)", n, state.fill_window, state.open, state.menu_open);
@@ -12406,7 +11783,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetNextWindowBgAlpha(ImGui::GetTime() < 20.0 ? 0.8f : 0.35f);
       ImGui::Begin("SettingsButton", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
       clamp_overlay_window();
-      ImGui::TextUnformatted(yougame::stdio_bridge() ? yougame::parity::kSettingsHint : "Settings: F1  /  START + DOWN + Z");
+      ImGui::TextUnformatted("Settings: F1  /  START + DOWN + Z");
     ImGui::End();
     }
   }
@@ -12570,32 +11947,13 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
   host::window_withhold_buttons(state.open || state.menu_open ? 0 : arena_withheld());
   // Open/close actions above also apply to this frame's resulting state. The
   // neutral-release capture still prevents a closing A/B/Start reaching Melee.
-  settings_input::navigation(ImGui::GetIO(), state.open || state.menu_open || state.practice_open || signin_overlay::open() ||
+  settings_input::navigation(ImGui::GetIO(), state.open || state.menu_open || state.practice_open ||
       practice.phase == slippi::native_practice::Phase::Failure || state.fill_window);
   if (!state.fill_window && !state.open && !state.menu_open && options.show_player_nicknames)
     draw_player_nicknames();
-  if (!state.fill_window && !state.open && !state.menu_open && !g_hud_match && yougame::stdio_bridge())
-    draw_back_to_yougame_hint();
   if (!state.fill_window && !state.open && !state.menu_open) draw_combo_counter();
   if (!state.fill_window && !state.open && !state.menu_open) draw_pro_tag_robots();
   if (!state.fill_window && !state.open && !state.menu_open) draw_community_code_overlays();
-  {   // YouGame's Sign in by code panel, over the online menu's game picture (settings stay on top)
-    static bool signin_was = false;
-    const bool signin_drawn = !state.fill_window && !state.open && !state.menu_open && signin_overlay::open();
-    yougame::sign_in_drawn(signin_drawn);   // Esc goes to the box only while it is on screen (window.cpp)
-    if (signin_drawn) {
-      const ImVec2 screen = ImGui::GetIO().DisplaySize;
-      const float aspect = presented_aspect(options, (int)screen.x, (int)screen.y, true);
-      float gw = screen.x, gh = gw / std::max(aspect, 0.1f);
-      if (gh > screen.y) { gh = screen.y; gw = gh * aspect; }
-      const float gx0 = (screen.x - gw) * 0.5f, gy0 = (screen.y - gh) * 0.5f;
-      signin_overlay::draw(gx0, gy0, gx0 + gw, gy0 + gh);
-    }
-    // Closed: the A or B that closed it is still held; keep the game's input neutral until it is let go.
-    const bool signin_now = signin_overlay::open();
-    if (signin_was && !signin_now) state.practice_release_capture = true;
-    signin_was = signin_now;
-  }
   {
     // Menu sounds: a tick when the highlighted category or control changes, a brighter one when
     // a page opens or the panel opens, a lower one when a page or the panel closes.
@@ -12655,17 +12013,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
   }
   const ImGuiIO& diag_io = ImGui::GetIO();
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  const bool agent_click_diag = agent_click_diag_until && agent_settings_frame <= agent_click_diag_until;
-  const bool agent_click_down_seen = agent_click_diag && settings_input::click_event_seen(agent_click.down);
-  const bool agent_click_up_seen = agent_click_diag && settings_input::click_event_seen(agent_click.up);
-  if (agent_click_down_seen || agent_click_up_seen) {
-    host::log("ui diag: mouse %s at %.0f,%.0f hovered id %08X active id %08X nav id %08X frame %d",
-              agent_click_down_seen ? "down" : "up", diag_io.MousePos.x, diag_io.MousePos.y,
-              ImGui::GetHoveredID(), ImGui::GetActiveID(), ImGui::GetFocusID(), agent_settings_frame);
-    if (agent_click_up_seen) agent_click_diag_until = 0;
-  } else
-#endif
   if (g_ui_diag && (diag_io.MouseClicked[0] || diag_io.MouseReleased[0]))
       host::log("ui diag: mouse %s at %.0f,%.0f hovered id %08X active id %08X nav id %08X",
                 diag_io.MouseClicked[0] ? "down" : "up", diag_io.MousePos.x, diag_io.MousePos.y,
@@ -12681,7 +12028,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
               g.NavId, g.ActiveId, w ? w->Name : "-", w ? w->NavRectRel[0].Min.y : 0.f, w ? w->NavRectRel[0].Max.y : 0.f,
               w ? w->Scroll.y : 0.f, w ? w->ScrollMax.y : 0.f);
   }
-  draw_update_handoff_notice();
   ImGui::Render();
   // Apply opacity after ImGui has built the overlay: this includes the game-facing custom
   // geometry and images as well as standard widgets, leaving the emulated frame visible beneath.
@@ -12743,13 +12089,6 @@ void PcSettingsUI::draw(ID3D12GraphicsCommandList* list) {
   if (!data) return;
   ID3D12DescriptorHeap* heap = impl_->heap.Get(); list->SetDescriptorHeaps(1, &heap);
   ImGui_ImplDX12_RenderDrawData(data, list);
-}
-void PcSettingsUI::draw_picture_overlay(ID3D12GraphicsCommandList* list, uint32_t w, uint32_t h) {
-  if (!ImGui::GetCurrentContext()) return;
-  ImDrawData data;
-  if (!coming_soon_overlay::picture_draw_data(&data, (float)w, (float)h)) return;
-  ID3D12DescriptorHeap* heap = impl_->heap.Get(); list->SetDescriptorHeaps(1, &heap);
-  ImGui_ImplDX12_RenderDrawData(&data, list);
 }
 
 namespace {

@@ -9,7 +9,8 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "sourceport/extern/melee/src"
+# prepare_native_sources.py prepares a standalone guest checkout in build-native.
+SRC = ROOT / "build-native/decomp/src"
 # file, function, buffer
 SITES = [
     ("melee/gr/granime.c", "grAnime_801C8318", "grAnime_8049EE40"),

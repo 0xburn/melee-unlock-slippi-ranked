@@ -35,9 +35,6 @@ class LatencyProbeWiringTest(unittest.TestCase):
         self.assertNotIn("probe_presented", source("port/runtime/gx/gx_d3d11.cpp"))
         self.assertNotIn("probe_presented", source("port/runtime/gx/gx_d3d12.cpp"))
 
-    def test_test_env_still_cut_in_yougame(self):
-        self.assertIn("return yougame_session ? nullptr : std::getenv(name);", source("port/runtime/host/test_env.h"))
-
 
 if __name__ == "__main__":
     unittest.main()

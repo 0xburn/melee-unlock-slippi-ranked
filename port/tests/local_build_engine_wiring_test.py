@@ -13,8 +13,8 @@ def source(path):
 class LocalBuildEngineWiringTest(unittest.TestCase):
     def test_static_startup_precedes_bridge(self):
         main = source("port/app/main.cpp").split("static int melee_main(int argc, char** argv) {", 1)[1]
-        startup = main.split("yougame::start();", 1)[0]
-        static = startup.rsplit("#ifndef MELEE_SOURCE_PORT", 1)[1].split("#endif", 1)[0]
+        static = next(block for block in re.findall(r"#ifndef MELEE_SOURCE_PORT(.*?)#endif", main, re.S)
+                      if "build.static_engine" in block)
         self.assertIn("build.static_engine = true;", static)
         self.assertIn("slippi::online::set_local_build(build);", static)
 
@@ -34,12 +34,6 @@ class LocalBuildEngineWiringTest(unittest.TestCase):
         self.assertIn("set_local_build(content_build_for_mode(mode))", host)
         self.assertIn("const auto build = content_build_for_mode(mode);", host)
 
-    def test_shared_room_key_reads_engine(self):
-        link = source("port/runtime/hle/yougame_link.cpp")
-        self.assertIn("compatibility_key(v, build.mod_view, build.fingerprint, build.static_engine,\n"
-                      "                           slippi::online::ranked_rules_digest(mode),\n"
-                      "                           compat_tag_with_test_timer(compat_tag, std::getenv(\"MELEE_ONLINE_TEST_TIMER\")))", link)
-        self.assertIn("const std::string compat = compatibility(search.mode);", link)
 
     def test_peer_engine_uses_ignored_capability_bit(self):
         net = source("port/runtime/hle/slippi_net.cpp")

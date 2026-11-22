@@ -1,6 +1,6 @@
 // Direct C model tests; no game engine linked. GPL-3.0-or-later.
 #include "mu_ranked_setup_model.h"
-#include "yougame_ranked_policy.h"
+#include "mu_ranked_wire.h"
 #include "mu_setup_hash.h"
 #include <deque>
 #include <cstdio>
@@ -15,15 +15,15 @@ static MuRankedSet fresh() {
   std::memset(s.game_results,255,sizeof s.game_results); s.last_stage_win[0]=s.last_stage_win[1]=65535; return s;
 }
 static MuRankedSetupResult initial(bool collision=false) {
-  MuRankedSetupResult r{}; r.stage=31; r.fighters[0]={2,0}; r.fighters[1]={(MuYgU8)(collision?2:20),0}; return r;
+  MuRankedSetupResult r{}; r.stage=31; r.fighters[0]={2,0}; r.fighters[1]={(MuRankU8)(collision?2:20),0}; return r;
 }
 static void automatic(MuRankedSetupModel& m) {
-  MuYgU8 b[5]; const auto* s=mu_ranked_setup_current(&m); CHECK(s);
+  MuRankU8 b[5]; const auto* s=mu_ranked_setup_current(&m); CHECK(s);
   unsigned player=s->player; CHECK(mu_ranked_setup_packet(&m,nullptr,1,b));
   CHECK(mu_ranked_setup_apply(&m,player,b));
 }
 static void stages() {
-  const auto p=yougame::ranked_policy::slippi_v1(); auto set=fresh(); auto r=initial(); MuRankedSetupModel m;
+  const auto p=mu_slippi_ranked_policy(); auto set=fresh(); auto r=initial(); MuRankedSetupModel m;
   CHECK(mu_ranked_setup_model_init(&m,&p,&set,0,&r)); CHECK(m.step==2 && m.step_count==5);
   for (unsigned i=0;i<3;++i) {
     const auto* s=mu_ranked_setup_current(&m); CHECK(s && s->type==MU_SETUP_STRIKE);
@@ -53,12 +53,12 @@ static void stages() {
   changed=p; changed.strike_counts[1]=3; CHECK(!mu_ranked_setup_model_init(&m,&changed,&set,0,&r));
 }
 static void colors() {
-  auto p=yougame::ranked_policy::slippi_v1(); auto set=fresh(); auto r=initial(true); MuRankedSetupModel m;
+  auto p=mu_slippi_ranked_policy(); auto set=fresh(); auto r=initial(true); MuRankedSetupModel m;
   CHECK(mu_ranked_setup_model_init(&m,&p,&set,0,&r)); CHECK(m.step==0 && set.color_ban.active);
   CHECK(!mu_ranked_setup_color_allowed(&m,0,2,0)); CHECK(mu_ranked_setup_next_color(&m,0,2,0,-1)==3);
   CHECK(mu_ranked_setup_next_color(&m,0,2,1,0)==1);
   CHECK(mu_ranked_setup_next_color(&m,0,2,0,0)==1);
-  MuRankedSetupChoice choice{}; choice.character=2; choice.color=0; MuYgU8 b[5];
+  MuRankedSetupChoice choice{}; choice.character=2; choice.color=0; MuRankU8 b[5];
   CHECK(!mu_ranked_setup_packet(&m,&choice,0,b)); automatic(m); CHECK(m.result.fighters[0].color==1);
   CHECK(!mu_ranked_setup_color_allowed(&m,1,2,1)); automatic(m); CHECK(m.result.fighters[1].color==2);
   while(mu_ranked_setup_current(&m)) automatic(m);
@@ -76,7 +76,7 @@ static void colors() {
   CHECK(mu_ranked_setup_model_init(&m,&p,&set,0,&r)); CHECK(m.result.fighters[0].color==0);
 }
 static void timers() {
-  const auto p=yougame::ranked_policy::slippi_v1();
+  const auto p=mu_slippi_ranked_policy();
   for(unsigned game=1;game<=2;++game) for(unsigned seat=0;seat<2;++seat) {
     auto set=fresh(); if(game==2) {set.cur_game=2;set.prev_winner=0;}
     auto r=initial(true); MuRankedSetupModel m; CHECK(mu_ranked_setup_model_init(&m,&p,&set,seat,&r));
@@ -90,21 +90,21 @@ static void timers() {
     CHECK(m.status==MU_SETUP_COMPLETE);
   }
   // Partial two-strike draft preserves the choice and fills the first enabled entry once.
-  auto set=fresh(); auto r=initial(); MuRankedSetupModel m; MuYgU8 b[5];
+  auto set=fresh(); auto r=initial(); MuRankedSetupModel m; MuRankU8 b[5];
   CHECK(mu_ranked_setup_model_init(&m,&p,&set,0,&r)); automatic(m);
   MuRankedSetupChoice draft{}; draft.count=1; draft.stages[0]=32;
   CHECK(!mu_ranked_setup_packet(&m,&draft,0,b)); CHECK(mu_ranked_setup_packet(&m,&draft,1,b));
   CHECK(b[3]==28 && b[4]==32); CHECK(mu_ranked_setup_apply(&m,1,b));
 }
 static void interleave() {
-  const auto p=yougame::ranked_policy::slippi_v1();
+  const auto p=mu_slippi_ranked_policy();
   // All possible starting-stage choices and both winners, with both seat views.
   for(unsigned mirror=0;mirror<2;++mirror) for(unsigned winner=0;winner<2;++winner) for(unsigned offset=0;offset<5;++offset) {
     auto sets=std::array<MuRankedSet,2>{fresh(),fresh()}; auto r=initial(mirror); MuRankedSetupModel m[2];
     for(unsigned game=0;game<3;++game) {
       for(unsigned seat=0;seat<2;++seat) CHECK(mu_ranked_setup_model_init(&m[seat],&p,&sets[seat],seat,&r));
       while(const auto* s=mu_ranked_setup_current(&m[0])) {
-        unsigned player=s->player; MuYgU8 b[5], reply[6]={1,0,0,0,0,0}; MuRankedSetupChoice draft{};
+        unsigned player=s->player; MuRankU8 b[5], reply[6]={1,0,0,0,0,0}; MuRankedSetupChoice draft{};
         const MuRankedSetupChoice* d=nullptr;
         if(s->type==MU_SETUP_STRIKE || s->type==MU_SETUP_STAGE) {
           const auto* pool=game?p.counterpicks:p.starters; unsigned n=game?6:5;
@@ -114,7 +114,7 @@ static void interleave() {
           d=&draft;
         }
         CHECK(mu_ranked_setup_packet(&m[player],d,1,b));
-        auto before=m[player]; auto invalid=std::array<MuYgU8,5>{b[0],b[1],b[2],b[3],b[4]}; invalid[0]=99;
+        auto before=m[player]; auto invalid=std::array<MuRankU8,5>{b[0],b[1],b[2],b[3],b[4]}; invalid[0]=99;
         CHECK(!mu_ranked_setup_apply(&m[player],player,invalid.data())); CHECK(!std::memcmp(&before,&m[player],sizeof before));
         CHECK(!mu_ranked_setup_apply(&m[player],!player,b));
         CHECK(mu_ranked_setup_apply(&m[player],player,b));
@@ -135,14 +135,14 @@ static void interleave() {
     CHECK(mu_ranked_setup_model_init(&m[0],&p,&a,0,&r));
     CHECK(mu_ranked_setup_model_init(&m[1],&p,&b,1,&r));
     while(m[0].step<2) {
-      auto player=mu_ranked_setup_current(&m[0])->player; MuYgU8 wire[5],response[6]={1,0,0,0,0,0};
+      auto player=mu_ranked_setup_current(&m[0])->player; MuRankU8 wire[5],response[6]={1,0,0,0,0,0};
       CHECK(mu_ranked_setup_packet(&m[player],nullptr,1,wire));
       CHECK(mu_ranked_setup_apply(&m[player],player,wire));
       std::memcpy(response+2,wire+1,4);CHECK(mu_ranked_setup_remote(&m[!player],response));
     }
     for(unsigned turn=0;turn<2;++turn) {
       unsigned player=turn?0:1; MuRankedSetupChoice choice{};
-      choice.character=turn?18:19; choice.color=0; MuYgU8 wire[5],response[6]={1,0,0,0,0,0};
+      choice.character=turn?18:19; choice.color=0; MuRankU8 wire[5],response[6]={1,0,0,0,0,0};
       if(turn) {CHECK(!mu_ranked_setup_packet(&m[player],&choice,0,wire));choice.color=1;}
       CHECK(mu_ranked_setup_packet(&m[player],&choice,0,wire));
       CHECK(mu_ranked_setup_apply(&m[player],player,wire));
@@ -153,18 +153,18 @@ static void interleave() {
   }
   // Remote skip uses the same deterministic fallback; absent/malformed packets do not mutate.
   auto set=fresh(); auto r=initial(); MuRankedSetupModel m; CHECK(mu_ranked_setup_model_init(&m,&p,&set,1,&r));
-  MuYgU8 reply[6]={0}; CHECK(!mu_ranked_setup_remote(&m,reply));
+  MuRankU8 reply[6]={0}; CHECK(!mu_ranked_setup_remote(&m,reply));
   reply[0]=1; reply[4]=200; CHECK(!mu_ranked_setup_remote(&m,reply));
   reply[1]=1; CHECK(mu_ranked_setup_remote(&m,reply)); CHECK(m.removed[0]==2);
 }
 static void disconnects() {
-  const auto p=yougame::ranked_policy::slippi_v1();
+  const auto p=mu_slippi_ranked_policy();
   for(unsigned game=1;game<=2;++game) for(unsigned seat=0;seat<2;++seat) for(unsigned stop=0;stop<6;++stop) {
     auto set=fresh(); set.cur_game=game; if(game>1)set.prev_winner=1;
     auto r=initial(true); MuRankedSetupModel m; CHECK(mu_ranked_setup_model_init(&m,&p,&set,seat,&r));
     for(unsigned i=0;i<stop && mu_ranked_setup_current(&m);++i) automatic(m);
     auto result=m.result; mu_ranked_setup_disconnect(&m); CHECK(m.status==MU_SETUP_DISCONNECTED);
-    MuYgU8 b[5]={0},reply[6]={1,1,0,0,0,0}; CHECK(!mu_ranked_setup_current(&m));
+    MuRankU8 b[5]={0},reply[6]={1,1,0,0,0,0}; CHECK(!mu_ranked_setup_current(&m));
     CHECK(!mu_ranked_setup_packet(&m,nullptr,1,b)); CHECK(!mu_ranked_setup_apply(&m,seat,b));
     CHECK(!mu_ranked_setup_remote(&m,reply)); CHECK(mu_ranked_setup_tick(&m)==MU_SETUP_WAIT);
     CHECK(!std::memcmp(&result,&m.result,sizeof result));
@@ -172,7 +172,7 @@ static void disconnects() {
   }
 }
 static void tiebreak() {
-  const auto p=yougame::ranked_policy::slippi_v1(); auto set=fresh(); auto r=initial(); MuRankedSetupModel m;
+  const auto p=mu_slippi_ranked_policy(); auto set=fresh(); auto r=initial(); MuRankedSetupModel m;
   for(unsigned tie=1;tie<=5;++tie) {
     CHECK(mu_ranked_setup_record_game(&set,-1,7,r.stage,0)==MU_SETUP_TIEBREAK);
     CHECK(set.cur_game==1 && set.tiebreak_num==tie && set.score[0]==0 && set.last_end_mode==7);
@@ -191,14 +191,14 @@ static void tiebreak() {
 // read as "no matching hash after 8000 ms" before the last strike step had even been applied.
 struct Seat {
   MuRankedSet set; MuRankedSetupModel m;
-  std::deque<std::pair<unsigned,std::array<MuYgU8,5>>> inbox;   // packets from the other seat, by arrival frame
+  std::deque<std::pair<unsigned,std::array<MuRankU8,5>>> inbox;   // packets from the other seat, by arrival frame
   MuSetupHash hash{}; uint64_t since=0; MuSetupHashWait wait{};   // the gate's state for this seat's setup
   MuSetupHash peer{}; bool peer_received=false; std::deque<std::pair<unsigned,MuSetupHash>> hash_inbox;
   bool built=false;
 };
-static std::array<MuYgU8,14> overwrite(const MuRankedSetupModel& m) {
+static std::array<MuRankU8,14> overwrite(const MuRankedSetupModel& m) {
   // publish_result's 0xBF payload, game 1: stage, then (present, char, colour) per port.
-  std::array<MuYgU8,14> out{}; out[0]=(MuYgU8)(m.result.stage>>8); out[1]=(MuYgU8)m.result.stage;
+  std::array<MuRankU8,14> out{}; out[0]=(MuRankU8)(m.result.stage>>8); out[1]=(MuRankU8)m.result.stage;
   for(unsigned i=0;i<2;++i) {out[2+3*i]=1; out[3+3*i]=m.result.fighters[i].character; out[4+3*i]=m.result.fighters[i].color;}
   return out;
 }
@@ -209,7 +209,7 @@ static MuSetupHash setup_of(unsigned port, const MuRankedSetupResult& r, bool ov
   return {(unsigned char)port,h,mu_fnv64_u8(h,0x5A)};
 }
 static void mirror_idle() {
-  const auto p=yougame::ranked_policy::slippi_v1();
+  const auto p=mu_slippi_ranked_policy();
   MuRankedSetupResult css{}; css.stage=28; css.fighters[0]={11,0}; css.fighters[1]={11,0};
   for(unsigned relay=1;relay<=30;relay+=29) {   // 1 frame, and a slow relay hop (half a second)
     std::array<Seat,2> seat;
@@ -237,13 +237,13 @@ static void mirror_idle() {
         const auto* s=mu_ranked_setup_current(&me.m);
         if(s && s->player==i) {
           if(mu_ranked_setup_tick(&me.m)==MU_SETUP_LOCAL_TIMEOUT) {
-            std::array<MuYgU8,5> b{}; CHECK(mu_ranked_setup_packet(&me.m,nullptr,1,b.data()));
+            std::array<MuRankU8,5> b{}; CHECK(mu_ranked_setup_packet(&me.m,nullptr,1,b.data()));
             CHECK(mu_ranked_setup_apply(&me.m,i,b.data())); other.inbox.push_back({frame+relay,b});
           }
         } else if(s) {
           mu_ranked_setup_tick(&me.m);
           if(!me.inbox.empty() && me.inbox.front().first<=frame) {
-            MuYgU8 response[6]={1,0,0,0,0,0}; std::memcpy(response+2,me.inbox.front().second.data()+1,4);
+            MuRankU8 response[6]={1,0,0,0,0,0}; std::memcpy(response+2,me.inbox.front().second.data()+1,4);
             me.inbox.pop_front(); CHECK(mu_ranked_setup_remote(&me.m,response));
           }
         }

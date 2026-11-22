@@ -2,7 +2,7 @@
 from pathlib import Path
 import argparse, csv, hashlib, json, os, plistlib, re, resource, socket, subprocess, sys, time
 sys.dont_write_bytecode = True
-from build_full import ROOT, BUILD, memory_gate, GAME_LIBRARY, build_dir
+from build_full import ROOT, BUILD, memory_gate, GAME_LIBRARY
 from compare_digest import compare, load
 REFERENCE = GAME_LIBRARY.parent / "digest-nosp.txt"
 # MELEE_CHECK_DISC points a check at another local test image (e.g. a scrubbed copy), never an uploaded one.
@@ -47,7 +47,7 @@ def checked_run(command, work, environment, output='console.log', timeout=90):
     memory_gate()
     with (work/output).open('w') as f:
         started = time.monotonic()
-        p = subprocess.Popen(command, cwd=work, env=environment, stdin=subprocess.PIPE if environment.get('YOUGAME_STDIO') == '1' else subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT)
+        p = subprocess.Popen(command, cwd=work, env=environment, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT)
         try:
             code = p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -119,7 +119,6 @@ def parity(graphics=False, seed=False, sync=False, windowed=False, fullscreen=Fa
 
 def memory_card():
     work, env, args = isolation('memory-card')
-    env['YOUGAME_STDIO'] = '1'
     assert not (work/'cards').exists()
     args += ['--frames','1800','--fast','--vanilla-game','--vanilla-only',
              '--time-base','0','--rng-seed','0x12345678','--state-digest',str(work/'digest.csv')]
@@ -195,27 +194,19 @@ def units():
     return int(any(r['exit'] and not r['skipped'] for r in results))
 
 def policies():
-    """Offline policy/ring regressions on both Mac architectures."""
+    """Offline policy regressions on both Mac architectures."""
     work, env, _ = isolation('policies')
     results = []
     for arch in ['arm64', 'x86_64']:
-        for name, compiler, flags, sources in [
-            ('lcancel', '/usr/bin/clang++', ['-std=c++17', '-I'+str(ROOT/'port/runtime/host')],
-             [ROOT/'port/tests/lcancel_policy_test.cpp']),
-            ('ring', '/usr/bin/clang', ['-std=c11', '-pthread', '-DHAS_SOCKLEN_T=1',
-             '-DHAS_POLL=1', '-DHAS_FCNTL=1', '-DHAS_MSGHDR_FLAGS=1', '-DHAS_GETADDRINFO=1',
-             '-DHAS_GETNAMEINFO=1', '-DHAS_INET_PTON=1', '-DHAS_INET_NTOP=1',
-             '-I'+str(ROOT/'port/third_party/enet/include')],
-             [ROOT/'port/tests/yg_enet_posix_ring_test.c', *sorted((ROOT/'port/third_party/enet').glob('*.c'))])]:
-            label = name+'-'+arch
-            exe = work/label
-            code = checked_run([compiler, '-arch', arch, '-mmacosx-version-min=15.0', '-O2',
-                                *flags, *map(str, sources), '-o', str(exe)],
-                               work, env, output=label+'-build.log', timeout=120)
-            if code: return code
-            code = checked_run([str(exe)], work, env, output=label+'.log', timeout=30)
-            results.append(dict(test=label, exit=code))
-    for name in ['gc_adapter_guard_test', 'yougame_merge_test']:
+        label = 'lcancel-'+arch
+        exe = work/label
+        code = checked_run(['/usr/bin/clang++', '-arch', arch, '-mmacosx-version-min=15.0', '-O2',
+                            '-std=c++17', '-I'+str(ROOT/'port/runtime/host'), str(ROOT/'port/tests/lcancel_policy_test.cpp'), '-o', str(exe)],
+                           work, env, output=label+'-build.log', timeout=120)
+        if code: return code
+        code = checked_run([str(exe)], work, env, output=label+'.log', timeout=30)
+        results.append(dict(test=label, exit=code))
+    for name in ['gc_adapter_guard_test']:
         code = checked_run([sys.executable, '-B', str(ROOT/'port/tests'/(name+'.py'))],
                            work, env, output=name+'.log')
         results.append(dict(test=name, exit=code))
@@ -253,57 +244,6 @@ def peer(i):
     return int(matches == 0)
 
 
-def bridge_check():
-    import selectors
-    work, env, args = isolation('bridge')
-    env['YOUGAME_STDIO'] = '1'
-    exe = work/'bridge-test'
-    memory_gate()
-    with (work/'build.log').open('w') as log:
-        app_objects = [BUILD/'objects'/('port_app_'+name+'.cpp.o') for name in ['source_host','source_guest_boundary','source_p2p']]
-        includes = [ROOT/p for p in ['port/linux/compat','port/runtime/hle','port/runtime/host','port/runtime/ppc']]
-        built = subprocess.run(['/usr/bin/clang++','-arch','x86_64','-mmacosx-version-min=15.0','-std=c++17',
-            *['-I'+str(p) for p in includes],str(ROOT/'port/mac/bridge_test.cpp'),*map(str,app_objects),str(BUILD/'libfull_host.a'),
-            '-L'+str(ROOT.parent/'deps/sdl2/lib'),'-lSDL2-2.0.0','-lcurl','-liconv','-framework','OpenGL','-framework','AppKit','-framework','Security',
-            '-Wl,-pagezero_size,0x10000','-Wl,-rpath,'+str(ROOT.parent/'deps/sdl2/lib'),'-o',str(exe)],
-            stdout=log,stderr=subprocess.STDOUT)
-    if built.returncode: return built.returncode
-    args = [str(exe)]
-    memory_gate()
-    seen = []
-    with (work/'console.log').open('w') as log:
-        p = subprocess.Popen(args,cwd=work,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT,text=True,bufsize=1)
-        deadline = time.monotonic()+90
-        selector = selectors.DefaultSelector(); selector.register(p.stdout,selectors.EVENT_READ)
-        while p.poll() is None and time.monotonic() < deadline:
-            for key,_ in selector.select(timeout=0.2):
-                line = key.fileobj.readline()
-                log.write(line); log.flush()
-                if not line.startswith('yg '): continue
-                request = json.loads(line[3:])
-                if 'id' not in request: continue
-                kind = request.get('type',''); seen.append(kind)
-                if kind == 'hello':
-                    result = {'player':{'id':'mac-spike-test','name':'Mac Spike'},'nameShared':True,
-                              'netBroker':{'version':1,'mode':'yougame'}}
-                elif kind == 'mpCode': result = {'code':'MAC#1'}
-                else: result = {}
-                p.stdin.write('yg '+json.dumps({'re':request['id'],'ok':True,'result':result})+'\n')
-                p.stdin.flush()
-        if p.poll() is None:
-            p.kill(); p.wait(); code = 124
-        else: code = p.returncode
-        log.write(p.stdout.read())
-        selector.close(); p.stdin.close(); p.stdout.close()
-    for path in work.rglob('*.log'):
-        if path.exists() and 'slippi: logged in as' in path.read_text(errors='replace'):
-            raise SystemExit(f'FAIL: Slippi login detected in {path}')
-    passed = code == 0 and 'hello' in seen and 'mpCode' in seen
-    (work/'result.json').write_text(json.dumps({'exit':code,'requests':seen,'passed':passed},indent=2)+'\n')
-    print(f'Stdio bridge: exit {code}, requests {seen}, passed {passed}',flush=True)
-    return int(not passed)
-
 def compatibility():
     work, env, _ = isolation('compat')
     exe = work/'compat-test'
@@ -320,8 +260,7 @@ def main():
     global BUILD, EXE
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--agent-test-hook',action='store_true',help='Check the isolated staging hook build')
-    parser.add_argument('check',choices=['parity','graphics','shaders','seed-build','unit','policies','netplay','bridge','compat','memory-card','peer-0','peer-1'])
+    parser.add_argument('check',choices=['parity','graphics','shaders','seed-build','unit','policies','netplay','compat','memory-card','peer-0','peer-1'])
     parser.add_argument('--seed',action='store_true')
     parser.add_argument('--sync-shaders',action='store_true')
     parser.add_argument('--windowed',action='store_true',help='Lead only, outside the sandbox: show the graphics window')
@@ -329,9 +268,8 @@ def main():
     parser.add_argument('--scale',default='1')
     parser.add_argument('--video-test',choices=['resize','sdl','appkit','escape','menu'])
     args = parser.parse_args()
-    BUILD = build_dir(args.agent_test_hook)
     EXE = BUILD/'MeleeUnlocked.app/Contents/MacOS/MeleeUnlocked'
     run_parity = lambda graphics: parity(graphics,args.seed,args.sync_shaders,args.windowed,args.fullscreen,args.video_test,args.scale)
-    return {'parity':lambda:run_parity(False),'graphics':lambda:run_parity(True),'shaders':translation_check,'seed-build':seed_build,'unit':units,'policies':policies,'netplay':netplay,'bridge':bridge_check,'compat':compatibility,'memory-card':memory_card,'peer-0':lambda:peer(0),'peer-1':lambda:peer(1)}[args.check]()
+    return {'parity':lambda:run_parity(False),'graphics':lambda:run_parity(True),'shaders':translation_check,'seed-build':seed_build,'unit':units,'policies':policies,'netplay':netplay,'compat':compatibility,'memory-card':memory_card,'peer-0':lambda:peer(0),'peer-1':lambda:peer(1)}[args.check]()
 if __name__ == '__main__':
     sys.exit(main())

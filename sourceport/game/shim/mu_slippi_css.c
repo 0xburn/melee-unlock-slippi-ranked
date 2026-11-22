@@ -37,16 +37,7 @@
 #include <sysdolphin/baselib/sislib.h>
 #include <mu_native.h>
 #include <mu_test_env.h>
-#if MU_SQUAD
-/* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-#include "mu_squad.h"
-/* shim/mu_squad_css.c (included by mncharsel.c): the online door's coin pick and lineup. */
-int gmSquad_CssPreview(u8* coin_ck, u8* coin_color, GmSquadMember out[GMSQUAD_SIZE]);
-#endif
 #include <mu_ranked.h>
-#ifdef MELEE_DOUBLES
-#include <mu_doubles_game.h>
-#endif
 
 extern char mnNameNew_CurrentNameText[];
 
@@ -78,8 +69,6 @@ static struct {
     u8 z_hold_timer;
     u8 chat_window_opened; /* set by the chat window (mu_slippi_chat.c) */
     u8 team_idx;
-    u8 doubles_searched; /* the 4-peer Doubles search went out on this CSS visit */
-    u8 doubles_connected; /* ... and its match room connected on this visit */
 } dt;
 
 /* mncharsel.c state the codes read through r13 (addresses of its statics). */
@@ -107,19 +96,7 @@ static const char spinner_done_str[3] = { (char) 0x81, 0x7C, 0 };
  * (mu_friends4_css.inc), never this 1-door one. */
 int mu_slippi_css_online(void)
 {
-    return mu_slippi_menus_enabled() && mu_slippi_on_online_css() && !mu_lobby_css();
-}
-
-/* YouGame Doubles on the 4-peer route: the home's match on this Teams character select. The room owns
- * the team (the toggle is locked), there is no code entry and no stage select: the search starts on
- * entry and every game locks in a random stage, which the room's seed turns into a doubles stage. */
-static int doubles_teams(void)
-{
-#ifdef MELEE_DOUBLES
-    return mu_slippi_state()->mode == MU_SLP_MODE_TEAMS && mu_doubles_teams_css();
-#else
-    return 0;
-#endif
+    return mu_slippi_menus_enabled() && mu_slippi_on_online_css();
 }
 
 int mu_slippi_css_teams(void)
@@ -140,9 +117,6 @@ int mu_slippi_css_team_idx(void)
 /* InitTeamToggleButton: the data table and the injection's own byte (kept across CSS loads). */
 void mu_slippi_css_set_team_idx(int team)
 {
-    if (doubles_teams()) {
-        return;   /* the room's team; the toggle stays where the room put it */
-    }
     dt.team_idx = (u8) team;
     mu_slippi_state()->team_idx = (u8) team;
 }
@@ -183,11 +157,6 @@ void mu_slippi_css_enter(CSSData** css, u8* chosen, s8* port, u8* request, s8* n
     if (st->team_idx == 0) {
         st->team_idx = 1;
     }
-#ifdef MELEE_DOUBLES
-    if (doubles_teams() && mu_doubles_teams_team() >= 0) {
-        st->team_idx = (u8) (mu_doubles_teams_team() + 1);   /* red 1 = team 0, blue 2 = team 1 */
-    }
-#endif
     if (st->mode == MU_SLP_MODE_TEAMS) {
         dt.team_idx = st->team_idx;
     }
@@ -297,7 +266,7 @@ void mu_css_frame(void)
     }
 }
 
-#define CMD_ZELDA_AS_SHEIK 0xDE /* upstream 0xE6: CMD_YOUGAME_FRIENDS_MENU in this build */
+#define CMD_ZELDA_AS_SHEIK 0xDE
 /* Player_SetPlayerCharacter and the rogueMelee run: a human's Zelda starts as Sheik when the player
  * asked for it. The host answers 0 online and during replay playback. */
 int mu_human_zelda_as_sheik(void)
@@ -329,7 +298,7 @@ int mu_host_button_label(int port, unsigned button_mask, char* out, int n)
     return 1;
 }
 
-#define CMD_ARENA_HAND 0xDB /* upstream 0xEF: CMD_YOUGAME_MENU in this build */
+#define CMD_ARENA_HAND 0xDB
 /* mnCharSel_CursorThink, after the hand moved: the online CSS's own player's hand goes to the host
  * (x, y as the screen's units, 0.1 steps) when it moved, for an arena room's side panels: a hand
  * pushed against the left or right edge goes into that panel. The fifth byte is the select's mode
@@ -422,36 +391,6 @@ static int picked_stage(void)
 
 static int test_skip_code_entry;   /* tests only: MELEE_TEST_ARENA_PRESS_START below */
 
-/* Shared by the hint and input path so the screen never advertises a dead Z. */
-static int mu_slippi_practice_available(void)
-{
-#if defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH
-    return mu_slippi_state()->mode == MU_SLP_MODE_RANKED && mu_slippi_ranked_available() &&
-           dt.msrb.connection_state == MU_SLP_MM_IDLE && !mu_online_p2p_menus() &&
-           !dt.chat_window_opened && char_chosen && *char_chosen && gm_801A4BB8() &&
-           mu_ranked_practice_allowed();
-#else
-    return 0;
-#endif
-}
-
-#if MU_SQUAD
-/* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
- * START with fewer than four fighters. Between picks the coin is back in the hand, so the vanilla
- * CSS clears its ready flag and the START paths below stop before lock-in, which is where the
- * refusal is explained: explain it here instead. */
-static void squad_start_refused(void)
-{
-    GmSquadMember lineup[GMSQUAD_SIZE];
-    u8 ck, color;
-    int count;
-    if (!gmSquad_OnlineLive(mu_slippi_state()->mode)) return;
-    count = gmSquad_CssPreview(&ck, &color, lineup);
-    if (count == GMSQUAD_SIZE) return;
-    gmSquad_OnlineNeedLineup(count);
-    lbAudioAx_80024030(3);
-}
-#endif
 
 /* HandleInputsOnCSS at fn_80262F44's `mnCharSel_804D6CF2 == 0 && START` test (only called when
  * mnCharSel_804D6CF2 == 0). Returns 1 when both players are ready: the caller continues into the
@@ -503,61 +442,21 @@ int mu_slippi_css_inputs(unsigned int trigger)
         }
     }
 
-    /* Y is unused in searching/error states. Read only the existing mapped pad edge. */
-    if ((trigger & HSD_PAD_Y) && !(trigger & HSD_PAD_Z) &&
-        (m->connection_state == MU_SLP_MM_MATCHMAKING || m->connection_state == MU_SLP_MM_ERROR)) {
-        u8 action = 1;
-        mu_slippi_cmd(0xE7, &action, 1, NULL, 0, NULL);
-        return 0;
-    }
-
     switch (m->connection_state) {
     case MU_SLP_MM_IDLE:
-        if (doubles_teams()) {
-            /* Join the match room once per visit, before the pick, so all four arrive in time. */
-            if (!dt.doubles_searched && !dt.chat_window_opened && gm_801A4BB8() != 0) {
-                dt.doubles_searched = 1;
-                st->is_winner = MU_SLP_WINNER_NULL;
-                st->chose_stage = 0;
-                mu_slippi_sss_find_match();
-            }
-            return 0;
-        }
         if (mu_online_p2p_menus()) {
             /* A peer-to-peer session has its opponent already: no search and no connect-code
              * entry. Its host never reports this state; a reply that could not be read does. */
             return 0;
         }
-#if defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH
-        /* Same lock-in path as search, with the CPU bridge installed first.
-         * The host must acknowledge the local entry before any B5/B4 is sent. */
-        if (mu_slippi_practice_available() && (trigger & HSD_PAD_Z)) {
-            if (mu_ranked_practice_control(MU_YG_PRACTICE_START)) {
-                st->is_winner = MU_SLP_WINNER_NULL;
-                st->chose_stage = 0;
-                lock_in_and_search(SB_RAND);
-            }
-            return 0;
-        }
-#endif
         if (dt.chat_window_opened || !(trigger & HSD_PAD_START) || gm_801A4BB8() == 0) {
             return 0;
         }
         st->is_winner = MU_SLP_WINNER_NULL;
         st->chose_stage = 0;
         if (*char_chosen == 0) {
-#if MU_SQUAD
-            squad_start_refused();
-#endif
             return 0;
         }
-#if defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH
-        if (st->mode == MU_SLP_MODE_RANKED) {
-            /* Returning from a practice reveal: restore the real backend before
-             * the ordinary Ranked B5/B4, without changing its matchmaking path. */
-            mu_ranked_practice_control(MU_YG_PRACTICE_STOP);
-        }
-#endif
         switch (st->mode) {
         case MU_SLP_MODE_RANKED:
         case MU_SLP_MODE_UNRANKED:
@@ -586,11 +485,6 @@ int mu_slippi_css_inputs(unsigned int trigger)
         if ((trigger & HSD_PAD_Z) ||
             (m->connection_state == MU_SLP_MM_ERROR && (trigger & (HSD_PAD_A | HSD_PAD_B)))) {
             mu_slippi_cleanup_connections();
-        }
-        /* A YouGame row while YouGame is on an older release: Start restarts in that release (the
-         * host answers only when it made the offer). */
-        if ((trigger & HSD_PAD_START) && mu_slippi_yougame_pick()) {
-            mu_slippi_yougame_restart_older();
         }
         return 0;
 
@@ -665,24 +559,14 @@ int mu_slippi_css_inputs(unsigned int trigger)
         {
             advance = 1;
         }
-#if MU_SQUAD
-        if ((trigger & HSD_PAD_START) && *char_chosen == 0 && gm_801A4BB8() != 0) {
-            squad_start_refused();
-        }
-#endif
-        if (advance && *char_chosen != 0 && gm_801A4BB8() != 0 && doubles_teams()) {
-            tx_lock_in(SB_RAND);   /* every game: the room's seed picks the stage */
-        } else if (advance && *char_chosen != 0 && gm_801A4BB8() != 0) {
+        if (advance && *char_chosen != 0 && gm_801A4BB8() != 0) {
             switch (st->mode) {
             case MU_SLP_MODE_UNRANKED:
             case MU_SLP_MODE_PARTY:
                 tx_lock_in(SB_RAND);
                 break;
             case MU_SLP_MODE_RANKED:
-                /* YouGame's Ranked v1: the next game of the set locks in as Unranked does (a random
-                 * legal stage). Without the host's Ranked the console stalls, as below. The
-                 * launcher's YouGame Ranked row (split layout) is the host's Ranked too. */
-                if (mu_slippi_ranked_available() || mu_slippi_yougame_pick()) {
+                if (mu_slippi_ranked_available()) {
                     tx_lock_in(SB_RAND);
                 }
                 break;
@@ -757,23 +641,6 @@ static int create_subtext(HSD_Text* t, const GXColor* color, f32 scale, f32 x, f
     HSD_SisLib_803A74F0(t, idx, &c);
     HSD_SisLib_803A70A0(t, idx, (char*) "");
     return idx;
-}
-
-/* The required-update answers: the server's ("Getting the latest version. ...") and the game's own
- * (yougame::update::kMessage, "Updating to the latest version. ..."). */
-static int update_words(const char* s)
-{
-    return s != NULL && (strncmp(s, "Getting the latest version", 26) == 0 ||
-                         strncmp(s, "Updating to the latest version", 30) == 0);
-}
-
-/* The host's Unranked note (MU_YG_SUB_UNRANKED_NOTE): the opponent's leave ended this side's session.
- * An older host answers nothing, so no note. */
-static int unranked_opponent_left(void)
-{
-    MuYgU8 sub = MU_YG_SUB_UNRANKED_NOTE, left = 0;
-    unsigned int got = 0;
-    return mu_slippi_cmd(MU_YG_COMMAND, &sub, 1, &left, 1, &got) == 0 && got == 1 && left == 1;
 }
 
 static void set_text(int idx, const char* s)
@@ -857,36 +724,11 @@ enum {
     ST_RANK_OPPONENT = 15,
 };
 
-/* RankInfo owns the standing, opponent and game-owned score below this title.
- * Keep the host query below: it starts the existing per-CSS YouGame mpRank read. */
-/* The header names the service first, as the menu's rows do (owner, 11-18): "YouGame Unranked",
- * "Slippi Direct". A Both pick reads "Both" until an opponent is found, then the service that won. */
-static const char* header_service(u8 conn)
-{
-    const int pick = mu_slippi_pick_service();
-    if (pick == 2) {
-        if (conn == MU_SLP_MM_OPPONENT_CONNECTING || conn == MU_SLP_MM_CONNECTION_SUCCESS) {
-            const int won = mu_slippi_match_service();
-            if (won == 1) return "Slippi";
-            if (won == 2) return "YouGame";
-        }
-        return "Both";
-    }
-    return pick == 1 ? "YouGame" : "Slippi";
-}
-
 static void set_header(const char* service, const char* mode)
 {
     HSD_SisLib_803A70A0(dt.text, ST_HEADER, (char*) "%s %s", service, mode);
 }
 
-static void ranked_header(const char* header)
-{
-    (void) header;
-    HSD_SisLib_803A7548(dt.text, ST_HEADER, 0.5f, 0.5f);
-    if (mu_ranked_practice()) set_text(ST_HEADER, "Practice - not rated");
-    else set_header(header_service(dt.msrb.connection_state), "Ranked");
-}
 
 /* The live pick preview, every frame while connected (display only; the host sends it on change):
  * the fighter under this player's coin while it is down, the costume the portrait shows, the team,
@@ -903,21 +745,6 @@ static void pick_preview_frame(void)
         return;
     }
     mu_css_pick_preview(0, port, &ck, &color);
-#if MU_SQUAD
-    /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-    if (gmSquad_OnlineChosen()) {
-        GmSquadMember lineup[GMSQUAD_SIZE];
-        int i, n = gmSquad_CssPreview(&ck, &color, lineup);
-        /* Kinds as the 0xE3 lineup carries them. The preview has three slots (its wire is every
-         * mode's, unchanged): they carry the three members, and the fourth pick, always the coin
-         * on the Squad Strike row, goes as the coin pick (ck), which opponent_picks_line shows. */
-        for (i = 0; i < n && i < 3; i++) {
-            kinds[i] = lineup[i].ckind;
-            colors[i] = lineup[i].color;
-        }
-        count = (u8) i;
-    }
-#endif
 #ifdef MU_AKANEIA_FIGHTERS
     if (ck != 0xFF) {
         const int ext = mu_ak_mex_external(ck);   /* the external id 0x82 sends */
@@ -948,22 +775,10 @@ static const char* pick_name(u8 ck)
 
 /* One line for every opponent whose game sends previews: who they are on, and whether they locked
  * in. An older game sends none, and the line stays empty. */
-#if MU_SQUAD
-/* Squad Strike: four places, the coin pick (the fourth, last pick) after the three slots. */
-#define OPP_SQUAD_PLACES GMSQUAD_SIZE
-#else
-#define OPP_SQUAD_PLACES 3
-#endif
-static const char* opp_squad_place(const MuOpponentPick* o, int j)
-{
-    if (j == 3) return o->squad_count == 3 && o->char_id != 0xFF ? pick_name(o->char_id) : "-";
-    return j < o->squad_count ? pick_name(o->kinds[j]) : "-";
-}
-
 static void opponent_picks_line(const MuMatchState* m, char* out, size_t size)
 {
     size_t used = 0;
-    int i, j, shown = 0, remotes = 0;
+    int i, shown = 0, remotes = 0;
     out[0] = 0;
     for (i = 0; i < 3; i++) remotes += m->opp_picks[i].valid;
     for (i = 0; i < 3 && used + 1 < size; i++) {
@@ -978,16 +793,8 @@ static void opponent_picks_line(const MuMatchState* m, char* out, size_t size)
         n = snprintf(out + used, size - used, "%s%s: ", shown ? "   " : "", name);
         if (n < 0) break;
         used += (size_t) n < size - used ? (size_t) n : size - used - 1;
-        if (o->squad_count > 0) {
-            for (j = 0; j < OPP_SQUAD_PLACES && used + 1 < size; j++) {
-                n = snprintf(out + used, size - used, "%s%s", j ? ", " : "", opp_squad_place(o, j));
-                if (n < 0) break;
-                used += (size_t) n < size - used ? (size_t) n : size - used - 1;
-            }
-        } else {
-            n = snprintf(out + used, size - used, "%s", o->char_id == 0xFF ? "choosing" : pick_name(o->char_id));
-            if (n > 0) used += (size_t) n < size - used ? (size_t) n : size - used - 1;
-        }
+        n = snprintf(out + used, size - used, "%s", o->char_id == 0xFF ? "choosing" : pick_name(o->char_id));
+        if (n > 0) used += (size_t) n < size - used ? (size_t) n : size - used - 1;
         if (o->locked && used + 1 < size) {
             n = snprintf(out + used, size - used, " - locked in");
             if (n > 0) used += (size_t) n < size - used ? (size_t) n : size - used - 1;
@@ -1002,9 +809,6 @@ static void text_think(HSD_GObj* gobj)
     MuMatchState* m = &dt.msrb;
     char opp_code[19] = "--//--//--//--//00";
     char opp_name[32];
-    char link_line[128] = { 0 };
-    int updating;
-    char rank_lines[6][128] = { { 0 } };
     /* The keys the prompts name: the bound key for a keyboard player, else the GameCube button. */
     char z_key[16] = "Z", b_key[16] = "B", start_key[16] = "START", prompt[64];
     const char* s;
@@ -1015,11 +819,6 @@ static void text_think(HSD_GObj* gobj)
     /* ... and its opponent is not connected yet. The host reports 3 here; 0 is the table before
      * its first B3, where "enter code" would be just as wrong. */
     int p2p_connecting = p2p && conn < MU_SLP_MM_CONNECTION_SUCCESS;
-    /* Doubles on the Teams client joins the home's match room by itself: there is no code to enter.
-     * Until it connects the line says so; once it dropped back to idle the room is gone, and the
-     * home brings the game back to it (holding B leaves sooner). */
-    int doubles_waiting = doubles_teams() && conn < MU_SLP_MM_CONNECTION_SUCCESS;
-    int doubles_closed = doubles_waiting && dt.doubles_connected && conn == MU_SLP_MM_IDLE;
 
     (void) gobj;
     pick_preview_frame();
@@ -1028,30 +827,6 @@ static void text_think(HSD_GObj* gobj)
         mu_host_button_label(*ctrl_port, HSD_PAD_B, b_key, sizeof b_key);
         mu_host_button_label(*ctrl_port, HSD_PAD_START, start_key, sizeof start_key);
     }
-    if (doubles_teams() && conn == MU_SLP_MM_CONNECTION_SUCCESS) {
-        dt.doubles_connected = 1;
-    }
-#if MU_SQUAD
-    /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-    /* A friend room: the friend picked Squad Strike, so this side's CSS turns squads on too. */
-    gmSquad_OnlineFriendJoin();
-    if (gmSquad_OnlineChosen()) {
-        GmSquadMember lineup[GMSQUAD_SIZE];
-        u8 ck, color;
-        gmSquad_OnlinePickCount(gmSquad_CssPreview(&ck, &color, lineup));
-    }
-#endif
-    if (conn == MU_SLP_MM_MATCHMAKING || conn == MU_SLP_MM_ERROR) {
-        u8 query = 0;
-        unsigned int got = 0;
-        if (mu_slippi_cmd(0xE7, &query, 1, (u8*) link_line, sizeof link_line, &got) != 0 || got != sizeof link_line)
-            link_line[0] = 0;
-        link_line[sizeof link_line - 1] = 0;
-    }
-    /* A required update (the app is already fetching it) is not an error: it installs when the player
-     * leaves the online screen (yougame::update::SafePoint), so say that instead of "Error". */
-    updating = conn == MU_SLP_MM_ERROR && (update_words(link_line) || update_words((const char*) m->error));
-    if (st->mode == MU_SLP_MODE_RANKED) mu_slippi_ranked_lines(rank_lines);
     code_sjis18((u8*) opp_code);
 
     /* Mode title: slpCSS mode matanim on SingleMenu child 36, MELEE (0) or TEAM MATCH (16). */
@@ -1069,48 +844,28 @@ static void text_think(HSD_GObj* gobj)
         if (st->mode == MU_SLP_MODE_RANKED) {
             HSD_SisLib_803A7548(dt.text, ST_HEADER, 0.5f, 0.5f);   /* the Ranked header may have shrunk */
         }
-        set_text(ST_HEADER, updating ? "Update ready" : "Error");
+        set_text(ST_HEADER, "Error");
     } else {
         switch (st->mode) {
         case MU_SLP_MODE_UNRANKED:
-#if MU_SQUAD
-            /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-            if (gmSquad_OnlineChosen()) { set_header("YouGame", "Squad Strike"); break; }
-#endif
-            set_header(header_service(conn), "Unranked"); break;
+            set_header("Slippi", "Unranked"); break;
         case MU_SLP_MODE_DIRECT:
-#if MU_SQUAD
-            /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-            if (gmSquad_OnlineFriend()) { set_header("YouGame", "Squad Strike"); break; }
-#endif
             if (p2p) {
                 set_text_fmt(ST_HEADER, "%s Mode", "P2P");
-            } else if (mu_slippi_pick_service() == 1) {
-                set_header("YouGame", "Friends");
             } else {
                 set_header("Slippi", "Direct");
             }
             break;
-        case MU_SLP_MODE_RANKED: ranked_header(rank_lines[0]); break;
+        case MU_SLP_MODE_RANKED: set_header("Slippi", "Ranked"); break;
         case MU_SLP_MODE_TEAMS:
-            if (mu_slippi_pick_service() == 1) set_header("YouGame", "Doubles");
-            else set_header("Slippi", "Teams");
+            set_header("Slippi", "Teams");
             break;
-        case MU_SLP_MODE_PARTY: set_header(header_service(conn), "Party"); break;
+        case MU_SLP_MODE_PARTY: set_header("Slippi", "Party"); break;
         default: set_text(ST_HEADER, "Error"); break;
         }
     }
 
-#if MU_SQUAD
-    /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-    if (gmSquad_OnlineChosen()) {
-        set_text(ST_RANK_OPPONENT, "Squad Strike by Chris x9x9x9x9x9. Idea by Tyler");
-        HSD_SisLib_803A7548(dt.text, ST_RANK_OPPONENT, 0.28f, 0.28f);
-    }
-#endif
-    /* Hand the old R1 rows to RankInfo and the authoritative result reveal. */
-    /* The rank panel, also under the launcher's YouGame Ranked row (the host answers its rank reads there too). */
-    if (st->mode == MU_SLP_MODE_RANKED && (mu_slippi_ranked_available() || mu_slippi_yougame_pick())) {
+    if (st->mode == MU_SLP_MODE_RANKED && mu_slippi_ranked_available()) {
         for (i = 0; i < 5; i++) {
             set_text(ST_RANK_OPPONENT + i, "");
         }
@@ -1123,7 +878,7 @@ static void text_think(HSD_GObj* gobj)
                              conn == MU_SLP_MM_OPPONENT_CONNECTING ? "Found:" : "");
     set_text(ST_PLAYING_OPP, conn == MU_SLP_MM_CONNECTION_SUCCESS ||
                            conn == MU_SLP_MM_OPPONENT_CONNECTING ? opp_name : "");
-    if (conn == MU_SLP_MM_CONNECTION_SUCCESS && !p2p && !mu_ranked_practice()) {
+    if (conn == MU_SLP_MM_CONNECTION_SUCCESS && !p2p) {
         /* A keyboard has no D-pad: name its four chat keys (up, left, right, down) instead. */
         char du[16], dl[16], dr[16], dd[16], chat[80];
         if (ctrl_port != NULL && mu_host_button_label(*ctrl_port, HSD_PAD_DPADUP, du, sizeof du) &&
@@ -1144,27 +899,15 @@ static void text_think(HSD_GObj* gobj)
         else picks[0] = 0;
         set_text(st_opp_picks, picks);
     }
-#if defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH
-    if (mu_slippi_practice_available()) {
-        snprintf(prompt, sizeof prompt, "%s: Practice vs CPU", z_key);
-        set_text(ST_PRESS_D, prompt);
-    }
-#endif
 
     /* Press / hold Z (the keyboard player's key for it) */
     prompt[0] = 0;
     if (conn == MU_SLP_MM_CONNECTION_SUCCESS) {
         snprintf(prompt, sizeof prompt, "Hold %s to disconnect", z_key);
-    } else if (updating) {
-        snprintf(prompt, sizeof prompt, "Press %s, then hold %s to update", z_key, b_key);
     } else if (conn == MU_SLP_MM_ERROR) {
         snprintf(prompt, sizeof prompt, "Press %s to clear error", z_key);
     } else if (conn > MU_SLP_MM_IDLE) {
         snprintf(prompt, sizeof prompt, "Press %s to cancel", z_key);
-    } else if (conn == MU_SLP_MM_IDLE && st->mode == MU_SLP_MODE_UNRANKED && unranked_opponent_left()) {
-        /* Unranked: the opponent left mid-game or between games. Said where "Hold Z to disconnect"
-         * stood, until the next search (the host clears it on Start). */
-        strcpy(prompt, "Opponent left");
     }
     set_text(ST_PRESS_Z, prompt);
 
@@ -1178,10 +921,6 @@ static void text_think(HSD_GObj* gobj)
     }
 
     if (conn == MU_SLP_MM_ERROR
-#if MU_SQUAD
-        /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-        || gmSquad_OnlineError()[0] /* empty unless chosen, but for "Waiting for your friend's game..." */
-#endif
     ) {
         /* Wrap the error at 30 letters on the last space (Shift-JIS pairs count as one). The line
          * index state carries over between lines exactly as the asm's registers do. */
@@ -1189,15 +928,7 @@ static void text_think(HSD_GObj* gobj)
         int sub = ST_ERR1, line_idx = 0, line_len = 0, last_space = 0, start = 0;
         u8 c;
         memset(buf, 0, sizeof buf);
-#if MU_SQUAD
-        if (gmSquad_OnlineError()[0])
-            strncpy((char*) buf, gmSquad_OnlineError(), 241);
-        else
-#endif
-        if (updating)
-            strncpy((char*) buf, "A new version is ready. It installs when you leave this screen, then brings you back to Online.", 241);
-        else if (link_line[0]) memcpy(buf, link_line, sizeof link_line);
-        else memcpy(buf, m->error, 241);
+        memcpy(buf, m->error, 241);
         for (;;) {
             int set = 0;
             int pos = start + line_idx;
@@ -1253,12 +984,6 @@ static void text_think(HSD_GObj* gobj)
             dt.spinner[1] = 1;
             goto spinners;
         }
-        if (doubles_waiting && m->local_ready == 0) {
-            snprintf(prompt, sizeof prompt, "Match closed. Hold %s to exit", b_key);
-            set_text(idx, doubles_closed ? prompt : "Connecting to players");
-            dt.spinner[1] = doubles_closed ? 0 : 1;
-            goto spinners;
-        }
         if (m->local_ready == 0) {
             const char* action;
             if ((st->mode == MU_SLP_MODE_DIRECT || st->mode == MU_SLP_MODE_TEAMS) &&
@@ -1292,8 +1017,7 @@ static void text_think(HSD_GObj* gobj)
                 set_text_fmt(idx, "Connecting to %s", opp_name[0] ? opp_name :
                              generic ? "opponent" : opp_code);
             } else {
-                if (link_line[0]) set_text(idx, link_line);
-                else set_text_fmt(idx, "Searching for %s", generic ? "opponent" : opp_code);
+                set_text_fmt(idx, "Searching for %s", generic ? "opponent" : opp_code);
             }
         }
         dt.spinner[2] = 1;
@@ -1361,13 +1085,7 @@ void mu_slippi_css_text_init(void)
             create_subtext(t, &color_red, 0.4f, 70.0f, err_y[i]);
         }
     }
-#if MU_SQUAD
-    /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-    /* Direct too: a friend room may turn squads on after this screen opened (gmSquad_OnlineFriendJoin). */
-    if (gmSquad_OnlineChosen() || mu_slippi_state()->mode == MU_SLP_MODE_DIRECT)
-        create_subtext(t, &color_gray, 0.28f, 70.0f, 118.0f);   /* the credit: left-aligned with the header, under the status lines */
-#endif
-    if (mu_slippi_state()->mode == MU_SLP_MODE_RANKED && (mu_slippi_ranked_available() || mu_slippi_yougame_pick())) {
+    if (mu_slippi_state()->mode == MU_SLP_MODE_RANKED && mu_slippi_ranked_available()) {
         for (i = 0; i < 5; i++) {
             create_subtext(t, &color_white, 0.32f, 70.0f, 178.0f + (float) i * 18.0f);
         }

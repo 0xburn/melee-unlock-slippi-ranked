@@ -209,7 +209,6 @@ _Static_assert(MU_DISPLAY_NO_FIGHTER_SHADOWS == MU_DISPLAY_OPTION_NO_FIGHTER_SHA
 _Static_assert(MU_DISPLAY_CENTER_2P_HUD == MU_DISPLAY_OPTION_CENTER_2P_HUD, "display option bits");
 _Static_assert(MU_DISPLAY_BOOT_TO_CSS == MU_DISPLAY_OPTION_BOOT_TO_CSS, "display option bits");
 
-int mu_console_active(void);
 
 /* The camera's shake is the viewer's own. Online it may only be lowered: the camera decides which fighters count as
  * on screen, and only those get their bones refreshed for the next frame's gameplay (ftLib_80086A8C, mu_online.c
@@ -219,7 +218,6 @@ int mu_console_active(void);
 float mu_screen_shake_scale(void)
 {
     if (!mu_host || mu_host->version < 27 || !mu_host->screen_shake_scale) return 1.0f;
-    if (mu_console_active()) return 1.0f;
     const float scale = mu_host->screen_shake_scale();
     if (!(scale >= 0.0f && scale <= 4.0f)) return 1.0f;
     return scale > 1.0f && (mu_online_active() || mu_online_pending()) ? 1.0f : scale;
@@ -353,8 +351,6 @@ MU_EXPORT int32_t mu_game_entry(const MuHostApi* host, MuGameApi* game)
     game->state_regions = mu_state_regions;
     game->state_exclusions = mu_snapshot_exclusions;
     game->snapshot_ranges = mu_snapshot_ranges;
-    extern int mu_css_transfer(int, void*, unsigned);
-    game->css_state = mu_css_transfer;
     game->practice = (int32_t (*)(int32_t, int32_t*, int32_t)) mu_practice_bridge;
     return 0;
 }

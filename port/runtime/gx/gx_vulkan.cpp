@@ -64,7 +64,6 @@ void vulkan_forget_failed_starts() {}
 #else
 #include "exi_slippi.h"
 #endif
-#include "yougame_parity.h"
 #include "window.h"
 #include "sim_work.h"
 #include "fullscreen_state.h"
@@ -79,7 +78,6 @@ void vulkan_forget_failed_starts() {}
 #ifdef GX_PC_SETTINGS
 #include "pc_settings.h"
 #include "arena_panel.h"
-#include "coming_soon_overlay.h"
 #include "lab_view.h"
 #include "pc_settings_shared.h"
 #include "texture_pack.h"
@@ -1754,8 +1752,6 @@ class VulkanBackend final : public Backend {
       settings_set_game_aspect(presented_aspect(opts_, client_w_, client_h_, frame_widenable_));
       settings_set_hud_snapshot(frame);
       const bool old_vsync = opts_.vsync;
-      // With a shader preset the Coming soon stickers go into the picture, under the preset (as Direct3D).
-      coming_soon_overlay::set_in_picture(shader_was_on_ && imgui_picture_pipeline_ != VK_NULL_HANDLE);
       arena_panel::set_under_hand(frame.under_hand_command >= 0 && !card_failed_, 640.0f * (float)scale_);   // drawn in the command loop
       if (settings_frame(settings_state_, opts_)) {
         apply_fullscreen_mode();
@@ -1887,7 +1883,6 @@ class VulkanBackend final : public Backend {
       else if (r != VK_SUCCESS) check(r, "present");
       ++presented_;
       if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
-        yougame::parity::signals.presented(real_frame);
         if (real_frame) host::startup_first_frame();
 #ifndef _WIN32
         host::window_presented(presented_);
@@ -2664,7 +2659,6 @@ class VulkanBackend final : public Backend {
     // console's picture (640 columns by the lines sent to the display), and the preset's passes draw
     // it onto the window after the bars and border art. Presets are written for that picture.
     const bool shader_on = test_fill < 0 && prepare_shader(c);
-    shader_was_on_ = shader_on;
     if (shader_on) draw_shader_source(c, w, h);
     vkCmdBeginRendering(f.cmd, &info);
     // Kept for the shader preset path, which clears the whole window: the art is painted again in
@@ -3074,14 +3068,6 @@ class VulkanBackend final : public Backend {
     vkCmdSetScissor(f.cmd, 0, 1, &sc);
     const VkExtent2D into{shader_source_.width, shader_source_.height};
     present_picture(c, w, h, &into);
-#ifdef GX_PC_SETTINGS
-    // The Coming soon stickers, into the picture before the preset draws it (coming_soon_overlay.h).
-    if (settings_ui_ready() && imgui_picture_pipeline_ != VK_NULL_HANDLE) {
-      ImDrawData data;
-      if (coming_soon_overlay::picture_draw_data(&data, (float)shader_source_.width, (float)shader_source_.height))
-        ImGui_ImplVulkan_RenderDrawData(&data, f.cmd, imgui_picture_pipeline_);
-    }
-#endif
     vkCmdEndRendering(f.cmd);
     barrier(f.cmd, shader_source_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   }
@@ -3418,8 +3404,6 @@ class VulkanBackend final : public Backend {
     ImGui_ImplVulkan_InitInfo info{};
     info.ApiVersion = VK_API_VERSION_1_3; info.Instance = instance_; info.PhysicalDevice = physical_; info.Device = device_;
     info.QueueFamily = queue_family_; info.Queue = queue_; info.DescriptorPoolSize = 64;
-    // Buffers for three overlay draws per swap image: the panel each frame, and the Coming soon
-    // stickers drawn into a shader preset's picture as well, with frames in flight.
     info.MinImageCount = 2; info.ImageCount = (uint32_t)std::max<size_t>(swap_images_.size(), 2) * 4;   // and the Arena card under the hands
     info.UseDynamicRendering = true;
     info.PipelineInfoMain.PipelineRenderingCreateInfo = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -3427,12 +3411,10 @@ class VulkanBackend final : public Backend {
     info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swap_format_;
     settings_ready_ = ImGui_ImplVulkan_Init(&info);
     if (!settings_ready_) { host::log("vulkan: settings panel unavailable"); settings_context_destroy(); return; }
-    // The overlay pipeline again for the shader preset's picture texture (R8G8B8A8, prepare_shader).
+    // The EFB used by the Arena card uses R8G8B8A8.
     static const VkFormat kPictureFormat = VK_FORMAT_R8G8B8A8_UNORM;
     ImGui_ImplVulkan_PipelineInfo picture = info.PipelineInfoMain;
     picture.PipelineRenderingCreateInfo.pColorAttachmentFormats = &kPictureFormat;
-    imgui_picture_pipeline_ = ImGui_ImplVulkan_CreateExtraPipeline(&picture);
-    if (imgui_picture_pipeline_ == VK_NULL_HANDLE) host::log("vulkan: no overlay pipeline for the preset picture; Coming soon stays over the window");
     card_info_ = picture;   // the EFB is R8G8B8A8 too; its sample count is set per pipeline (card_pipeline)
   }
   // The overlay pipeline for the EFB at its current sample count, for the Arena card under the hands.
@@ -3453,7 +3435,6 @@ class VulkanBackend final : public Backend {
   }
   void destroy_settings_ui() {
     if (!settings_ready_) return;
-    if (imgui_picture_pipeline_ != VK_NULL_HANDLE) { vkDestroyPipeline(device_, imgui_picture_pipeline_, nullptr); imgui_picture_pipeline_ = VK_NULL_HANDLE; }
     for (auto& [samples, p] : card_pipelines_) if (p != VK_NULL_HANDLE) vkDestroyPipeline(device_, p, nullptr);
     card_pipelines_.clear();
     ImGui_ImplVulkan_Shutdown();
@@ -3462,7 +3443,6 @@ class VulkanBackend final : public Backend {
   }
   SettingsState settings_state_;
   bool settings_ready_ = false;
-  VkPipeline imgui_picture_pipeline_ = VK_NULL_HANDLE;   // the overlay for the preset's picture texture
   ImGui_ImplVulkan_PipelineInfo card_info_{};
   std::map<VkSampleCountFlagBits, VkPipeline> card_pipelines_;   // the overlay for the EFB, by sample count
   bool card_failed_ = false, under_hand_logged_ = false;
@@ -3508,7 +3488,6 @@ class VulkanBackend final : public Backend {
   VkDescriptorSetLayout present_set_layout_ = VK_NULL_HANDLE;
   VkPipelineLayout present_layout_ = VK_NULL_HANDLE;
   VkPipeline present_plain_ = VK_NULL_HANDLE, present_crt_ = VK_NULL_HANDLE, present_plain_rgba_ = VK_NULL_HANDLE;
-  bool shader_was_on_ = false;   // last frame drew through a shader preset (the Coming soon stickers go into it)
   Image shader_source_;   // the picture at the console's own size, for a shader preset (user_shader.h)
   std::unordered_map<uint64_t, VkShaderModule> modules_;
   std::unordered_map<PipelineKey, VkPipeline, PipelineKeyHash> pipelines_;

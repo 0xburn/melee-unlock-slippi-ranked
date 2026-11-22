@@ -57,7 +57,7 @@ static void linux_crash_dialog(const char* head, bool stopped) {
       ? "\n\nMelee Unlocked stopped with an error. The launcher can send this report: it asks once you close this message. "
       : "\n\nMelee Unlocked crashed. The launcher can send this report: it asks once you close this message. ") +
       "If you started the game without the launcher, please send melee_port.log and melee_port_crash.txt from the game folder "
-      "with your bug report (https://github.com/hero88go/melee-unlocked/issues).";
+      "with your bug report (https://github.com/0xburn/melee-unlocked/issues).";
   MessageBoxA(nullptr, text.c_str(), "Melee Unlocked", MB_ICONERROR | MB_OK);
 }
 
@@ -157,12 +157,7 @@ static void linux_crash_signal(int sig, siginfo_t* si, void* uc_void) {
   host::log("%s", head);
   host::log_flush();
   linux_crash_dialog(head, false);
-  if (yougame::active()) {   // the app's "stopped" notice reads this line (yougame_mode_policy.h crash_line)
-    char reason[160];
-    std::snprintf(reason, sizeof reason, "signal %d (%s) in %s", sig, strsignal(sig), module);
-    std::fprintf(stderr, "%s\n", yougame::mode_policy::crash_line(reason).c_str());
-    std::fflush(stderr);
-  }
+
   signal(sig, SIG_DFL);
   raise(sig);
 }
@@ -199,8 +194,5 @@ static void die_report(const char* message) {
     std::fclose(f);
   }
   linux_crash_dialog(head, true);
-  if (yougame::active()) {   // the app's "stopped" notice reads this line (yougame_mode_policy.h crash_line)
-    std::fprintf(stderr, "%s\n", yougame::mode_policy::crash_line(message).c_str());
-    std::fflush(stderr);
-  }
+
 }

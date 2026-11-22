@@ -1,8 +1,7 @@
 
 # Melee Unlocked 1.0
 
-A native Windows and Linux build of Super Smash Bros. Melee (NTSC 1.02) with **Slippi and YouGame
-online play** and an **unlocked display frame rate.** It has two engines, and the launcher lets you pick.
+A native Windows and Linux build of Super Smash Bros. Melee (NTSC 1.02) with **Slippi online play** and an **unlocked display frame rate.** It has two engines, and the launcher lets you pick.
 
 **Source Port (the main build).** The game is compiled for Windows from C source code, the
 decompilation of Melee, and built as a native library. No GameCube code is run, emulated or
@@ -75,24 +74,19 @@ are included with Melee Unlocked.
 <img width="1600" height="1040" alt="image" src="https://github.com/user-attachments/assets/91256ba3-b118-48c8-9ead-ebe42c2d78f4" />
 
 
-- Unlocked frame rate (monitor rate, a fixed cap, or fully unlocked) with sub-frame animation
-- Slippi online against regular Slippi Dolphin players, using your Slippi Launcher login
-- YouGame online from the game's own menu: Ranked, Unranked, Friends, Doubles (2v2 with a friend) and
-  Squad Strike (four fighters, one stock each), with no YouGame app or browser needed. Unranked can
-  search YouGame, Slippi or both at once. See [YouGame online](#yougame-online)
-- Play while you search: keep training (or warm up in Training) while a YouGame search runs; a short
-  countdown takes you to the match when one is found
-- Arena rooms: Direct > Arena, with invites, on Slippi and on YouGame
-- Lower latency: with the frame rate uncapped a new game frame reaches the screen the moment it is
-  ready, and V-Sync is off unless you turn it on. Predict mode eases turns and stops back over a few
-  frames and moves falls, runs, dashes and wavedashes at the display's rate
+- Melee advances movement, collisions, hitboxes and game inputs at 60 Hz. The threaded renderer
+  can draw intermediate poses at the monitor rate, at a fixed cap up to 480 FPS, or uncapped.
+  Predict mode estimates motion between ticks and eases back toward confirmed poses when a fighter
+  turns or stops. The full Mac gameplay build currently presents at 60 Hz. Input-to-screen latency
+  depends on the display pipeline and has not been measured for this fork.
+- Online play uses the account signed in through Slippi Launcher. Ranked uses Slippi matchmaking.
 - A second controller without a GameCube adapter: Controls lists pads that are plugged in but not
   playing, each with a Play as P2 (P3, P4) button
 - Box controllers: b0xx-ahk (through vJoy) and HayBox boxes in DInput mode get their layout automatically
 - Replay Viewer: pause, the progress bar, fast forward, jumps between tips and Take over a player
-- Subframe rollback (early inputs) between Melee Unlocked players: button presses and stick moves
-  are sent the moment they happen, between frames, so the other game predicts them sooner. Based on
-  Arte's subframe rollback work (see Credits)
+- Optional early inputs between two Melee Unlocked peers. With the setting enabled, a sampler
+  polls between game ticks and sends changes to the peer. Early rollback on a contradicted prediction
+  is a separate opt-in. See the [measurements and test setup](docs/announcement-verification.md).
 - GameCube adapter (WUP-028 with the WinUSB driver), keyboard fallback
 - DLSS / DLAA (NVIDIA Streamline), internal resolution up to 8x, SSAA, anisotropic filtering,
   sharpening, borderless fullscreen, VSync
@@ -128,16 +122,8 @@ are included with Melee Unlocked.
 
 ## Install
 
-For launchers exposing vanilla, ACE, and Akaneia as separate entries, see
-[separate YouGame listings](docs/yougame-listings.md). `--vanilla-only` forces vanilla gameplay
-for one session while preserving the engine's native mod support and saved mod choices.
-
-Download `MeleeUnlocked-<version>-win64.zip` from [Releases](https://github.com/hero88go/melee-unlocked/releases)
-and extract it anywhere. On Linux, download `MeleeUnlocked-<version>-linux-x86_64.tar.gz`, extract it
-and run `./MeleeUnlocked` (its README covers GameCube adapter setup). Mac is experimental: build it
-from source with `port/mac/build_full.py`. The RTX Pack (NVIDIA RTX and RTX Remix) downloads from
-Video > Ray tracing in the game. Then pick one of two ways to run it. **The launcher is optional**;
-the game does not depend on it, and the manual way is complete on its own.
+This fork is built from source. Use your own Melee NTSC 1.02 ISO.
+The launcher is optional. For macOS, see [the Mac build instructions](port/mac/README.md).
 
 ### Manual (no launcher)
 
@@ -190,7 +176,7 @@ Either drag the ISO onto `play.bat` in a clone of this repo (it installs Python,
 Visual Studio 2022 Build Tools with winget if missing, then builds and starts the game), or:
 
 ```powershell
-git clone https://github.com/hero88go/melee-unlocked.git
+git clone https://github.com/0xburn/melee-unlocked.git
 cd melee-unlocked
 python tools/extract_dol.py "C:/path/to/melee.iso" build/main.dol
 python port/recomp/recomp.py --dol build/main.dol --gct-base 0x8065CC80
@@ -330,9 +316,15 @@ Add `--hidden` to play it without a window, and `--volume 0` for no sound.
 
 ## Slippi online
 
-Everything Slippi Dolphin does for netplay is built in: matchmaking, rollback netcode, the
-Slippi code set, replay recording, game reporting. Slippi Dolphin itself is not needed and is
-not touched.
+The native client sends matchmaking requests to Slippi and connects directly to the assigned opponents. Slippi runs the queue and checks Ranked eligibility for the signed-in account. The client handles peer input, rollback and match reporting.
+
+Ranked has been exercised against a local matchmaking fixture using the stock Dolphin 3.7 client
+and through complete local sets between two instances of the fork. Slippi's production service
+has not yet accepted a set from this fork in our tests.
+
+On macOS, sign in through Slippi Launcher, open the packaged MeleeUnlocked.app and choose your
+NTSC 1.02 disc on the first launch. Select **Online → Ranked** in the game. The fork reads the
+existing Slippi sign-in and connects directly to the official service.
 
 **Is the Slippi Launcher required?** For online play, yes: a Slippi account is required and
 accounts are created and logged in only through the [Slippi Launcher](https://slippi.gg/downloads).
@@ -354,28 +346,9 @@ network; this experimental mode has no relay or guaranteed global chat history.
 See the [lobby setup and limitations](lobby/README.md).
 
 
-## YouGame online
-
-Online Play has a YouGame page and a Slippi page; press Z to switch between them. The YouGame page
-has Ranked, Unranked, Friends, Doubles and Squad Strike, and all of them play straight from the game.
-
-- **Connect once** from the launcher's Play page; after that the launcher connects by itself. If the
-  YouGame app is running and signed in, the launcher uses that account.
-- **Unranked** searches YouGame, Slippi or both: left and right (or L and R) on the Unranked row
-  choose, and the game remembers it.
-- **Friends** opens YouGame's friend picker and lobby. **Doubles** is 2v2 with a friend.
-  **Squad Strike** (by Chris x9x9x9x9x9, idea by Tyler): pick four fighters and play them in order,
-  one stock each.
-- **Play while you search**: press B on the character select during a search and keep searching, or
-  hold L and R (or pick WARM UP) to go to Training. A banner shows the mode and the search time.
-  Game > Online sets whether you are asked and which banner you see.
-- **Launch with YouGame extension** (launcher) adds the YouGame button and its Shift+Tab menu in the
-  game, and starts the YouGame app in the background when it is installed.
-- After a new release, YouGame modes open once YouGame lists that version, usually within two hours.
-
 ## Bug reports
 
-Open a [GitHub issue](https://github.com/hero88go/melee-unlocked/issues) using the template.
+Open a [GitHub issue](https://github.com/0xburn/melee-unlocked/issues) describing what happened.
 Attach `melee_port.log` from the game folder, your `port-settings.ini`, and the .slp replay if
 the bug happened in a match.
 

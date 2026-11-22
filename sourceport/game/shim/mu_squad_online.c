@@ -14,7 +14,6 @@ int snprintf(char* buffer, __SIZE_TYPE__ size, const char* format, ...);
 #include <melee/lb/lbfile.h>
 #include <melee/ef/types.h>
 #include <mu_native.h>
-#include <mu_lobby_wire.h>
 
 static bool online_chosen, online_ready, host_supported, selection_accepted;
 /* Squad Strike in a friend room (Direct): each lock-in carries its lineup, there is no search. */
@@ -28,9 +27,7 @@ void gmSquad_LobbyChoose(bool chosen)
 }
 bool gmSquad_LobbyAdmission(void)
 {
-    u8 op = MU_LOBBY_OP_SQUAD_ADMISSION;
-    if (!gmSquad_OnlineBudget()) return false;
-    return mu_lobby_send(&op, 1) != 0;
+    return false;
 }
 /* A friend room's lock-in, held until the friend's game is heard from (MU_SQUAD_ROOM_WAITING).
  * It is the one line shown without Squad Strike chosen: the friend may still pick it. */
@@ -345,11 +342,11 @@ bool gmSquad_OnlineBudget(void)
     u32 main_bytes, animation_bytes;
     int ck, color, target, i;
     unsigned got = 0;
-    if (!online_chosen && !mu_lobby_css()) return false;
+    if (!online_chosen) return false;
     /* Every check below sets its own refusal again: drop a stale one before re-checking. */
     if (search_refused) online_error = "";
     search_refused = false;
-    if (!host_supported && !mu_lobby_css()) {
+    if (!host_supported) {
         online_error = online_friend ? friend_refused : "Host has no Squad Strike support. Search refused.";
         search_refused = true;
         OSReport("squad: host has no squad support, search refused\n");

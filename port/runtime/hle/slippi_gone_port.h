@@ -7,7 +7,7 @@
 #include <limits>
 #include <vector>
 
-#include "../abi/mu_friends_lobby.h"
+#include "../abi/mu_build_capabilities.h"
 
 namespace slippi {
 
@@ -30,7 +30,7 @@ struct PeerBuildRow {
 };
 
 // Whether every peer reads a port that has left the same way we would. All of them must have told us so:
-// a plain Slippi peer or an older YouGame build keeps Slippi's read, and one player using another rule splits the match.
+// a plain Slippi peer or an older build keeps Slippi's read, and one player using another rule splits the match.
 inline bool EveryPeerReadsGoneOwnFrames(const PeerBuildRow* rows, int count) {
   if (count <= 0) return false;
   for (int i = 0; i < count; ++i)

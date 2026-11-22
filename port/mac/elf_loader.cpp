@@ -68,7 +68,7 @@ uintptr_t import(const char* name) {
     IMPORT(fflush), IMPORT(fopen), IMPORT(getenv), IMPORT(fabsf), IMPORT(strcmp),
     IMPORT(fprintf), IMPORT(atoi),
     {"fabs",reinterpret_cast<uintptr_t>(static_cast<double(*)(double)>(&::fabs))},
-    IMPORT(snprintf), IMPORT(memmove),
+    IMPORT(snprintf), IMPORT(memmove), IMPORT(malloc), IMPORT(free), IMPORT(strcat),
     IMPORT(sqrtf), IMPORT(fwrite)
   };
   // fabs[f] is exact sign-bit clearing; sqrtf is IEEE single precision on x86.

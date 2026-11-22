@@ -1,8 +1,6 @@
-/* Shared baked menu art and native SIS description parsing. */
+/* Native SIS description parsing. */
 #ifndef MU_MENU_LABEL_H
 #define MU_MENU_LABEL_H
-#include "mu_menu_label_art.h"
-#include "mu_doubles_label_art.h"
 
 /* SIS command lengths from HSD_SisLib_803A6478. Read operands, including
  * embedded zeroes, rather than treating an encoded stream as a C string. */

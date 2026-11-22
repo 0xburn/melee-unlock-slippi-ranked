@@ -16,10 +16,6 @@
 /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
 #include "mu_squad.h"
 #endif
-#include "mu_yougame_pause.h"
-#include "mu_tourney.h"
-#include "mu_tourney_game.h"
-#include "mu_doubles_game.h"
 #include <dolphin/os.h>
 #include <melee/ft/fighter.h>
 #include <melee/ft/types.h>
@@ -32,13 +28,9 @@ enum { MU_PR_SCENE, MU_PR_GET_PLAYER, MU_PR_SET_PLAYER, MU_PR_GET_STAGE, MU_PR_S
        MU_PR_TRAINING_STAGE, MU_PR_UNLOCKED, MU_PR_PAGE_PAUSE, MU_PR_CSS_PICK, MU_PR_FRIENDS_RETURN };
 
 extern StaticPlayer player_slots[];
-int mu_friends_css_pick(int* a);
 int mu_boot_match_boot(void);
 void mu_boot_match_enter_mode(int mode);
 enum { MU_PR_BOOT_MATCH = 35 };   /* MU_PRACTICE_BOOT_MATCH, checked in mu_entry.c */
-void mu_friends_css_reset(void);
-void mu_slippi_return_to_friends(void);
-void mu_slippi_note_friends_css(void);
 struct gm_80479D58_t* mu_gm_engine_state(void);
 
 /* An explicit practice handoff owns one pending destination while the origin scene runs
@@ -60,10 +52,6 @@ int mu_practice_resolve_pending_mode(int requested)
 
 void mu_practice_enter_mode(int mode)
 {
-#ifdef MELEE_DOUBLES
-    mu_doubles_enter_mode(mode);
-#endif
-    mu_tourney_enter_mode(mode);
     mu_boot_match_enter_mode(mode);
     if (practice_pending_mode >= 0) {
         practice_pending_mode = practice_origin_mode = -1;
@@ -71,20 +59,6 @@ void mu_practice_enter_mode(int mode)
 }
 
 int mu_practice_bridge(int op, int* a, int n);
-void mu_friends_css_enter(CSSData* css)
-{
-    static int applied;
-    unsigned char query = 10, response[4];
-    unsigned int got = 0;
-    int a[3];
-    int mu_online_abi_command(unsigned int, const unsigned char*, unsigned int, unsigned char*, unsigned int, unsigned int*);
-    if (applied || mu_online_abi_command(0xE6, &query, 1, response, 4, &got) != 0 || got != 4) return;
-    applied = 1;
-    a[0] = response[0]; a[1] = response[1]; a[2] = response[2];
-    mu_practice_bridge(MU_PR_SET_EVENT_BACKUP, a, 3);
-    css->vs.start.players[response[3] - 1].ckind = response[0];
-    css->vs.start.players[response[3] - 1].color = response[1];
-}
 
 int mu_practice_bridge(int op, int* a, int n)
 {
@@ -95,30 +69,6 @@ int mu_practice_bridge(int op, int* a, int n)
     case MU_SQUAD_TEST_SETUP:
         return gmSquad_OnlineTest(a, n);
 #endif
-    case MU_PR_CSS_PICK:
-        if (n < 3 || gm_GetCurrentGameMode() != GM_VS || gm_GetCurrentSceneIndex() != 0) return -1;
-        if (mu_friends_css_pick(a) != 0) return -1;
-        mu_slippi_note_friends_css();
-        return 0;
-    case MU_PR_FRIENDS_RETURN:
-        mu_slippi_return_to_friends();
-        if (gm_GetCurrentGameMode() == GM_MENU) return 0;
-        a[0] = GM_MENU;
-        return mu_practice_bridge(MU_PR_REQUEST_MAJOR,a,1);
-    case MU_TOURNEY_TICK_OP:
-        mu_tourney_poll();
-        return 0;
-    case MU_TOURNEY_QUIT_OP:
-        mu_tourney_quit();
-        return 0;
-    case MU_TOURNEY_BOOT_OP: {
-        int major = GM_VS;
-        /* A late first hello may enter only from the main menu, using its normal unload. */
-        if (gm_GetCurrentGameMode() != GM_MENU || !mu_tourney_boot()) return -1;
-        return mu_practice_bridge(MU_PR_REQUEST_MAJOR, &major, 1);
-    }
-    case MU_PR_PAGE_PAUSE:
-        return mu_yougame_page_pause(a, n);
     case MU_PR_BOOT_MATCH:
         return mu_boot_match_boot();
     case MU_PR_SCENE:
@@ -172,7 +122,6 @@ int mu_practice_bridge(int op, int* a, int n)
         /* Leave the current scene for `major`: the pending mode plus the engine's leave flag, so a
          * Training minor that never ends on its own runs its decide path on the next frame. */
         if (n < 1) return -1;
-        if (a[0] == GM_VS) mu_friends_css_reset();
         practice_origin_mode = gm_GetCurrentGameMode();
         practice_pending_mode = a[0];
         gm_ChangeGameModeAfterCurrentScene(a[0]);

@@ -7,16 +7,9 @@
 #include <dbghelp.h>
 #include <tlhelp32.h>
 #include <psapi.h>
-#include "yougame_link.h"
-#include "yougame_update.h"
 #ifdef MELEE_SOURCE_PORT
 #include "replay_bar.h"
-#include "yougame_console_boot.h"
-#include "yougame_console_engine.h"
-#include "yougame_console_entry.h"
 #endif
-#include "yougame_mode_policy.h"
-#include "yougame_memcard.h"
 #include "host.h"
 #include "sysgen_boot.h"
 #include "gameplay_policy.h"
@@ -57,7 +50,6 @@
 #include "render_options.h"
 #include "gx_retro.h"
 #include "pc_settings.h"
-#include "yougame_display_defaults.h"
 #include "texture_pack.h"
 #include "cosmetic_mods.h"
 #include "disc_skin_scan.h"
@@ -75,16 +67,6 @@
 namespace app { int run_settings_window(gx::RenderOptions& options, unsigned long standby_parent, std::function<void()> reload); }
 #ifdef MELEE_SOURCE_PORT
 #include "source_host.h"
-#endif
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_test.h"
-#include "yougame_ranked_cpu.h"
-#include "yougame_agent_script.h"
-#include "yougame_agent_pad.h"
-#include "yougame_agent_fight.h"
-#ifndef MELEE_SOURCE_PORT
-#include "yougame_agent_static.h"
-#endif
 #endif
 #include <chrono>
 #include <cwctype>
@@ -1159,16 +1141,10 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS* info) {
     // game closes: a player in an online match pressed OK mid-game expecting to play on.
     std::string text = std::string(head) + "\n\nMelee Unlocked crashed and closes when you press OK. The launcher can then send this "
                        "report. If you started the game without the launcher, please send melee_port.log, melee_port_crash.txt and "
-                       "melee_port_crash.dmp from the game folder with your bug report (https://github.com/hero88go/melee-unlocked/issues).";
+                       "melee_port_crash.dmp from the game folder with your bug report (https://github.com/0xburn/melee-unlocked/issues).";
     MessageBoxA(nullptr, text.c_str(), "Melee Unlocked", MB_ICONERROR | MB_OK);
   }
-  if (yougame::active()) {   // the app's "stopped" notice reads this line (yougame_mode_policy.h crash_line)
-    char reason[160];
-    std::snprintf(reason, sizeof reason, "exception %08lX in %s", er->ExceptionCode,
-                  std::strrchr(module_name, '\\') ? std::strrchr(module_name, '\\') + 1 : module_name);
-    std::fprintf(stderr, "%s\n", yougame::mode_policy::crash_line(reason).c_str());
-    std::fflush(stderr);
-  }
+
   return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -1267,13 +1243,10 @@ static void die_report(const char* message) {
     std::string text = std::string(head) + "\n\nMelee Unlocked stopped with an error and closes when you press OK. The launcher can then "
                        "send this report. If you started the game without the launcher, please send melee_port.log, "
                        "melee_port_crash.txt and melee_port_crash.dmp from the game folder with your bug report "
-                       "(https://github.com/hero88go/melee-unlocked/issues).";
+                       "(https://github.com/0xburn/melee-unlocked/issues).";
     MessageBoxA(nullptr, text.c_str(), "Melee Unlocked", MB_ICONERROR | MB_OK);
   }
-  if (yougame::active()) {   // the app's "stopped" notice reads this line (yougame_mode_policy.h crash_line)
-    std::fprintf(stderr, "%s\n", yougame::mode_policy::crash_line(message).c_str());
-    std::fflush(stderr);
-  }
+
 }
 
 #else
@@ -1311,26 +1284,13 @@ static void arm_test_crash(bool automated) {
   }).detach();
 }
 
-#ifdef YOUGAME_AGENT_TEST_HOOK
-// agent-test.json stopAt:<frame> (hook builds only): host::die at that frame, so the app's "stopped"
-// notice can be tested end to end: exit 3 and the last stderr line "crash: agent test: stop at frame N".
-// It counts frames like MELEE_TEST_CRASH and runs on a thread of its own.
-static void arm_agent_stop(int frame) {
-  host::log("[yougame] agent test: stop armed for frame %d", frame);
-  std::thread([frame] {
-    const auto now = [] { return std::max(host::profiler_frame_id(), host::retrace_count()); };
-    while (now() < unsigned(frame)) Sleep(1);
-    host::die("agent test: stop at frame %d", frame);
-  }).detach();
-}
-#endif
 
 // Records the disc this run used, next to the launcher's own settings. However the game was
 // started (a batch file, a shortcut, the launcher, a development command line), the launcher can
 // then offer that disc instead of leaving Play greyed out with an empty box.
 static void remember_iso(const std::string& iso) {
 #ifdef __APPLE__
-  (void)iso; return;  // YouGame owns its launch history; do not write launcher state elsewhere.
+  (void)iso; return;  // This records a disc in the Windows launcher's LOCALAPPDATA directory.
 #endif
   char full[MAX_PATH];
   if (!GetFullPathNameA(iso.c_str(), MAX_PATH, full, nullptr)) return;
@@ -1666,11 +1626,18 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 #ifdef __APPLE__
 #include "../mac/full_launch.h"
 int main(int argc, char** argv) {
-  auto args = mac_host::full_launch_arguments(argc, argv);
-  std::vector<char*> pointers;
-  for (auto& arg : args) pointers.push_back(arg.data());
-  pointers.push_back(nullptr);
-  return guarded_main((int)args.size(), pointers.data());
+  try {
+    auto args = mac_host::full_launch_arguments(argc, argv);
+    if (args.empty()) return 0; // Cancelled the disc picker.
+    std::vector<char*> pointers;
+    for (auto& arg : args) pointers.push_back(arg.data());
+    pointers.push_back(nullptr);
+    return guarded_main((int)args.size(), pointers.data());
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "%s\n", error.what());
+    if (argc == 1) mac_host::show_launch_error(error.what());
+    return 2;
+  }
 }
 #else
 int main(int argc, char** argv) { return guarded_main(argc, argv); }
@@ -1770,15 +1737,16 @@ static int run_prewarm_only(int argc, char** argv) {
 }
 
 static int melee_main(int argc, char** argv) {
+  if (argc == 2 && (std::strcmp(argv[1], "--help") == 0 || std::strcmp(argv[1], "-h") == 0)) {
+    usage();
+    return 0;
+  }
   // --prewarm-only must run from the same working directory as a normal launch.
   if (app::prewarm_only::requested(argc, argv)) {
     const int result = run_prewarm_only(argc, argv);
     host::log_flush();
     host::end_process(result);   // Windows too: skip CRT/DLL unload inside graphics drivers
   }
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  const auto agent_process_start = yougame::agent_test::PadBack::Clock::now();
-#endif
 #ifndef MELEE_SOURCE_PORT
   user_gecko::install_static_runtime();
 #endif
@@ -1793,47 +1761,13 @@ static int melee_main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--version") { std::printf("%s\n", MELEE_PORT_VERSION); return 0; }
 #ifndef MELEE_SOURCE_PORT
-  // Vanilla never constructs a mod build. Set the engine before the YouGame bridge starts;
+  // Record the engine before boot selects the game content.
   // mod boot preserves it when replacing this content identity below.
   slippi::online::LocalBuild build;
   build.static_engine = true;
   slippi::online::set_local_build(build);
 #endif
-  // Launched by YouGame: take the bridge out of the environment and start hearing the app before
-  // anything else (yougame_link.h).
-  yougame::start();
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  // Environment defaults must precede adapter setup and all lazy timer/seed readers.
-#ifdef MELEE_SOURCE_PORT
-  constexpr auto agent_engine = yougame::agent_test::Engine::Source;
-#else
-  constexpr auto agent_engine = yougame::agent_test::Engine::Static;
-#endif
-  // The app may start the game through Melee Unlocked's own launcher (launcher(), not active()); an AGENT TEST
-  // copy started that way reads its agent-test.json too. YOUGAME_AGENT_COPY=1 still gates it inside load().
-  const auto agent_test = yougame::agent_test::load(yougame::active() || yougame::launcher(), std::getenv("YOUGAME_DATA"), agent_engine);
-  yougame::display_defaults::agent_test_run = agent_test.agent_file;   // the FPS counter's default (read with the settings)
-  host::test_env::agent_run = agent_test.agent_file;   // Slippi Launcher search and refresh off
-  yougame::ranked_cpu::practice_allowed = agent_test.agent_file;
-#if MU_SQUAD
-  // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
-  // Install after harness admission below; install is intentionally first-writer-only.
-#if !defined(MELEE_SOURCE_PORT) || defined(MELEE_NO_SLIPPI)
-  yougame::net_test::install(agent_test.net);
-#endif
-#else
-  yougame::net_test::install(agent_test.net);
-#endif
-  yougame::ranked_cpu::enabled = agent_test.ranked_cpu;
-  for (const auto& [name, value] : agent_test.environment) _putenv_s(name.c_str(), value.c_str());
-#endif
-  user_gecko::set_sources_allowed(yougame::mode_policy::mod_sources(yougame::active()).folders);
-#ifndef MELEE_SOURCE_PORT
-  if (!yougame::mode_policy::mod_sources(yougame::active()).folders)
-    hle::card::file_filter = [](const std::filesystem::path& file) {
-      return yougame::mode_policy::card_save_allowed(true, source_port::mods::check_te_file(file).te);
-    };
-#endif
+
 #ifdef MELEE_SOURCE_PORT
   if (!source_port::reserve_memory()) return 1;
 #endif
@@ -1873,8 +1807,6 @@ static int melee_main(int argc, char** argv) {
     }
   }
   host::Options& o = host::options;
-  bool match_arg = false, boot_match_arg = false;   // --match given; --boot-match (hook builds) asked VS from the menu
-  (void)match_arg; (void)boot_match_arg;
   bool ram_translator = false;
   bool headless = false, hidden = false, threaded = false, fps_requested = false;
   bool scripted = false, allow_matchmaking = false;   // automated runs stay off Slippi's servers
@@ -1885,10 +1817,6 @@ static int melee_main(int argc, char** argv) {
 #if MU_SQUAD
   // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
   bool squad_test_invalid_lineup = false;
-  bool squad_test_net_delay = false;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  yougame::net_test::Config squad_net_config;
-#endif
 #endif
   bool online_test_arg = false;   // --online-test was given: a Slippi test match, never with --p2p-*
 #endif
@@ -1958,16 +1886,8 @@ static int melee_main(int argc, char** argv) {
     else host::log("timing: sandbox appcontainer unknown (%lu)", (unsigned long)token_error);
   } else host::log("timing: sandbox appcontainer unknown (%lu)", (unsigned long)GetLastError());
 #endif
-  yougame::relay_pads::logging_ready();
-  // Started on its own: look for a running YouGame app on a background thread (yougame_channel.h). The
-  // settings window's standby process never does: only the game holds a connection.
-  if (!settings_window_only) yougame::start_channel(automated);
-  // YouGame's start hook, before the game window exists (its window must never sit behind ours).
-  if (!settings_window_only) yougame::start_hook_at_boot(automated);
-  gfx.pc_settings = !automated;
-  // In YouGame's player box the app reports a stop from the exit code; a dialog there only kept the
-  // process alive behind the frozen picture (yougame_mode_policy.h). The report files are still written.
-  g_crash_dialog = yougame::mode_policy::crash_dialog_allowed(automated, yougame::active());
+
+  g_crash_dialog = !automated;
   o.no_gc_adapter = automated;   // a hidden test run must not take the adapter from a game the player is running
   if (std::getenv("MELEE_NO_GC_ADAPTER")) o.no_gc_adapter = true;   // same, for a visible test window
 #ifdef _WIN32
@@ -2001,38 +1921,6 @@ static int melee_main(int argc, char** argv) {
     gx::load_pc_settings(gfx, o.volume);
     gfx.settings_open = false;
   }
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  // Staging test builds only (CMake YOUGAME_AGENT_TEST_HOOK, off by default): app test defaults use the
-  // same option paths as flags, after saved settings and before CLI.
-  if (!agent_test.log.empty()) host::log("[yougame] %s", agent_test.log.c_str());
-  if (!agent_test.unsupported_online.empty()) host::log("[yougame] %s", agent_test.unsupported_online.c_str());
-  yougame::box_present::agent_compositor.store(agent_test.box_present_compositor);
-  if (agent_test.rumble_test) yougame::relay_pads::arm_rumble_test(
-      std::chrono::duration<double, std::milli>(agent_process_start.time_since_epoch()).count());
-  yougame::agent_test::agent_script = agent_test.agent_script;
-#ifndef MELEE_SOURCE_PORT
-  yougame::agent_test::static_match = yougame::agent_test::StaticMatch(
-      agent_test.static_online_test, std::getenv("MELEE_ONLINE_TEST_QUIT_AFTER"));
-#endif
-  yougame::agent_test::key_script.arm(yougame::stdio_bridge(), agent_test.key_script);
-  yougame::agent_test::fight_enabled = agent_test.fight;
-  if (agent_test.pad_back_seconds) {
-    yougame::agent_test::pad_back.arm(agent_test.pad_back_seconds, agent_process_start);
-    host::log("[yougame] agent test: padBack in %d s", agent_test.pad_back_seconds);
-  }
-  if (agent_test.stop_at_frame) arm_agent_stop(agent_test.stop_at_frame);
-  if (std::find(agent_test.arguments.begin(), agent_test.arguments.end(), "--replay-dir") != agent_test.arguments.end())
-    explicit_replay_dir = true;   // keep the launcher replay choice from replacing this default
-  std::vector<std::string> test_arguments;
-  std::vector<char*> test_argv;
-  if (!agent_test.arguments.empty()) {
-    test_arguments = agent_test.prepend(argc, argv);
-    for (auto& argument : test_arguments) test_argv.push_back(argument.data());
-    test_argv.push_back(nullptr);
-    argc = static_cast<int>(test_arguments.size());
-    argv = test_argv.data();
-  }
-#endif
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     auto next = [&]() -> const char* { if (i + 1 >= argc) { usage(); std::exit(2); } return argv[++i]; };
@@ -2042,7 +1930,7 @@ static int melee_main(int argc, char** argv) {
     }
     if (a == "--resume") {
       const char* value = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "";
-      if (yougame::update::resume(value) == yougame::update::Resume::Online) {
+      if (value == "online") {
 #ifdef MELEE_SOURCE_PORT
         source_port::set_resume_online();
 #else
@@ -2157,8 +2045,7 @@ static int melee_main(int argc, char** argv) {
     else if (a == "--capture-sim-frame") gfx.capture_sim_frame = std::strtoull(next(), nullptr, 0);
     else if (a == "--script") { if (!host::input_load_script(next())) { std::fprintf(stderr, "cannot load input script\n"); return 1; } scripted = true; }
     else if (a == "--allow-matchmaking") allow_matchmaking = true;
-    // The launcher restarted this game in the release YouGame is on: open that YouGame mode at once.
-    else if (a == "--online-mode") { const std::string m = next(); yougame::set_online_mode_arg(m == "direct" ? 2 : m == "ranked" ? 1 : 0); }
+
     else if (a == "--dump") gfx.dump_path = next();
     else if (a == "--shader-cache") { gfx.shader_cache = next(); gfx.shader_cache_shared = true; }
     else if (a == "--trace-func") { const char* spec = next(); uint32_t addr = (uint32_t)std::strtoul(spec, nullptr, 16); uint32_t limit = 40;
@@ -2204,7 +2091,6 @@ static int melee_main(int argc, char** argv) {
     // --p2p-port and --p2p-peer is what picks that session over Slippi's for this run.
     else if (a.rfind("--p2p-", 0) == 0) { if (!source_p2p::option(a, next())) { usage(); return 2; } }
 #endif
-    else if (a == "--ranked-rules") slippi::online::config().ranked_rules_path = next();
     else if (a == "--user-dir") { sysgen_user_dir = next(); slippi::online::config().user_dir = sysgen_user_dir; }
     else if (a == "--lobby-direct") {
       std::string code = next();
@@ -2336,16 +2222,7 @@ static int melee_main(int argc, char** argv) {
       for (const auto& d : host::audio_list_devices()) std::printf("%s\t%s\n", d.id.c_str(), d.name.c_str());
       return 0;
     }
-    // Test-only: --boot-match starts the --match VS match from the main menu, as agent-test.json's
-    // bootMatch does inside an app session, so a bare scripted run needs no menu input.
-    else if (a == "--boot-match") {
-#ifdef YOUGAME_AGENT_TEST_HOOK
-      boot_match_arg = true;
-#else
-      std::fprintf(stderr, "--boot-match is test-only: it needs a YOUGAME_AGENT_TEST_HOOK build\n"); return 2;
-#endif
-    }
-    else if (a == "--match") { match_arg = true; if (!source_port::set_match(next())) {
+    else if (a == "--match") { if (!source_port::set_match(next())) {
       std::fprintf(stderr, "--match <stage>:<p1>[:<p2>...], each player <kind>[/c<level>][/x<costume>]\n"); return 2; } }
     else if (a == "--card-self-test") card_self_test_dir = next();
     else if (a == "--mod-dir") source_port::set_mod_directory(next());
@@ -2364,18 +2241,6 @@ static int melee_main(int argc, char** argv) {
 #if MU_SQUAD
     // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
     else if (a == "--squad-test-invalid-lineup") squad_test_invalid_lineup = true;
-    else if (a == "--squad-test-net-delay") {
-#ifdef YOUGAME_AGENT_TEST_HOOK
-      squad_test_net_delay = true;
-      if (!yougame::net_test::parse_squad_delay(next(), &squad_net_config)) {
-        std::fprintf(stderr, "--squad-test-net-delay <ms>[:<jitter_ms>]: delay 1..250, jitter 0..100; requires --online-test squad and --local-peer\n");
-        return 2;
-      }
-#else
-      std::fprintf(stderr, "--squad-test-net-delay <ms>[:<jitter_ms>] requires MU_SQUAD + YOUGAME_AGENT_TEST_HOOK, --online-test squad and --local-peer\n");
-      return 2;
-#endif
-    }
 #endif
     else if (a == "--online-test") { online_test_arg = true; if (!source_port::set_online_test(next())) {
       std::fprintf(stderr, "--online-test direct|unranked|ranked|teams[:<character>[:<color>]]"
@@ -2383,7 +2248,7 @@ static int melee_main(int argc, char** argv) {
         // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
         "|squad:<ck>/<color>[,...]"
 #endif
-        " (with --local-peer; ranked needs YouGame mode)\n"); return 2; } }
+        " (with --local-peer)\n"); return 2; } }
 #endif
 #endif
     else if (a == "--settings-window") {}
@@ -2413,7 +2278,7 @@ static int melee_main(int argc, char** argv) {
 #if MU_SQUAD
 #ifdef MELEE_SOURCE_PORT
   // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
-  if (!source_port::check_squad_test(slippi::Matchmaking::local_peer.enabled, squad_test_invalid_lineup, squad_test_net_delay)) {
+  if (!source_port::check_squad_test(slippi::Matchmaking::local_peer.enabled, squad_test_invalid_lineup, false)) {
     std::fprintf(stderr, "--online-test squad:<ck>/<color>[,...] requires --local-peer; --squad-test-invalid-lineup and --squad-test-net-delay require squad mode\n");
     return 2;
   }
@@ -2421,15 +2286,6 @@ static int melee_main(int argc, char** argv) {
 #endif
 #if MU_SQUAD
   // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#ifdef MELEE_SOURCE_PORT
-  if (squad_test_net_delay) {
-    squad_net_config.squad_cancel_test = squad_test_invalid_lineup;
-    yougame::net_test::install(squad_net_config);
-  } else
-    yougame::net_test::install(agent_test.net);
-#endif
-#endif
 #endif
   if ((hidden || headless || scripted) && !allow_matchmaking) slippi::Matchmaking::server_allowed = false;
   if (slippi::Matchmaking::local_peer.test_stage >= 0) {
@@ -2461,8 +2317,8 @@ static int melee_main(int argc, char** argv) {
   // Cosmetic catalog/profile storage follows --settings-path just like controller and video
   // settings. Configure it for normal, standalone-settings, and automated diagnostic launches.
   host::cosmetics::configure(gfx.settings_path);
-  // In the YouGame app nothing is downloaded or run beside a verified build: only the patch tool it ships.
-  host::cosmetics::set_tool_recovery(!yougame::active());
+
+  host::cosmetics::set_tool_recovery(true);
   // Tests: MELEE_BUILD_LOOKS=<patch folder> builds the exact looks' packs from --iso and exits (0 ready, 1 not).
   if (const char* looks = std::getenv("MELEE_BUILD_LOOKS"); looks && *looks) {
     std::string message;
@@ -2589,24 +2445,9 @@ static int melee_main(int argc, char** argv) {
 #ifdef MELEE_SOURCE_PORT
   if (!card_self_test_dir.empty()) return source_port::card_self_test(card_self_test_dir.c_str()) ? 0 : 1;
 #endif
-#if defined(MELEE_SOURCE_PORT) && defined(YOUGAME_AGENT_TEST_HOOK)
-  if (boot_match_arg) {
-    if (!match_arg) { std::fprintf(stderr, "--boot-match needs --match <stage>:<p1>[:<p2>...]\n"); return 2; }
-    if (yougame::active()) { std::fprintf(stderr, "--boot-match is for bare runs; in a YouGame session use agent-test.json bootMatch\n"); return 2; }
-    yougame::agent_test::boot_match.store(true, std::memory_order_release);
-    host::log("agent-test: --boot-match: VS from the main menu");
-  }
-#endif
   if (o.iso.empty()) { usage(); return 2; }
   if (!host::disc_open(o.iso)) { std::fprintf(stderr, "cannot open ISO %s\n", o.iso.c_str()); return 1; }
-  // The window, and with it the YouGame app's caps line (a toplevel window's caps carry its handle),
-  // before the slow startup work: Sys generation, the retail-disc check, the card and the disc prefetch.
-  // On a PC with 0.6 GB free they took about 90 s (11-15, pc4), past the 30 s the app gives a first run
-  // to send caps, and the app then kept the game in child mode with a frozen picture. The window stays
-  // black (its class brush) until the first frame. Only the render thread's window (every normal
-  // launch) moves: that thread answers the window's messages while this one works. Without it this
-  // thread owns the window and pumps it only once the game runs, so that window is still made below,
-  // just before the game. Window and renderer only: nothing here reads or writes game state.
+  // Set the window title before asset preparation starts.
   {
     const char* version = MELEE_PORT_VERSION;
     std::wstring base = L"Melee Unlocked ";
@@ -2619,11 +2460,6 @@ static int melee_main(int argc, char** argv) {
     // Players see just the name; the version, engine and rates stay behind the Performance overlay.
     host::window_title_debug() = base;
   }
-#ifdef _WIN32
-  // Embedded in YouGame (child or toplevel): the app owns placement and size; never change display
-  // modes under its window. A saved exclusive choice from a standalone run is ignored here.
-  if (yougame::embedded()) gfx.exclusive_fullscreen = false;
-#endif
   std::unique_ptr<gx::Backend> backend;
   bool window_made = false;
   auto make_window = [&] {
@@ -2638,10 +2474,7 @@ static int melee_main(int argc, char** argv) {
       backend = gx::create_threaded_backend(gfx, !hidden);
     } else if (!headless) {
 #ifdef __APPLE__
-      // An app older than 0.13.1048 asks for the player box (YOUGAME_EMBED=1) but passes no parent window: the game
-      // can't embed there, so it starts in full screen on its own, as before.
-      const bool box_without_parent = yougame::embedded() && !std::getenv("YOUGAME_EMBED_PARENT");
-      const bool defer_fullscreen = (gfx.fullscreen || box_without_parent) && !hidden;
+      const bool defer_fullscreen = gfx.fullscreen && !hidden;
       if (defer_fullscreen) host::window_prefer_simple_fullscreen();
       void* hwnd = host::window_create(gfx.window_w, gfx.window_h, host::window_title_base().c_str(), !hidden && !defer_fullscreen);
       if (defer_fullscreen) host::window_defer_fullscreen_show();
@@ -2654,9 +2487,6 @@ static int melee_main(int argc, char** argv) {
       if (gfx.fullscreen && !gfx.exclusive_fullscreen) host::window_set_fullscreen(true);
 #endif
       int client_w = gfx.window_w, client_h = gfx.window_h;
-#ifdef _WIN32
-      if (yougame::embed_toplevel()) host::window_client_size(&client_w, &client_h);
-#endif
       // As on the render thread (threaded_backend.cpp): the window keeps answering while the renderer starts.
       host::window_responsive([&] { backend.reset(gx::create_render_backend(hwnd, client_w, client_h, gfx)); });
       host::window_set_resize_callback([renderer = backend.get()](int w, int h) { gx::render_resize(renderer, w, h); });
@@ -2688,6 +2518,13 @@ static int melee_main(int argc, char** argv) {
     // The player's disc, not a crash: say so and leave without a crash report (as --vanilla-only does).
     std::fprintf(stderr, "%s\n", disc_problem.c_str());
     host::log_flush();
+#ifdef __APPLE__
+    if (!automated) {
+      std::error_code ec;
+      std::filesystem::remove(std::filesystem::path(sysgen_user_dir) / "disc-path", ec);
+      mac_host::show_launch_error(disc_problem);
+    }
+#endif
 #ifdef _WIN32
     if (!automated) MessageBoxA(nullptr, disc_problem.c_str(), "Melee Unlocked", MB_ICONINFORMATION | MB_OK);
     ExitProcess(2);
@@ -2699,9 +2536,7 @@ static int melee_main(int argc, char** argv) {
   // The profile picked in the settings panel, unless the command line gave its own mod layers. A
   // profile that no longer loads starts the retail game rather than refusing to start.
   if (gx::RenderOptions::mod_features_available() && !source_port::has_mod_layers() && !gfx.mod_profile.empty()) {
-    if (!yougame::mode_policy::mod_sources(yougame::active()).folders)
-      host::log("mods: saved profile ignored in YouGame mode; mods come from the listing");
-    else if (!source_port::set_mod_profile(gfx.mod_profile.c_str(), false))
+    if (!source_port::set_mod_profile(gfx.mod_profile.c_str(), false))
       host::log("mods: saved profile %s could not be loaded; starting the retail game", gfx.mod_profile.c_str());
   }
 #ifdef MELEE_NO_SLIPPI
@@ -2773,6 +2608,10 @@ static int melee_main(int argc, char** argv) {
     explicit_card_dir = true;
     host::log("gameplay: verified retail disc; vanilla-only memory card %s%s", o.card_dir.c_str(), host::startup_mark().c_str());
   }
+#ifdef __APPLE__
+  if (!automated && !scripted && mac_host::melee_disc_header(o.iso))
+    mac_host::remember_disc(std::filesystem::path(sysgen_user_dir), std::filesystem::u8path(o.iso));
+#endif
   remember_iso(o.iso);   // so the launcher can offer this disc without being told again
   // Controllers do not count as activity to Windows, so a session played only on a pad let the
   // display power off after the idle timeout (monitors going black mid-game until the mouse moved).
@@ -2780,9 +2619,6 @@ static int melee_main(int argc, char** argv) {
   if (!hidden) SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
 
 #ifdef __APPLE__
-  // Embedded launch belongs to YouGame, including when --fullscreen is also supplied.
-  // Decide before hiding a regular fullscreen launch; the panel still needs permission to show.
-  if (yougame::embedded()) gfx.fullscreen = false;
   // Accept --threaded-renderer from the desktop launch spec. AppKit requires the main thread.
   threaded = false;
   if (automated || scripted) {
@@ -2884,8 +2720,8 @@ static int melee_main(int argc, char** argv) {
     const auto caches_due = std::chrono::steady_clock::now() + std::chrono::milliseconds(3000);
     const auto caches = ::gx::cache_store::request_flush_all("exit");
     // Join the console link service before tearing down the host/bridge.
-    yougame::console::console_engine().end("window closed");
-    yougame::console::wait_friends_retired(2000);   // a Leave just before quitting still leaves the room
+
+       // a Leave just before quitting still leaves the room
     ::gx::cache_store::wait_flush_all(caches, caches_due);   // what is left of the 3 s
     host::report_sim_work();
     g_profiler.report();   // no-op without --profile
@@ -2910,18 +2746,6 @@ static int melee_main(int argc, char** argv) {
   // this returns at once and the run is what it was.
   source_p2p::start(hidden || headless || scripted);
   if (g_profile) g_profiler.start();   // the native game runs on this thread; shutdown() reports
-  if (yougame::active()) {
-    // Hello launches and pending manual relaunches enter before loading/running the game DLL.
-    if (yougame::console::requests.pending()) yougame::console_boot_ready();
-    yougame::console::responsive_wait([] { return yougame::wait_identity(10000); }, [] { host::window_pump(); });
-    yougame::console::take_pending_launch();
-    yougame::console::boot(yougame::console::take_request(),
-        [](const auto& q, auto& c, auto& e) { return yougame::console::start_session(q, c, e); },
-        [](auto link, const auto& c) { return yougame::console::console_begin(std::move(link), c); },
-        [] { yougame::console_boot_ready(); }, [] { host::window_pump(); },
-        [](const char* text) { screen_label::show(text, 12.0); },
-        [](const std::string& text) { host::log("%s", text.c_str()); });
-  }
   if (host::exit_requested()) { shutdown(0); host::end_process(0); }
   host::log("startup: starting the game%s", host::startup_mark().c_str());
   const int source_code = source_port::run(shutdown);
@@ -3025,7 +2849,6 @@ static int melee_main(int argc, char** argv) {
 #endif
   host::boot_setup();
 #ifndef MELEE_SOURCE_PORT
-  yougame::memcard::install_static_boot();
 #endif
   {
     std::vector<gx::texpack::CosmeticCompanion> companions;

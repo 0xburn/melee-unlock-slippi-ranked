@@ -3,11 +3,6 @@
 #define NOMINMAX
 #include "gx_cache_prune.h"
 #include "test_env.h"
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_paths.h"
-#endif
-#include "yougame_box_present.h"
-#include "yougame_link.h"
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -48,7 +43,6 @@
 #include "exi_slippi.h"
 #endif
 #include "gx_shader.h"
-#include "yougame_parity.h"
 #include "crt_shader.h"
 #include "present_shader.h"
 #include "user_shader.h"
@@ -87,7 +81,6 @@ static_assert(MU_RTX_PASS_PARTICLES == 1, "remix_effect_draw (gx_core.h) tests t
 #ifdef GX_PC_SETTINGS
 #include "pc_settings.h"
 #include "arena_panel.h"
-#include "coming_soon_overlay.h"
 #include "lab_view.h"
 #endif
 
@@ -136,7 +129,7 @@ bool rtx_remix_available() {
 #ifdef MELEE_REMIX_SPIKE
   static const bool present = [] {
     std::wstring dir;
-    if (const wchar_t* v = host::test_env::yougame_session ? nullptr : _wgetenv(L"MELEE_REMIX_DIR")) dir = v;
+    if (const wchar_t* v = _wgetenv(L"MELEE_REMIX_DIR")) dir = v;
     else {
       if (!rtx_pack_current(game_dir_w())) return false;   // a pack from another version: nothing of it loads
       dir = (std::filesystem::path(game_dir_w()) / L"Remix").wstring();
@@ -1667,7 +1660,7 @@ void D3D12Backend::apply_fullscreen_mode() {
   fg_presenter_wait();
   // Every embedded window, child or toplevel: a settings change (Internal resolution) used to reach
   // ResizeTarget/SetFullscreenState here in child embeds and leave the picture monitor-sized and cropped.
-  if (yougame::embedded()) opts_.exclusive_fullscreen = false;
+
   if (!swapchain_) return;
   BOOL was_exclusive = FALSE;
   swapchain_->GetFullscreenState(&was_exclusive, nullptr);
@@ -5155,16 +5148,6 @@ void D3D12Backend::present_pass(const EfbCopy& c, bool upscaled, ID3D12Resource*
       list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
     }
   }
-#ifdef GX_PC_SETTINGS
-  {   // The Coming soon stickers go into the picture under a preset (same target format as the overlay's pipeline)
-    const bool soon_in_picture = shader_on && settings_ui_ && backbuffer_format_ == DXGI_FORMAT_R8G8B8A8_UNORM;
-    coming_soon_overlay::set_in_picture(soon_in_picture);
-    if (soon_in_picture) {
-      list_->OMSetRenderTargets(1, &shader_rtv, FALSE, nullptr);
-      settings_ui_->draw_picture_overlay(list_.Get(), shader_w, shader_h);
-    }
-  }
-#endif
   if (shader_on) {
     D3D12_RESOURCE_BARRIER to_source{};
     to_source.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -5455,26 +5438,18 @@ void D3D12Backend::capture_backbuffer() {
     if (pending_captures_.size() >= opts_.capture_burst) flush_captures();
     return;
   }
-  #ifdef YOUGAME_AGENT_TEST_HOOK
-    yougame::agent_paths::ppm(opts_.capture_path, desc.Width, desc.Height, data, pitch);
-#else
     std::ofstream f(opts_.capture_path, std::ios::binary);
   f << "P6\n" << desc.Width << ' ' << desc.Height << "\n255\n";
   for (UINT y = 0; y < desc.Height; ++y) for (UINT x = 0; x < desc.Width; ++x) f.write((const char*)data + (size_t)y * pitch + x * 4, 3);
-#endif
   staging->Unmap(0, nullptr);
   host::log("captured %s (sim frame %llu)", opts_.capture_path.c_str(), (unsigned long long)capture_sequence_);
 }
 
 void D3D12Backend::flush_captures() {
   for (const PendingCapture& pc : pending_captures_) {
-    #ifdef YOUGAME_AGENT_TEST_HOOK
-    yougame::agent_paths::ppm(pc.path, pc.w, pc.h, pc.data.data(), pc.pitch);
-#else
     std::ofstream f(pc.path, std::ios::binary);
     f << "P6\n" << pc.w << ' ' << pc.h << "\n255\n";
     for (UINT y = 0; y < pc.h; ++y) for (UINT x = 0; x < pc.w; ++x) f.write((const char*)pc.data.data() + (size_t)y * pc.pitch + x * 4, 3);
-#endif
     host::log("captured %s (sim frame %llu)", pc.path.c_str(), (unsigned long long)pc.sequence);
   }
   pending_captures_.clear();
@@ -6042,33 +6017,28 @@ void D3D12Backend::submit_frame(const Frame& frame, const DrawMatrices* override
       const bool synced = opts_.vsync || (tear_free_ && fg_applied_ <= 0 && !fsr_fg_generated_);
       // Keep the existing deadline timer, simulation-locked path and DXGI queue limit.
       // A subframe without a timer deadline may rely on Reflex/vblank pacing: keep interval 1.
-      const bool paced = (present_deadline_ > 0 || opts_.subframe == SubFrameMode::Off ||
-                          !subframe_useful(opts_.fps_cap)) && !fsr_fg_generated_ && fg_applied_ <= 0 && opts_.reflex_mode <= 0;
-      const auto present = yougame::box_present::choose(yougame::embedded(), opts_.vsync,
-          host::window_is_fullscreen() || fullscreen_state_.exclusive_active,
-          yougame::box_present::agent_override(), true, paced, !fullscreen_state_.exclusive_active, synced, yougame::embed_toplevel());
-      if (const auto line = yougame::box_present::announcement(present)) host::log("%s", line);
+      const UINT interval = synced ? 1u : 0u;
+      const UINT present_flags = !synced && !fullscreen_state_.exclusive_active ? DXGI_PRESENT_ALLOW_TEARING : 0u;
       const double present_call = Stopwatch::now();
       // While the window cannot be seen (minimized, or alt-tabbed out of exclusive fullscreen),
       // only test whether it can again, as DXGI asks. Presenting on regardless fed screen capture
       // (a Discord stream) frames that flashed an old picture. Not under frame generation, which
       // paces its own presents. Embedded launches keep drawing so the first-frame ready signal
       // releases the app cover.
-      const bool test_only = occluded_ && fg_applied_ <= 0 && !yougame::embedded();
+      const bool test_only = occluded_ && fg_applied_ <= 0;
       slot_shown_[slot_] = !test_only;
       const HRESULT present_result = [&] { host::perf::Scope wait_cost(host::perf::Stage::Wait);
           if (test_only) return swapchain_->Present(0, DXGI_PRESENT_TEST);
-          return swapchain_->Present(present.interval, present.flags); }();
+          return swapchain_->Present(interval, present_flags); }();
       const bool now_occluded = present_result == DXGI_STATUS_OCCLUDED;
       if (now_occluded != occluded_) {
         occluded_ = now_occluded;
         host::log(occluded_ ? "d3d12: window hidden, presents paused" : "d3d12: window visible, presents resumed");
       }
-      yougame::parity::signals.presented(!test_only && SUCCEEDED(present_result) && frame.test_fill < 0);
       if (!test_only && SUCCEEDED(present_result) && frame.test_fill < 0) host::startup_first_frame();
       present_wait_ += Stopwatch::now() - present_call;   // a synced Present waits for the display (see gx_d3d11.cpp)
       if (!test_only) pacing_diagnostics_.present(present_call, opts_.vsync,
-          present.interval, present.flags, opts_.fps_cap, fullscreen_state_.exclusive_active);
+          interval, present_flags, opts_.fps_cap, fullscreen_state_.exclusive_active);
     } catch (const std::system_error& error) {
       streamline::disable_after_resource_error(error.what());
       opts_.frame_generation_mode = 0;

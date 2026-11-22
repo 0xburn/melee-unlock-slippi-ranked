@@ -25,10 +25,10 @@ struct Summary {
   uint64_t held_up = 0, fell_behind = 0;
   Samples ping;
   std::string mode;
-  void begin(int id, bool friends) {
+  void begin(int id) {
     *this = {};
     active = true;
-    mode = friends ? "friends" : id == 0 ? "ranked" : id == 1 ? "unranked" : id == 2 ? "direct" : id == 3 ? "teams" : "party";
+    mode = id == 0 ? "ranked" : id == 1 ? "unranked" : id == 2 ? "direct" : id == 3 ? "teams" : "party";
   }
   std::string line(uint64_t rollbacks, uint64_t stalls, uint64_t desyncs, const char* result) const {
     char out[512];

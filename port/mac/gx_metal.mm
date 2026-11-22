@@ -7,17 +7,10 @@
 #include "gx_metal.h"
 #include "gx_metal_translate.h"
 #include "gx_metal_recipe.h"
-#include "embed_mac.h"
-#include "embed_mac_pixels.h"
-#include "embed_mac_screenshot.h"
 #include "../runtime/gx/gx_backend.h"
 #include "../runtime/gx/gx_shader.h"
 #include "../runtime/gx/gx_texture.h"
 #include "../runtime/host/test_env.h"
-#include "../runtime/hle/yougame_parity.h"
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "../runtime/hle/yougame_agent_present.h"
-#endif
 #include <chrono>
 #include <cstdarg>
 #include <condition_variable>
@@ -133,20 +126,10 @@ struct Slot {
   Object<id<MTLTexture>> capture_image;
   std::string capture_path;
   uint32_t capture_width = 0, capture_height = 0, capture_pitch = 0;
-  bool capture_retina = false;
   bool readback_pending = false, test_shot = false;
   uint32_t test_present = 0;
   uint64_t test_sequence = 0;
 };
-#ifdef YOUGAME_AGENT_TEST_HOOK
-struct AgentPresent {
-  uint32_t present = 0, sim = 0;
-  uint8_t major = 0, minor = 0;
-  int width = 0, height = 0, window_width = 0, window_height = 0;
-  size_t pitch = 0;
-  Object<id<MTLBuffer>> pixels;
-};
-#endif
 struct Texture { Object<id<MTLTexture>> image; uint64_t used = 0; };
 // Float arrays match the MSL constant structs' float4 alignment without SIMD ABI assumptions.
 struct BlitConstants { float rect[4]; uint32_t opaque; };
@@ -305,7 +288,6 @@ class MetalBackend final : public Backend {
   std::shared_ptr<Pipeline> queue_recipe(const Recipe&);
   id<MTLRenderPipelineState> pipeline(const DrawCall&, bool urgent = true);
   void update_widescreen();
-  void update_embed_scale();
   id<MTLDepthStencilState> depth_state(uint32_t);
   id<MTLSamplerState> sampler(const TextureRef&);
   id<MTLTexture> texture(const TextureRef&);
@@ -323,11 +305,6 @@ class MetalBackend final : public Backend {
   void test_shot(id<MTLTexture>, const Frame&);
   void readback(id<MTLTexture>);
   void flush_capture(Slot&);
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  void agent_readback(id<MTLTexture>, const Frame&);
-  void record_agent_presents();
-  std::vector<AgentPresent> agent_presents_;
-#endif
 
   struct SubmitPhases {
     double surface = 0, drawable = 0, readback = 0;
@@ -339,14 +316,12 @@ class MetalBackend final : public Backend {
   CGSize logged_drawable_size_ = CGSizeMake(-1, -1);
   RenderOptions options_;
   int width_, height_, scale_ = 1;
-  mac_embed::EmbedScaleState embed_scale_;
   bool skip_ = false;
   std::filesystem::path cache_, seed_cache_;
   Object<id<MTLDevice>> device_;
   Object<id<MTLCommandQueue>> queue_;
   Object<id<MTLTexture>> color_, depth_, white_;
   Object<id<MTLRenderPipelineState>> fallback_[4][3], copy_pso_, depth_copy_pso_, present_pso_, clear_pso_;
-  Object<id<MTLRenderPipelineState>> retina_resize_pso_;
   Object<id<MTLDepthStencilState>> clear_depth_, no_depth_;
   std::unordered_map<uint32_t, Object<id<MTLDepthStencilState>>> depths_;
   std::unordered_map<uint64_t, Object<id<MTLSamplerState>>> samplers_;
@@ -399,16 +374,7 @@ Object<id<MTLRenderPipelineState>> MetalBackend::startup_pipeline(id<MTLFunction
   Object<id<MTLRenderPipelineState>> result(state); [state release]; return result;
 }
 void MetalBackend::init_utilities() {
-  int rw = 0, rh = 0;
-  const bool retina = mac_embed::retina_size(window_, &rw, &rh);
-  // Added only to the opt-in library; preserve EFB color AND depth when auto resolution follows a display change.
-  const std::string retina_source = R"MSL(
-fragment CO retina_resize_ps(BO i [[stage_in]], texture2d<float> color [[texture(0)]], depth2d<float> depth [[texture(1)]]) {
-  constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::nearest);
-  CO o; o.color = color.sample(s, i.uv); o.depth = depth.sample(s, i.uv); return o;
-}
-)MSL";
-  const auto lib = compiler_->library(retina ? std::string(utility_source) + retina_source : std::string(utility_source));
+  const auto lib = compiler_->library(utility_source);
   id<MTLFunction> vertex = [lib.get() newFunctionWithName:@"fallback_vs"];
   for (unsigned variant = 0; variant < 4; ++variant) {
     NSString* name = [NSString stringWithFormat:@"fallback%u", variant];
@@ -427,10 +393,6 @@ fragment CO retina_resize_ps(BO i [[stage_in]], texture2d<float> color [[texture
   depth_copy_pso_ = startup_pipeline(vertex, pixel, MTLPixelFormatRGBA8Unorm, false);
   [pixel release]; pixel = [lib.get() newFunctionWithName:@"clear_ps"];
   clear_pso_ = startup_pipeline(vertex, pixel, MTLPixelFormatRGBA8Unorm, true);
-  if (retina) {
-    [pixel release]; pixel = [lib.get() newFunctionWithName:@"retina_resize_ps"];
-    retina_resize_pso_ = startup_pipeline(vertex, pixel, MTLPixelFormatRGBA8Unorm, true);
-  }
   [pixel release]; [vertex release];
   MTLDepthStencilDescriptor* state = [[MTLDepthStencilDescriptor alloc] init];
   state.depthCompareFunction = MTLCompareFunctionAlways; state.depthWriteEnabled = YES;
@@ -455,10 +417,7 @@ MetalBackend::MetalBackend(SDL_Window* window, int width, int height, const Rend
     const auto pruned = metal::prune_temporary_files(cache_);
     if (pruned) host::log("metal: removed %zu abandoned temporary cache files", pruned);
     compiler_->cache_ = cache_;
-    int rw = 0, rh = 0;
-    embed_scale_.active = mac_embed::retina_size(window_, &rw, &rh);
-    scale_ = embed_scale_.active ? mac_embed::efb_scale(options.efb_scale, rh) :
-      std::clamp(options.efb_scale > 0 ? options.efb_scale : (height + EFB_HEIGHT - 1) / EFB_HEIGHT, 1, 6);
+    scale_ = std::clamp(options.efb_scale > 0 ? options.efb_scale : (height + EFB_HEIGHT - 1) / EFB_HEIGHT, 1, 6);
     init_utilities();
     for (uint32_t state = 0; state < 32; ++state) depth_state(state);
     for (auto& slot : slots_) slot.ring.init(device_.get());
@@ -469,7 +428,6 @@ MetalBackend::MetalBackend(SDL_Window* window, int width, int height, const Rend
     // context is created and no swap call goes through OpenGL in this backend.
     view_.reset(SDL_Metal_CreateView(window_));
     require(view_.get() != nullptr, SDL_GetError());
-    mac_embed::attach_metal_view(window_, view_.get());
     layer_ = static_cast<CAMetalLayer*>(SDL_Metal_GetLayer(view_.get()));
     layer_.device = device_.get(); layer_.pixelFormat = MTLPixelFormatBGRA8Unorm;
     layer_.displaySyncEnabled = options_.vsync;
@@ -478,9 +436,6 @@ MetalBackend::MetalBackend(SDL_Window* window, int width, int height, const Rend
     // framebuffer-only path, including when generic --capture is requested.
     const char* shot = host::test_env::getenv("MELEE_TEST_SHOT");
     layer_.framebufferOnly = shot ? NO : YES;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-    if (yougame::agent_present::recorder().frames_enabled()) layer_.framebufferOnly = NO;
-#endif
     if (shot) {
       const std::string spec(shot); const auto colon = spec.rfind(':');
       if (colon != std::string::npos) {
@@ -556,7 +511,7 @@ void Compiler::work(unsigned worker) {
     if (std::filesystem::is_regular_file(path, exists_error)) descriptor.url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
     check_running();
     NSError* error = nil;
-    // 10-31: inside the YouGame app, adding a pipeline to a binary archive crashed in Metal itself
+    // 10-31: adding a pipeline to a binary archive crashed in Metal itself
     // (-[MTLCompiler createBinaryArchiveAsRecompileTarget:] null, on the AGX add path) at boot. Archives are only a
     // warm-start cache, so they stay off unless MELEE_METAL_ARCHIVE=1; without one, pipelines compile as usual.
     const char* archive_opt = std::getenv("MELEE_METAL_ARCHIVE");
@@ -1149,35 +1104,24 @@ void MetalBackend::present(const Frame& frame, const EfbCopy& copy) {
   int w = 0, h = 0;
   {
     PhaseTimer timing{phases_.surface};
-    // Embedded dimensions follow the picture snapshot in both Retina modes; SDL's layer can lag a view-only resize.
-    const bool embedded = mac_embed::drawable_size(window_, &w, &h);
-    if (!embedded) SDL_Metal_GetDrawableSize(window_, &w, &h);
+    SDL_Metal_GetDrawableSize(window_, &w, &h);
     if (w > 0 && h > 0) {
-      // The adapter owns embedded layer sizing on the main thread, including the parent-gone transition to 1x.
-      if (!embedded) layer_.drawableSize = CGSizeMake(w, h);
+      layer_.drawableSize = CGSizeMake(w, h);
       layer_.displaySyncEnabled = options_.vsync;
     }
   }
   log_drawable_size();
-  const uint64_t screenshot = mac_embed::screenshot_take_requested() ? mac_embed::screenshot_take() : 0;
-  if (w <= 0 || h <= 0) { mac_embed::screenshot_failed(screenshot); return; }
-  BOOL framebuffer_only = YES;
-  if (screenshot) { framebuffer_only = layer_.framebufferOnly; layer_.framebufferOnly = NO; }
+  if (w <= 0 || h <= 0) { return; }
   const auto start = Clock::now();
   id<CAMetalDrawable> drawable = [layer_ nextDrawable];
-  if (screenshot) layer_.framebufferOnly = framebuffer_only;
   const double drawable_ms = milliseconds(start);
   phases_.drawable += drawable_ms;
-  if (!drawable) { mac_embed::screenshot_failed(screenshot); host::log("metal: nextDrawable unavailable at simulation %llu", (unsigned long long)frame.sequence); return; }
+  if (!drawable) { host::log("metal: nextDrawable unavailable at simulation %llu", (unsigned long long)frame.sequence); return; }
   // Use GL's lround fit and floor centering, converting its bottom-left Y to
   // Metal's top-left Y. Fractional viewports shift sampling and leak into bars.
   const double aspect = presented_aspect(options_, w, h, false);
   int output_w = w, output_h = std::lround(w / aspect);
   if (output_h > h) { output_h = h; output_w = std::lround(h * aspect); }
-  int rw = 0, rh = 0;
-  if (mac_embed::retina_size(window_, &rw, &rh)) {
-    const auto box = mac_embed::letterbox(w, h, aspect); output_w = box.w; output_h = box.h;
-  }
   const int left = (w-output_w)/2, bottom = (h-output_h)/2;
   const MTLViewport viewport{double(left), double(h-bottom-output_h), double(output_w), double(output_h), 0, 1};
   BlitConstants constants{{copy.src_w / float(EFB_WIDTH), copy.src_h / float(EFB_HEIGHT),
@@ -1197,40 +1141,6 @@ void MetalBackend::present(const Frame& frame, const EfbCopy& copy) {
     capture(slot_->capture_image.get(), frame);
   } else if (generic) capture(drawable.texture, frame);
   test_shot(drawable.texture, frame);
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  agent_readback(drawable.texture, frame);
-#endif
-  if (screenshot) {
-    // Read the finished drawable (bars and presentation included), with no GPU wait.
-    const int sw = int(drawable.texture.width), sh = int(drawable.texture.height);
-    const size_t pitch = (size_t(sw) * 4 + 255) & ~size_t(255);
-    id<MTLBuffer> buffer = mac_embed::shot::source_ok(sw, sh) ?
-      [device_.get() newBufferWithLength:pitch * sh options:MTLResourceStorageModeShared] : nil;
-    if (!buffer) mac_embed::screenshot_failed(screenshot);
-    else {
-      std::shared_ptr<const void> owner((const void*)buffer, [](const void* p) { [(id)p release]; });
-      id<MTLBlitCommandEncoder> encoder = [command_.get() blitCommandEncoder];
-      if (!encoder) mac_embed::screenshot_failed(screenshot);
-      else {
-        [encoder copyFromTexture:drawable.texture sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
-          sourceSize:MTLSizeMake(sw, sh, 1) toBuffer:buffer destinationOffset:0
-          destinationBytesPerRow:pitch destinationBytesPerImage:pitch * sh];
-        [encoder endEncoding];
-        [command_.get() addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-          if (completed.status != MTLCommandBufferStatusCompleted) mac_embed::screenshot_failed(screenshot);
-          else mac_embed::screenshot_submit(screenshot, sw, sh, pitch, true, false, owner,
-                                            static_cast<const uint8_t*>(buffer.contents));
-        }];
-      }
-    }
-  }
-  // Scheduling a drawable is not a successful present. Release the app's loading
-  // cover only when Metal reports it on screen, using GL's real-frame rule.
-  const bool real_frame = frame.test_fill < 0;
-  [drawable addPresentedHandler:^(id<MTLDrawable> presented) {
-    if (presented.presentedTime > 0)
-      yougame::parity::signals.presented(real_frame);
-  }];
   [command_.get() presentDrawable:drawable];
   host::log("metal: present %u simulation %llu drawable %.3f ms", presented_, (unsigned long long)frame.sequence, drawable_ms);
 }
@@ -1269,72 +1179,12 @@ void MetalBackend::readback(id<MTLTexture> image) {
   }
   slot_->readback_pending = true; slot_->capture_width = image.width;
   slot_->capture_height = image.height; slot_->capture_pitch = pitch;
-  int rw = 0, rh = 0;
-  slot_->capture_retina = mac_embed::retina_size(window_, &rw, &rh);
   id<MTLBlitCommandEncoder> encoder = [command_.get() blitCommandEncoder];
   [encoder copyFromTexture:image sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
     sourceSize:MTLSizeMake(image.width, image.height, 1) toBuffer:slot_->capture.get() destinationOffset:0
     destinationBytesPerRow:pitch destinationBytesPerImage:bytes];
   [encoder endEncoding];
 }
-#ifdef YOUGAME_AGENT_TEST_HOOK
-void MetalBackend::agent_readback(id<MTLTexture> image, const Frame& frame) {
-  auto& evidence = yougame::agent_present::recorder();
-  if (!evidence.enabled()) return;
-  AgentPresent pending;
-  pending.present = presented_; pending.sim = frame.source_retrace;
-  pending.major = frame.scene_major; pending.minor = frame.scene_minor;
-  pending.width = image.width; pending.height = image.height;
-  SDL_GetWindowSize(window_, &pending.window_width, &pending.window_height);
-  if (evidence.wants_frame(presented_)) {
-    PhaseTimer timing{phases_.readback};
-    // Copy the actual finished BGRA drawable, including the letterbox, before
-    // presenting it. Each drawable owns its copy even with several XFBs/frame.
-    pending.pitch = (image.width * 4 + 255) & ~size_t(255);
-    const size_t bytes = pending.pitch * image.height;
-    id<MTLBuffer> buffer = [device_.get() newBufferWithLength:bytes options:MTLResourceStorageModeShared];
-    pending.pixels = Object<id<MTLBuffer>>(buffer); [buffer release];
-    require(bool(pending.pixels), "Metal agent capture allocation failed");
-    id<MTLBlitCommandEncoder> encoder = [command_.get() blitCommandEncoder];
-    [encoder copyFromTexture:image sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
-      sourceSize:MTLSizeMake(image.width, image.height, 1) toBuffer:pending.pixels.get() destinationOffset:0
-      destinationBytesPerRow:pending.pitch destinationBytesPerImage:bytes];
-    [encoder endEncoding];
-  }
-  agent_presents_.push_back(std::move(pending));
-}
-void MetalBackend::record_agent_presents() {
-  auto& evidence = yougame::agent_present::recorder();
-  const bool readback = std::any_of(agent_presents_.begin(), agent_presents_.end(),
-      [](const AgentPresent& pending) { return bool(pending.pixels); });
-  if (readback) {
-    // Diagnostic pictures, like GL's glReadPixels, may wait for the GPU. With
-    // present_frames off there is no extra GPU wait, copy or pixel processing.
-    [slot_->fence.get() waitUntilCompleted];
-    require(slot_->fence.get().status == MTLCommandBufferStatusCompleted, "Metal agent readback failed");
-  }
-  for (const auto& pending : agent_presents_) {
-    yougame::agent_present::Image strip;
-    if (pending.pixels) {
-      const auto* bytes = static_cast<const uint8_t*>(pending.pixels.get().contents);
-      std::vector<uint8_t> rgb(size_t(pending.width) * pending.height * 3);
-      for (int y = 0; y < pending.height; ++y) {
-        for (int x = 0; x < pending.width; ++x) {
-          const auto* pixel = bytes + size_t(y) * pending.pitch + size_t(x) * 4;
-          auto* out = rgb.data() + (size_t(y) * pending.width + x) * 3;
-          out[0] = pixel[2]; out[1] = pixel[1]; out[2] = pixel[0];
-        }
-      }
-      strip = yougame::agent_present::downscale(rgb.data(), pending.width, pending.height, 480, false);
-    }
-    // The command buffer (and each presentDrawable) is committed before this
-    // hook. Use GL's source retrace, scene, dimensions, clocks and PPM writer.
-    evidence.after_swap(pending.present, pending.sim, pending.major, pending.minor,
-        pending.width, pending.height, pending.window_width, pending.window_height, std::move(strip));
-  }
-  agent_presents_.clear();
-}
-#endif
 void MetalBackend::flush_capture(Slot& slot) {
   if (!slot.readback_pending) return;
   const auto* bytes = static_cast<const uint8_t*>(slot.capture.get().contents);
@@ -1347,10 +1197,9 @@ void MetalBackend::flush_capture(Slot& slot) {
     }
   }
   // Keep the activation from readback time: a fallback may occur before this slot retires.
-  const auto output = mac_embed::limit_capture(rgb, slot.capture_width, slot.capture_height, slot.capture_retina);
   auto write = [&](const std::filesystem::path& path) {
     std::ofstream file(path, std::ios::binary);
-    file << "P6\n" << output.w << ' ' << output.h << "\n255\n";
+    file << "P6\n" << slot.capture_width << ' ' << slot.capture_height << "\n255\n";
     file.write(reinterpret_cast<const char*>(rgb.data()), rgb.size()); file.close();
     if (!file) host::log("metal: capture write failed: %s", path.c_str());
     return bool(file);
@@ -1359,14 +1208,14 @@ void MetalBackend::flush_capture(Slot& slot) {
   if (slot.test_shot) {
     if (test_all_) {
       // Preserve GL's :all hash of bottom-to-top RGB, without saving PPMs.
-      const size_t pitch = size_t(output.w) * 3;
-      for (int y = 0; y < output.h / 2; ++y)
+      const size_t pitch = size_t(slot.capture_width) * 3;
+      for (int y = 0; y < slot.capture_height / 2; ++y)
         std::swap_ranges(rgb.begin() + y * pitch, rgb.begin() + (y+1) * pitch,
-                         rgb.begin() + (output.h-1-y) * pitch);
+                         rgb.begin() + (slot.capture_height-1-y) * pitch);
       test_hashes_ << slot.test_present << ' ' << std::hex << hash_bytes(rgb.data(), rgb.size()) << std::dec << std::endl;
     } else if (write(test_dir_ / ("present-" + std::to_string(slot.test_present) + ".ppm"))) {
       test_shots_ << slot.test_present << ' ' << slot.test_sequence << ' '
-        << output.w << 'x' << output.h << ' '
+        << slot.capture_width << 'x' << slot.capture_height << ' '
         << std::hex << hash_bytes(rgb.data(), rgb.size()) << std::dec << std::endl;
     }
   }
@@ -1374,39 +1223,9 @@ void MetalBackend::flush_capture(Slot& slot) {
 }
 void MetalBackend::update_widescreen() {
   int width = width_, height = height_;
-  if (!mac_embed::drawable_size(window_, &width, &height)) SDL_GetWindowSize(window_, &width, &height);
+  SDL_GetWindowSize(window_, &width, &height);
   set_true_widescreen(options_.true_widescreen && !options_.widescreen,
                       true_widescreen_aspect(options_, width, height));
-}
-void MetalBackend::update_embed_scale() {
-  int w = 0, h = 0;
-  const bool retina = mac_embed::retina_size(window_, &w, &h);
-  if (!embed_scale_.update(retina, w, h, [this](int& w, int& h) { SDL_GetWindowSize(window_, &w, &h); })) return;
-  const int next = mac_embed::efb_scale(options_.efb_scale, h); // Metal's existing path has no SSAA multiplier.
-  if (next == scale_) return;
-  auto color = make_texture(EFB_WIDTH * next, EFB_HEIGHT * next, MTLPixelFormatRGBA8Unorm);
-  auto depth = make_texture(EFB_WIDTH * next, EFB_HEIGHT * next, MTLPixelFormatDepth32Float);
-  const BlitConstants full{{1, 1, 0, 0}, 0};
-  const auto offset = slot_->ring.upload(&full, sizeof full);
-  MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
-  pass.colorAttachments[0].texture = color.get();
-  pass.colorAttachments[0].loadAction = MTLLoadActionDontCare;
-  pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-  pass.depthAttachment.texture = depth.get();
-  pass.depthAttachment.loadAction = MTLLoadActionDontCare;
-  pass.depthAttachment.storeAction = MTLStoreActionStore;
-  id<MTLRenderCommandEncoder> encoder = [command_.get() renderCommandEncoderWithDescriptor:pass];
-  [encoder setRenderPipelineState:retina_resize_pso_.get()];
-  [encoder setDepthStencilState:clear_depth_.get()];
-  [encoder setCullMode:MTLCullModeNone];
-  [encoder setViewport:MTLViewport{0, 0, double(color.get().width), double(color.get().height), 0, 1}];
-  [encoder setVertexBuffer:slot_->ring.buffer.get() offset:offset atIndex:0];
-  [encoder setFragmentTexture:color_.get() atIndex:0];
-  [encoder setFragmentTexture:depth_.get() atIndex:1];
-  [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-  [encoder endEncoding];
-  color_ = std::move(color); depth_ = std::move(depth); scale_ = next;
-  host::log("embed: Metal EFB x%d for %dx%d px", scale_, w, h);
 }
 void MetalBackend::submit_frame(const Frame& frame, const DrawMatrices* overrides) {
   @autoreleasepool {
@@ -1429,7 +1248,6 @@ void MetalBackend::submit_frame(const Frame& frame, const DrawMatrices* override
     command_ = Object<id<MTLCommandBuffer>>([queue_.get() commandBuffer]);
     require(bool(command_), "Metal command buffer unavailable");
     command_.get().label = @"GX frame";
-    update_embed_scale();
     update_widescreen();
     set_css_scene(frame.scene_major == 1 && frame.scene_minor == 0);
     set_main_projection(frame_scene_draw(frame));
@@ -1464,13 +1282,10 @@ void MetalBackend::submit_frame(const Frame& frame, const DrawMatrices* override
     [command_.get() commit]; slot_->fence = command_; command_ = {};
     const double commit_ms = milliseconds(phase);
     phase = Clock::now();
-#ifdef YOUGAME_AGENT_TEST_HOOK
-    record_agent_presents();
-#endif
     const double evidence_ms = milliseconds(phase);
     phase = Clock::now();
     if (presented_ != present_before) {
-      mac_embed::frame_presented(window_); host::window_presented(presented_);
+      host::window_presented(presented_);
     }
     const double notify_ms = milliseconds(phase);
     phase = Clock::now();

@@ -13,11 +13,6 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_paths.h"
-#endif
-#include "yougame_box_present.h"
-#include "yougame_link.h"
 #include <windows.h>
 #include "gx_cache_prune.h"
 #include <d3d11_1.h>
@@ -60,7 +55,6 @@
 #include "exi_slippi.h"
 #endif
 #include "gx_shader.h"
-#include "yougame_parity.h"
 #include "crt_shader.h"
 #include "user_shader.h"
 #include "gx_texture.h"
@@ -75,7 +69,6 @@
 #ifdef GX_PC_SETTINGS
 #include "pc_settings.h"
 #include "arena_panel.h"
-#include "coming_soon_overlay.h"
 #include "lab_view.h"
 #endif
 
@@ -696,7 +689,7 @@ void D3D11Backend::init() {
   sd.Flags = allow_tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
   const HRESULT swapchain_hr = factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &sd, nullptr, nullptr, &swapchain_);
   if (FAILED(swapchain_hr)) {
-    if (yougame::embed_toplevel()) require(swapchain_hr, "toplevel flip swapchain");
+
     // Pre-Windows-10 runtimes have no flip-discard: fall back to the blit model.
     sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD; sd.BufferCount = 1; sd.Flags = 0; allow_tearing_ = false;
     require(factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &sd, nullptr, nullptr, &swapchain_), "swapchain");
@@ -896,7 +889,7 @@ void D3D11Backend::create_swapchain_targets(bool resize) {
 void D3D11Backend::apply_fullscreen_mode() {
   // Every embedded window, child or toplevel: a settings change (Internal resolution) used to reach
   // ResizeTarget/SetFullscreenState here in child embeds and leave the picture monitor-sized and cropped.
-  if (yougame::embedded()) opts_.exclusive_fullscreen = false;
+
   if (!swapchain_) return;
   BOOL was_exclusive = FALSE;
   swapchain_->GetFullscreenState(&was_exclusive, nullptr);
@@ -1906,15 +1899,6 @@ void D3D11Backend::present_efb(const EfbCopy& c) {
     rect[9] = (float)std::clamp((int)std::lround((double)c.src_h * scale_ / shader_h), 1, 4);
   }
   blit(efb_srv_.Get(), rect, efb_depth_srv_.Get(), crt_on ? crt : nullptr);
-#ifdef GX_PC_SETTINGS
-  // The Coming soon stickers go into the picture under a preset, so its lines and curve cover them.
-  coming_soon_overlay::set_in_picture(shader_on && settings_ui_);
-  if (shader_on && settings_ui_) {
-    settings_ui_->draw_picture_overlay(shader_w, shader_h);
-    reset_bound();
-    context_->IASetInputLayout(layout_.Get());
-  }
-#endif
   if (shader_on) {
     context_->OMSetRenderTargets(1, &rtv, nullptr);
     const user_shader::Target where{vp.TopLeftX, vp.TopLeftY, (uint32_t)std::max(vw, 1.0f), (uint32_t)std::max(vh, 1.0f)};
@@ -2026,26 +2010,18 @@ void D3D11Backend::write_capture(const std::string& path, uint64_t sequence) {
     if (pending_captures_.size() >= opts_.capture_burst) flush_captures();
     return;
   }
-  #ifdef YOUGAME_AGENT_TEST_HOOK
-    yougame::agent_paths::ppm(path, desc.Width, desc.Height, data, m.RowPitch);
-#else
     std::ofstream f(path, std::ios::binary);
   f << "P6\n" << desc.Width << ' ' << desc.Height << "\n255\n";
   for (UINT y = 0; y < desc.Height; ++y) for (UINT x = 0; x < desc.Width; ++x) f.write((const char*)data + (size_t)y * m.RowPitch + x * 4, 3);
-#endif
   context_->Unmap(capture_staging_.Get(), 0);
   host::log("captured %s (sim frame %llu)", path.c_str(), (unsigned long long)sequence);
 }
 
 void D3D11Backend::flush_captures() {
   for (const PendingCapture& pc : pending_captures_) {
-    #ifdef YOUGAME_AGENT_TEST_HOOK
-    yougame::agent_paths::ppm(pc.path, pc.w, pc.h, pc.data.data(), pc.pitch);
-#else
     std::ofstream f(pc.path, std::ios::binary);
     f << "P6\n" << pc.w << ' ' << pc.h << "\n255\n";
     for (UINT y = 0; y < pc.h; ++y) for (UINT x = 0; x < pc.w; ++x) f.write((const char*)pc.data.data() + (size_t)y * pc.pitch + x * 4, 3);
-#endif
     host::log("captured %s (sim frame %llu)", pc.path.c_str(), (unsigned long long)pc.sequence);
   }
   pending_captures_.clear();
@@ -2553,32 +2529,27 @@ void D3D11Backend::submit_frame(const Frame& frame, const DrawMatrices* override
     const bool synced = opts_.vsync || tear_free_;
     // Keep the existing deadline timer, simulation-locked path and DXGI queue limit.
     // A subframe without a timer deadline may rely on Reflex/vblank pacing: keep interval 1.
-    const bool paced = (present_deadline_ > 0 || opts_.subframe == SubFrameMode::Off ||
-                        !subframe_useful(opts_.fps_cap));
-    const auto present = yougame::box_present::choose(yougame::embedded(), opts_.vsync,
-        host::window_is_fullscreen() || fullscreen_state_.exclusive_active,
-        yougame::box_present::agent_override(), flip_model_, paced, allow_tearing_ && !fullscreen_state_.exclusive_active, synced, yougame::embed_toplevel());
-    if (const auto line = yougame::box_present::announcement(present)) host::log("%s", line);
+    const UINT interval = synced ? 1u : 0u;
+    const UINT present_flags = !synced && allow_tearing_ && !fullscreen_state_.exclusive_active ? DXGI_PRESENT_ALLOW_TEARING : 0u;
     const double present_call = Stopwatch::now();
     // Hidden standalone windows use DXGI's occlusion probe; the embed must keep drawing
     // because its loading cover is released only after the first real frame.
-    const bool test_only = occluded_ && !yougame::embedded();
+    const bool test_only = occluded_;
     const HRESULT present_result = [&] { host::perf::Scope wait_cost(host::perf::Stage::Wait);
         if (test_only) return swapchain_->Present(0, DXGI_PRESENT_TEST);
-        return swapchain_->Present(present.interval, present.flags); }();
+        return swapchain_->Present(interval, present_flags); }();
     if ((present_result == DXGI_STATUS_OCCLUDED) != occluded_) {
       occluded_ = present_result == DXGI_STATUS_OCCLUDED;
       host::log(occluded_ ? "d3d11: window hidden, presents paused" : "d3d11: window visible, presents resumed");
     }
     // Ready includes a real hidden Present (DXGI_STATUS_OCCLUDED), but never a probe.
-    yougame::parity::signals.presented(!test_only && SUCCEEDED(present_result) && frame.test_fill < 0);
     if (!test_only && SUCCEEDED(present_result) && frame.test_fill < 0) host::startup_first_frame();
     // A synced Present blocks until the display takes the previous frame: waiting, not drawing.
     // Counted as drawing it inflated the render-time estimate to a whole refresh under synced
     // pacing, and the presentation loop then aimed every frame one refresh too late.
     present_wait_ += Stopwatch::now() - present_call;
     if (!test_only) pacing_diagnostics_.present(present_call, opts_.vsync,
-        present.interval, present.flags, opts_.fps_cap, fullscreen_state_.exclusive_active);
+        interval, present_flags, opts_.fps_cap, fullscreen_state_.exclusive_active);
     ++frames_presented_;
     if ((frames_presented_ & 31) == 0) update_variable_refresh();
     if (capture) { capture_sequence_ = frame.sequence; write_capture(path, frame.sequence); }

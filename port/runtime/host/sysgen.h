@@ -22,8 +22,8 @@ struct Config {
   std::filesystem::path build_dir, sys_dir, data_dir;
 };
 // The player's own folder for generated Sys files, used when the command line names none outside the
-// game folder. Windows: %LOCALAPPDATA%\MeleeUnlocked-YouGame\User (the folder a double-click and the
-// launcher use). Linux: $XDG_DATA_HOME/MeleeUnlocked-YouGame/User, else ~/.local/share/... Mac: the
+// game folder. Windows: %LOCALAPPDATA%\MeleeUnlocked\User (the folder a double-click and the
+// launcher use). Linux: $XDG_DATA_HOME/MeleeUnlocked/User, else ~/.local/share/... Mac: the
 // bundle's own profile folder, $XDG_DATA_HOME/melee-unlocked/User, else ~/.local/share/... (full_launch.h).
 // Empty when the system names no such folder.
 std::filesystem::path user_data_dir();

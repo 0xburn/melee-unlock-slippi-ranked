@@ -211,12 +211,8 @@ static bool has_nvidia_adapter() {
   return found;
 }
 
-// The note that Streamline faulted on this PC: it holds the game version it happened on, and a start of that
-// version leaves Streamline out. A new version tries it again. It lives in the game's data folder when the app
-// gives one (YOUGAME_DATA): the app starts the game in an AppContainer, where the game's own folder is read-only,
-// so a note beside the game could not be written and the fallback never took. A note beside the game (older
-// versions, or a game started on its own) still counts.
-static std::wstring g_fault_note, g_fault_note_beside_game;
+// Remember which version faulted before trying Streamline again.
+static std::wstring g_fault_note;
 static bool fault_note_says_this_version(const std::wstring& path) {
   if (path.empty()) return false;
   FILE* f = _wfopen(path.c_str(), L"rb");
@@ -227,7 +223,7 @@ static bool fault_note_says_this_version(const std::wstring& path) {
   return std::string(text, n).rfind(MELEE_PORT_VERSION, 0) == 0;
 }
 static bool fault_noted() {
-  return fault_note_says_this_version(g_fault_note) || fault_note_says_this_version(g_fault_note_beside_game);
+  return fault_note_says_this_version(g_fault_note);
 }
 static void write_fault_note(const char* what) {
   if (g_fault_note.empty()) return;
@@ -238,15 +234,6 @@ static void write_fault_note(const char* what) {
     std::fputc('\n', f);
     std::fclose(f);
   }
-}
-// A folder the game may write to: the app's data folder for this game, else the game's own folder.
-static std::wstring writable_dir(const std::wstring& exe_dir) {
-  const wchar_t* data = _wgetenv(L"YOUGAME_DATA");
-  if (data && *data) {
-    const DWORD attrs = GetFileAttributesW(data);
-    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) return data;
-  }
-  return exe_dir;
 }
 // slInit with structured exception handling around it: no C++ objects here. An access violation inside
 // Streamline's own start (seen on a player's PC, in the app's AppContainer) used to end the game; now the game
@@ -273,9 +260,7 @@ bool restart_without_streamline() {
 
 bool init(const std::wstring& exe_dir, bool load_frame_generation) {
   const char* force_fault = std::getenv("MELEE_SL_TEST_DEVICE_FAULT");   // tests the fallback below
-  const std::wstring writable = writable_dir(exe_dir);
-  g_fault_note = writable + L"/streamline-faulted.txt";
-  g_fault_note_beside_game = writable == exe_dir ? std::wstring() : exe_dir + L"/streamline-faulted.txt";
+  g_fault_note = exe_dir + L"/streamline-faulted.txt";
   if (fault_noted()) {
     host::log("dlss: Streamline faulted on this PC with this version; not loaded (DLSS, Reflex and frame generation unavailable; delete streamline-faulted.txt to try again)");
     return false;
@@ -320,9 +305,9 @@ bool init(const std::wstring& exe_dir, bool load_frame_generation) {
   pref.logLevel = host::test_env::getenv("MELEE_TEST_SL_VERBOSE") ? sl::LogLevel::eVerbose : sl::LogLevel::eDefault;
   pref.pathsToPlugins = plugin_dirs;
   pref.numPathsToPlugins = 1;
-  // Streamline's logs go where the game may write (see writable_dir), or nowhere: a folder it cannot create is
+  // Streamline's logs go where the game may write or nowhere: a folder it cannot create is
   // not handed to it.
-  static std::wstring logs; logs = writable + L"\\streamline-logs";
+  static std::wstring logs; logs = exe_dir + L"\\streamline-logs";
   const bool logs_ok = CreateDirectoryW(logs.c_str(), nullptr) || GetLastError() == ERROR_ALREADY_EXISTS;
   pref.pathToLogsAndData = logs_ok ? logs.c_str() : nullptr;
   pref.logMessageCallback = log_callback;

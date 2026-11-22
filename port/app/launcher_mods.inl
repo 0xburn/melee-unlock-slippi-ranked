@@ -291,7 +291,7 @@ std::string hash_file(const std::wstring& path, LPCWSTR algorithm) {
   if (BCryptOpenAlgorithmProvider(&alg, algorithm, nullptr, 0) < 0) return {};
   std::string out;
   if (BCryptCreateHash(alg, &h, nullptr, 0, nullptr, 0, 0) >= 0) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     std::vector<char> buf(4 << 20);
     bool ok = (bool)in;
     while (ok && in) {

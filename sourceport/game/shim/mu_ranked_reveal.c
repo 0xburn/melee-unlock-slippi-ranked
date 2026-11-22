@@ -1,5 +1,5 @@
-/* YouGame CSS-return rank reveal. GPL-3.0-or-later.
- * Presentation only: the room's result is the only rating authority. No E4,
+/* Post-set rank reveal. GPL-3.0-or-later.
+ * Presentation only: Slippi's match result is the only rating authority. No E4,
  * matchmaking, scene changes, inputs or writes to the simulation/set state.
  * The portable model is also compiled directly by the host regression test. */
 #include <mu_ranked_wire.h>
@@ -20,13 +20,13 @@ enum {
     REVEAL_HOLD_END = REVEAL_GLOW_END + 180
 };
 typedef struct MuReveal {
-    MuYgResult result;
+    MuRankResult result;
     unsigned frame;
     int active, reduced, logged;
 } MuReveal;
 typedef struct MuRevealPose {
     float old_y, old_alpha, new_y, new_alpha, scale, glow;
-    MuYgI32 rating;
+    MuRankI32 rating;
     int direction, changed, tier_up;
 } MuRevealPose;
 
@@ -37,17 +37,17 @@ static float reveal_progress(unsigned frame, unsigned first, unsigned last)
     return (float)(frame - first) / (float)(last - first);
 }
 
-static int reveal_direction(const MuYgResult* r)
+static int reveal_direction(const MuRankResult* r)
 {
     return (r->rank_after.order > r->rank_before.order) -
            (r->rank_after.order < r->rank_before.order);
 }
 
-static const char* reveal_note(const MuYgResult* r)
+static const char* reveal_note(const MuRankResult* r)
 {
-    if (r->status == MU_YG_RESULT_RECORDING) return "Result being recorded";
-    if (r->status == MU_YG_RESULT_UNRATED) return "Unrated result";
-    if (r->status == MU_YG_RESULT_ERROR) return "Result unavailable";
+    if (r->status == MU_RANK_RESULT_RECORDING) return "Result being recorded";
+    if (r->status == MU_RANK_RESULT_UNRATED) return "Unrated result";
+    if (r->status == MU_RANK_RESULT_ERROR) return "Result unavailable";
     if (!r->rank_after.placed) return "Placement progress";
     if (!r->rank_before.placed) return "Rank revealed";
     if (reveal_direction(r) < 0) return "Demoted to";
@@ -58,20 +58,10 @@ static const char* reveal_note(const MuYgResult* r)
 
 static const char* reveal_reason(unsigned reason)
 {
-    switch (reason) {
-    case MU_YG_REASON_PACK: return "Pack is not eligible for rating";
-    case MU_YG_REASON_VOID: return "Set was voided";
-    case MU_YG_REASON_OTHER: return "Room marked this set unrated";
-    case MU_YG_REASON_MALFORMED: return "Room result could not be read";
-    case MU_YG_REASON_UNAVAILABLE: return "Room result is unavailable";
-    /* An unrated set the room gave by a leave (a test build's set). */
-    case MU_YG_REASON_FORFEIT_WON: return "Opponent left - set not rated";
-    case MU_YG_REASON_FORFEIT_LOST: return "You left - set not rated";
-    default: return "No rated result supplied by the room";
-    }
+    return reason == MU_RANK_REASON_MALFORMED ? "Could not read the set result" : "Set result unavailable";
 }
 
-static int reveal_same_rank(const MuYgRank* a, const MuYgRank* b)
+static int reveal_same_rank(const MuPlayerRank* a, const MuPlayerRank* b)
 {
     return a->known == b->known && a->placed == b->placed && a->tier == b->tier &&
            a->division == b->division && a->order == b->order && a->rating == b->rating &&
@@ -80,15 +70,15 @@ static int reveal_same_rank(const MuYgRank* a, const MuYgRank* b)
 }
 
 /* Repeated polls never restart an animation. No memcmp of padded C structs. */
-static void reveal_accept(MuReveal* s, const MuYgResult* input)
+static void reveal_accept(MuReveal* s, const MuRankResult* input)
 {
-    MuYgResult r = *input;
-    if (r.status > MU_YG_RESULT_ERROR || (r.status == MU_YG_RESULT_RECORDED &&
+    MuRankResult r = *input;
+    if (r.status > MU_RANK_RESULT_ERROR || (r.status == MU_RANK_RESULT_RECORDED &&
         (!r.rank_before.known || !r.rank_after.known))) {
         memset(&r, 0, sizeof r);
-        r.status = MU_YG_RESULT_ERROR; r.reason = MU_YG_REASON_MALFORMED;
+        r.status = MU_RANK_RESULT_ERROR; r.reason = MU_RANK_REASON_MALFORMED;
     }
-    if (r.status != MU_YG_RESULT_RECORDED) {
+    if (r.status != MU_RANK_RESULT_RECORDED) {
         /* Non-authoritative numbers and rank labels can never leak into UI. */
         r.before = r.after = 0;
         memset(&r.rank_before, 0, sizeof r.rank_before);
@@ -100,7 +90,7 @@ static void reveal_accept(MuReveal* s, const MuYgResult* input)
         !reveal_same_rank(&s->result.rank_after, &r.rank_after)) {
         s->result = r; s->frame = 0; s->logged = 0;
     }
-    s->active = r.status != MU_YG_RESULT_NONE;
+    s->active = r.status != MU_RANK_RESULT_NONE;
 }
 
 /* Tenths as the panel shows them: "872", "1534.7", "-25" (mu_rank_number, whose header needs the
@@ -116,13 +106,13 @@ static void reveal_tenths(char out[24], long long tenths)
  * change, never a name or id. Zero when there is nothing new to log. */
 static int reveal_shown_line(MuReveal* s, char out[160])
 {
-    const MuYgResult* r = &s->result;
+    const MuRankResult* r = &s->result;
     char before[24], after[24], delta[24];
     long long d = (long long)r->after - r->before;
-    if (!s->active || r->status != MU_YG_RESULT_RECORDED || s->logged) return 0;
+    if (!s->active || r->status != MU_RANK_RESULT_RECORDED || s->logged) return 0;
     s->logged = 1;
     reveal_tenths(before, r->before); reveal_tenths(after, r->after); reveal_tenths(delta, d);
-    snprintf(out, 160, "yougame: ranked reveal shown: %.24s %s -> %.24s %s (%s%s)\n",
+    snprintf(out, 160, "slippi: ranked reveal shown: %.24s %s -> %.24s %s (%s%s)\n",
              r->rank_before.label, before, r->rank_after.label, after, d > 0 ? "+" : "", delta);
     return 1;
 }
@@ -130,10 +120,10 @@ static int reveal_shown_line(MuReveal* s, char out[160])
 static MuRevealPose reveal_pose(const MuReveal* s)
 {
     MuRevealPose p;
-    const MuYgResult* r = &s->result;
+    const MuRankResult* r = &s->result;
     float old_t, new_t, pop_t, glow_t, rating_t;
     memset(&p, 0, sizeof p); p.scale = 1;
-    if (!s->active || r->status != MU_YG_RESULT_RECORDED) return p;
+    if (!s->active || r->status != MU_RANK_RESULT_RECORDED) return p;
     p.direction = reveal_direction(r);
     p.changed = r->rank_before.placed != r->rank_after.placed ||
                 r->rank_before.order != r->rank_after.order ||
@@ -150,7 +140,7 @@ static MuRevealPose reveal_pose(const MuReveal* s)
     {
         double t = rating_t, u = 1-t;
         double rating = r->before + ((double)r->after-r->before)*(1-u*u*u);
-        p.rating = rating_t >= 1 ? r->after : (MuYgI32)rating;
+        p.rating = rating_t >= 1 ? r->after : (MuRankI32)rating;
     }
     p.old_alpha = p.changed ? 1-old_t : 0;
     p.old_y = -18*old_t;
@@ -173,10 +163,10 @@ static void reveal_tick(MuReveal* s)
     if (s->active && s->frame < REVEAL_HOLD_END) ++s->frame;
 }
 
-/* "Waiting for the room's result" stays until the room answers; the answer restarts the frame. */
+/* "Waiting for the set result" stays until Slippi answers; the answer restarts the frame. */
 static int reveal_done(const MuReveal* s)
 {
-    return s->active && s->result.status != MU_YG_RESULT_RECORDING && s->frame >= REVEAL_HOLD_END;
+    return s->active && s->result.status != MU_RANK_RESULT_RECORDING && s->frame >= REVEAL_HOLD_END;
 }
 
 #ifndef MU_RANKED_REVEAL_TEST
@@ -249,7 +239,7 @@ static void reveal_close(void)
     reveal.panel = reveal.old_label = reveal.new_label = NULL;
 }
 
-static void reveal_label(HSD_Text* t, const MuYgRank* rank, float offset, float scale, float alpha)
+static void reveal_label(HSD_Text* t, const MuPlayerRank* rank, float offset, float scale, float alpha)
 {
     unsigned c = mu_rank_text_rgb(rank->tier);
     GXColor color = {c >> 16, c >> 8, c, (unsigned char)(alpha*255)};
@@ -274,12 +264,11 @@ static void reveal_label(HSD_Text* t, const MuYgRank* rank, float offset, float 
 static void reveal_draw(void)
 {
     MuReveal* s = &reveal.model;
-    MuYgResult* r = &s->result;
+    MuRankResult* r = &s->result;
     MuRevealPose p = reveal_pose(s);
     GXColor chip = {0xb5, 0xc0, 0xcd, 0xff};
     char d[24], current[24], line[128];
-    int practice = mu_ranked_practice();
-    int recorded = !practice && r->status == MU_YG_RESULT_RECORDED;
+    int recorded = r->status == MU_RANK_RESULT_RECORDED;
     if (!reveal.panel) {
         reveal.panel = reveal_text(REVEAL_X, REVEAL_Y, .42f);
         reveal.old_label = reveal_text(REVEAL_LABEL_X, REVEAL_LABEL_Y, .5f);
@@ -295,23 +284,14 @@ static void reveal_draw(void)
         HSD_SisLib_803A6B98(reveal.panel, 12, REVEAL_RATING_Y, "%s", "");
         HSD_SisLib_803A7548(reveal.panel, 1, .38f, .38f);
     }
-    HSD_SisLib_803A70A0(reveal.panel, 0, "%s", practice ? "Practice - not rated" : "Ranked");
+    HSD_SisLib_803A70A0(reveal.panel, 0, "%s", "Ranked");
     reveal.old_label->hidden = reveal.new_label->hidden = !recorded;
     if (!recorded) {
         if (reveal.old_badge) mu_rank_badge_free(reveal.old_badge);
         if (reveal.new_badge) mu_rank_badge_free(reveal.new_badge);
         reveal.old_badge = reveal.new_badge = NULL;
-        if (practice) {
-            const MuRankedSet* set = mu_ranked_set();
-            if (set->score[0] > set->score[1])
-                sprintf(line, "You won %u-%u", (unsigned)set->score[0], (unsigned)set->score[1]);
-            else if (set->score[1] > set->score[0])
-                sprintf(line, "CPU won %u-%u", (unsigned)set->score[1], (unsigned)set->score[0]);
-            else sprintf(line, "Set tied %u-%u", (unsigned)set->score[0], (unsigned)set->score[1]);
-        } else {
-            sprintf(line, "%s", r->status == MU_YG_RESULT_RECORDING ?
-                    "Waiting for the room's result" : reveal_reason(r->reason));
-        }
+        sprintf(line, "%s", r->status == MU_RANK_RESULT_RECORDING ?
+                "Waiting for the set result" : reveal_reason(r->reason));
         HSD_SisLib_803A70A0(reveal.panel, 1, "%s", line);
         return;
     }
@@ -343,23 +323,23 @@ void mu_ranked_reveal_enter(void)
 
 void mu_ranked_reveal_frame(void)
 {
-    MuYgRanks ranks;
-    MuYgResult error;
+    MuPlayerRanks ranks;
+    MuRankResult error;
     MuReveal* s = &reveal.model;
     unsigned previous;
     if (!mu_slippi_css_online() || mu_slippi_state()->mode != MU_SLP_MODE_RANKED ||
-        !(mu_slippi_ranked_available() || mu_slippi_yougame_pick())) {   /* the app's Ranked, or the launcher's YouGame Ranked row */
+        !mu_slippi_ranked_available()) {
         reveal_close(); memset(s, 0, sizeof *s); return;
     }
     if (mu_slippi_css_scene_request()) { reveal_close(); return; }
     s->reduced = mu_rank_badge_reduced_motion();
     if (mu_ranked_read_ranks(&ranks)) reveal_accept(s, &ranks.result);
     else {
-        memset(&error, 0, sizeof error); error.status = MU_YG_RESULT_ERROR;
-        error.reason = MU_YG_REASON_UNAVAILABLE;
+        memset(&error, 0, sizeof error); error.status = MU_RANK_RESULT_ERROR;
+        error.reason = MU_RANK_REASON_UNAVAILABLE;
         /* A failed poll cannot imply that a set exists on an idle CSS, nor reopen a result
          * that has already had its turn (the panel would flicker back over the CSS). */
-        if (s->active && s->result.status != MU_YG_RESULT_RECORDED && !reveal_done(s))
+        if (s->active && s->result.status != MU_RANK_RESULT_RECORDED && !reveal_done(s))
             reveal_accept(s, &error);
     }
     if (!s->active || reveal_done(s)) { reveal_close(); return; }
@@ -367,13 +347,13 @@ void mu_ranked_reveal_frame(void)
     reveal_draw();
     {
         char line[160];
-        if (reveal.panel && !mu_ranked_practice() && reveal_shown_line(s, line)) OSReport("%s", line);
+        if (reveal.panel && reveal_shown_line(s, line)) OSReport("%s", line);
     }
     reveal_tick(s);
     // Allow the result to finish drawing/animating before handing the game back.
     if (reveal.panel && previous >= REVEAL_GLOW_END) mu_ranked_update_result_shown();
     /* Existing game's menu confirmation, once at the swap; no imported sounds. */
-    if (!s->reduced && s->result.status == MU_YG_RESULT_RECORDED &&
+    if (!s->reduced && s->result.status == MU_RANK_RESULT_RECORDED &&
         previous < REVEAL_NEW_START && s->frame == REVEAL_NEW_START &&
         reveal_direction(&s->result)) lbAudioAx_80024030(1);
 }

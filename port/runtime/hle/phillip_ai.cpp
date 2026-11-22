@@ -17,7 +17,6 @@
 #include <nlohmann/json.hpp>
 #include <onnxruntime_c_api.h>
 
-namespace yougame { bool active(); }   // yougame_link.h: launched by the YouGame desktop app
 
 #ifdef _WIN32
 #include <windows.h>
@@ -259,7 +258,7 @@ void fetch_later(const Entry& e, bool retry = false) {
   static const bool off = std::getenv("MELEE_PRO_AI_NO_DOWNLOAD") != nullptr;
   // Never inside the YouGame app: its builds ship no catalog, and one dropped beside the game (a mod or
   // a pack) must not start downloads until the catalog is part of the verified build.
-  if (yougame::active()) return;
+
   // Two places only: Phillip's published models (a pinned Hugging Face commit) and this game's own
   // content release, which holds the policies trained here.
   const bool known_source = e.source.rfind("https://huggingface.co/vladfi/phillip-models/resolve/", 0) == 0 ||

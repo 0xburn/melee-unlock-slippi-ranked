@@ -124,41 +124,9 @@ inline std::vector<std::filesystem::path> settings_builds(const std::filesystem:
   return builds;
 }
 
-// Process-local grant, shared by simulation, matchmaking and login threads. Only the answer to
-// this run's slippiLink request may install it; the first accepted file wins for the process.
-namespace detail {
-inline std::mutex app_sign_in_mutex;
-inline std::filesystem::path app_sign_in_override;
-}
-inline void set_app_sign_in(const std::filesystem::path& file) {
-  if (file.empty()) return;
-  std::lock_guard<std::mutex> lock(detail::app_sign_in_mutex);
-  if (detail::app_sign_in_override.empty()) detail::app_sign_in_override = file;
-}
-// The run's grant takes priority over the launch-time environment grant. Exactly that file is
-// read, never written, and no launcher folder is searched. Empty when neither is set.
-inline std::filesystem::path app_sign_in() {
-  {
-    std::lock_guard<std::mutex> lock(detail::app_sign_in_mutex);
-    if (!detail::app_sign_in_override.empty()) return detail::app_sign_in_override;
-  }
-#ifdef _WIN32
-  wchar_t* value = nullptr;
-  size_t length = 0;
-  std::filesystem::path file;
-  if (_wdupenv_s(&value, &length, L"YOUGAME_SLIPPI_USER_JSON") == 0 && value && *value) file = value;
-  free(value);
-  return file;
-#else
-  const char* value = std::getenv("YOUGAME_SLIPPI_USER_JSON");
-  return value && *value ? std::filesystem::path(value) : std::filesystem::path();
-#endif
-}
-
 inline Profile resolve(const std::filesystem::path& local_user_dir,
                        const std::vector<std::filesystem::path>& roots = launcher_roots()) {
   if (host::test_env::agent_copy()) return {};
-  if (const auto app = app_sign_in(); !app.empty()) return read(app);
   if (auto profile = read(local_user_dir / "user.json")) return profile;
   for (const auto& root : roots) {
     for (const char* build : {"netplay", "playback"})
@@ -200,38 +168,4 @@ inline Missing why_missing(const std::filesystem::path& local_user_dir,
   return launcher ? Missing::SignIn : Missing::Launcher;
 }
 
-// Why the YouGame app's Unranked cannot use a Slippi login, for a log line that names no path: no
-// sign-in file, one that is not a whole account (unreadable, not JSON, no uid or play key), or an
-// account that was never finished (no connect code). The first file found decides; the app's file
-// (app_sign_in) is the only one when it names one.
-enum class Unusable { FileMissing, Unreadable, NoConnectCode };
-inline Unusable why_unusable_grant() {
-  const auto file = app_sign_in();
-  if (file.empty()) return Unusable::FileMissing;
-  std::error_code ec;
-  if (!std::filesystem::is_regular_file(file, ec)) return Unusable::FileMissing;
-  std::ifstream input(file, std::ios::binary);
-  if (!input) return Unusable::Unreadable;
-  const auto data = nlohmann::json::parse(input, nullptr, false);
-  if (text(data, "uid").empty() || text(data, "playKey").empty()) return Unusable::Unreadable;
-  if (text(data, "connectCode").empty()) return Unusable::NoConnectCode;
-  return Unusable::FileMissing; // As with why_unusable(), called only after login failed.
-}
-inline Unusable why_unusable(const std::filesystem::path& local_user_dir,
-                             const std::vector<std::filesystem::path>& roots = launcher_roots()) {
-  std::error_code ec;
-  const auto app = app_sign_in();
-  for (const auto& file : app.empty() ? sign_in_files(local_user_dir, roots) : std::vector<std::filesystem::path>{app}) {
-    if (!std::filesystem::is_regular_file(file, ec)) continue;
-    std::ifstream input(file, std::ios::binary);
-    if (!input) return Unusable::Unreadable;
-    const auto data = nlohmann::json::parse(input, nullptr, false);
-    if (text(data, "uid").empty() || text(data, "playKey").empty()) return Unusable::Unreadable;
-    if (text(data, "connectCode").empty()) return Unusable::NoConnectCode;
-  }
-  return Unusable::FileMissing;
-}
-inline const char* unusable_text(Unusable why) {
-  return why == Unusable::FileMissing ? "file missing" : why == Unusable::Unreadable ? "unreadable" : "no connect code";
-}
 }  // namespace slippi::account

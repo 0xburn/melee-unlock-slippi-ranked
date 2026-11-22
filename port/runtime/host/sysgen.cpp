@@ -194,7 +194,7 @@ std::filesystem::path user_data_dir() {
   wchar_t local[MAX_PATH] = {};
   const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
   if (n == 0 || n >= MAX_PATH) return {};
-  return std::filesystem::path(local) / L"MeleeUnlocked-YouGame" / L"User";
+  return std::filesystem::path(local) / L"MeleeUnlocked" / L"User";
 #else
   const char* xdg = std::getenv("XDG_DATA_HOME");
   const char* home = std::getenv("HOME");
@@ -205,7 +205,7 @@ std::filesystem::path user_data_dir() {
 #ifdef __APPLE__
   return base / "melee-unlocked" / "User";
 #else
-  return base / "MeleeUnlocked-YouGame" / "User";
+  return base / "MeleeUnlocked" / "User";
 #endif
 #endif
 }

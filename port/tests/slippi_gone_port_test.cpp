@@ -10,7 +10,7 @@
 namespace {
 using namespace slippi;
 constexpr int kPad = 12, kFrames = 7;
-constexpr uint8_t kOldBuildCaps2 = MU_BUILD_CAPS2_FRIENDS_LOBBY | MU_BUILD_CAPS2_LOCAL_PARTNER;
+constexpr uint8_t kOldBuildCaps2 = 0x03 /* historical peer flags */;
 constexpr uint8_t kNewBuildCaps2 = kOldBuildCaps2 | MU_BUILD_CAPS2_GONE_OWN_FRAMES;
 int failures = 0;
 void check(bool ok, const char* name) {
@@ -145,8 +145,8 @@ void the_game_calls_them() {
   check(online.find("g_gone_own_frames = -1;\n    std::fill(std::begin(g_gone_last_frame), std::end(g_gone_last_frame), slippi::kNoFrame);") != std::string::npos,
         "a new match forgets the last match's latches");
   check(net.find("slippi::EveryPeerReadsGoneOwnFrames(") != std::string::npos, "the client uses the tested gate");
-  check(net.find("MU_BUILD_CAPS2_LOCAL_PARTNER | MU_BUILD_CAPS2_GONE_OWN_FRAMES") != std::string::npos, "we tell peers we read this way");
-  check(net.find("if (machine_pad_format_ && SenderPort(peer) != port)") != std::string::npos, "a build message can only speak for its sender");
+  check(net.find("*p << (uint8_t)(MU_BUILD_CAPS2_GONE_OWN_FRAMES") != std::string::npos, "we tell peers we read this way");
+  check(net.find("if (SenderPort(peer) != port)") != std::string::npos, "a build message can only speak for its sender");
 }
 }  // namespace
 

@@ -6,7 +6,7 @@
  * exactly as the SDK one. CMakeLists.txt builds it in place of the SDK file. */
 #include <dolphin.h>
 
-#include "../../extern/melee/libs/dolphin/src/dolphin/ax/__ax.h"
+#include "ax/__ax.h"
 #include <dolphin/ax.h>
 #include <dolphin/dsp.h>
 

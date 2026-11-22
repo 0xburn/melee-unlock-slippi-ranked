@@ -32,7 +32,6 @@
 namespace gx {
 
 bool remix_requested() {
-  // Never inside YouGame: only the player's Lighting choice turns Remix on there.
   static const bool on = [] { const char* v = host::test_env::getenv("MELEE_REMIX"); return v && v[0] == '1'; }();
   return on;
 }
@@ -192,8 +191,7 @@ RemixBridge::~RemixBridge() {
 bool RemixBridge::start(int width, int height, bool hidden, std::string* error, void* parent) {
   Impl& m = *impl_;
   std::wstring dir;
-  // MELEE_REMIX_DIR never applies inside YouGame: SetDllDirectoryW below makes it a search path for every DLL.
-  if (const wchar_t* v = host::test_env::yougame_session ? nullptr : _wgetenv(L"MELEE_REMIX_DIR")) dir = v;
+  if (const wchar_t* v = _wgetenv(L"MELEE_REMIX_DIR")) dir = v;
   else {
     wchar_t exe[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);

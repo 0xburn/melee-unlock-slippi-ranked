@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import unittest
 
-from yougame_console_wiring_test import body
+from source_test_helpers import body
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -225,8 +225,6 @@ class PipelineCacheWiring(unittest.TestCase):
         request = shutdown.index('::gx::cache_store::request_flush_all("exit")')
         wait = shutdown.index("::gx::cache_store::wait_flush_all(caches, caches_due);")
         self.assertLess(shutdown.index("host::set_process_ending();"), request)
-        self.assertLess(request, shutdown.index('console_engine().end("window closed")'))
-        self.assertLess(shutdown.index("yougame::console::wait_friends_retired(2000);"), wait)
         self.assertLess(wait, shutdown.index("->reset();"))
         self.assertNotIn("flush_all(", shutdown[:shutdown.index("->reset();")].replace("request_flush_all(", "").replace("wait_flush_all(", ""))
         exit_path = main[main.index("} catch (const ExitRequested& stop) {"):]
@@ -249,14 +247,7 @@ class PipelineCacheWiring(unittest.TestCase):
         self.assertLess(restart.index('::gx::cache_store::flush_all("relaunch"'), restart.index("CreateProcessW("))
         looks = body(host, "restart_with_mod_looks")
         self.assertLess(looks.index('::gx::cache_store::flush_all("relaunch"'), looks.index("CreateProcessW("))
-        link = source("port/runtime/hle/yougame_link.cpp")
-        entry = body(link, "friends_entry")
-        self.assertLess(entry.index('::gx::cache_store::flush_all("relaunch"'), entry.index("prepared = handoff(c,relaunching"))
-        # Asked for as the room opens, so the flush at the handoff usually has nothing left to write.
-        opened = entry[entry.index("io.opened = [](const std::string& code) {"):]
-        opened = opened[:opened.index("};")]
-        self.assertIn('if (g_stdio && g_relaunch) ::gx::cache_store::request_flush_all("relaunch");', opened)
-        for text in (main, host, link):
+        for text in (main, host):
             self.assertIn('#include "pipeline_cache_store.h"', text)
 
     def test_first_start_shows_progress_not_a_frozen_window(self):

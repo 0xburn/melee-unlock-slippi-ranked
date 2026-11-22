@@ -55,9 +55,6 @@ static GmSquadMember s_lineup[GMSQUAD_PORTS][GMSQUAD_SIZE];
 static u8 s_lineup_count[GMSQUAD_PORTS];
 static u8 s_current[GMSQUAD_PORTS];
 static u32 s_held_frame[GMSQUAD_PORTS];
-/* Friends' costume rule (squad_console_rule): last asked armed, and a standard copy over its size
- * in this console session (never on the vanilla disc), which refuses the session's squads. */
-static bool s_console_rule, s_console_over;
 
 static void init(void)
 {
@@ -71,7 +68,7 @@ static void init(void)
 bool gmSquad_ModeAllowed(void)
 {
     /* The explicit squad row runs unranked singles on each player's own CSS. */
-    if (gm_GetCurrentGameMode() == GM_HANYU_CSS && (gmSquad_OnlineChosen() || gmSquad_LobbyChosen())) return true;
+    if (gm_GetCurrentGameMode() == GM_HANYU_CSS && false) return true;
     /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
      * The menu-free online harness enters debug VS after canonical setup. */
     if (gm_GetCurrentGameMode() == GM_DEBUG_VS && mu_online_harness() && gmSquad_OnlineReady()) return true;
@@ -121,19 +118,12 @@ u32 gmSquad_FileSize(const char* name, int* entry)
     u32 bytes = 0xFFFFFFFFu;
     unsigned i;
     *entry = DVDConvertPathToEntrynum(lbFileGetFullName(name));
-    if (gmSquad_OnlineChosen() || mu_lobby_css()) {
-        for (i = 0; i < s_disc_count; ++i)
-            if (s_disc_sizes[i].entry == *entry) return s_disc_sizes[i].bytes;
-        if (s_disc_count == 2048) return bytes; // fail closed
-    }
+
     if (*entry >= 0 && DVDFastOpen(*entry, &info)) {
         bytes = info.length;
         DVDClose(&info);
     }
-    if (gmSquad_OnlineChosen() || mu_lobby_css()) {
-        s_disc_sizes[s_disc_count].entry = *entry;
-        s_disc_sizes[s_disc_count++].bytes = bytes;
-    }
+
     return bytes;
 }
 
@@ -383,37 +373,12 @@ void mu_squad_effect_file(int index, void* ctx, GmSquadFileVisitor visit)
         visit(ctx, efAsync_DatEntries[index].ef_DAT_file, false);
 }
 
-int mu_console_active(void);
-/* Decisions two machines must make alike use the fixed facts: the online row, and Friends' synced
- * select (a console session runs this offline engine on both machines, gmSquad_Frame). There each
- * machine's own heap and its own skins' lengths would let squad_add, squad_place_coin or
- * squad_trim decide differently on each side, a desync. Every native host boots with at least the
- * fixed floors (mu_squad_wire.h), so both machines can load what the floors admit. */
-static bool squad_fixed_budget(void)
-{
-    return gmSquad_OnlineChosen() || gmSquad_LobbyChosen() || mu_console_active();
-}
-
 static void squad_budget_file(void* ctx, const char* name, int use)
 {
     SquadFileBudget* b = ctx;
     int entry, i;
     u32 bytes;
     if (name == NULL) return;
-    if ((use == GMSQUAD_FILE_COSTUME || use == GMSQUAD_FILE_HAT) && squad_fixed_budget()) {
-        /* Online and Friends: the fighter's constant, never the local skin (the host opens the standard copy
-         * for a skin over it). Offline (one machine's heap, nothing exchanged) costumes are charged
-         * at their local length below, exactly as before. Same name = same archive. */
-        bytes = gmSquad_CostumeBytes(b->kind, use);
-        for (i = 0; i < b->costume_count; ++i) if (!strcmp(b->costumes[i], name)) return;
-        if (bytes == 0 || b->costume_count == 64) {
-            b->main_bytes = b->animation_bytes = 0x7FFFFFFFu;
-            return; /* unknown costume is deterministically unaffordable */
-        }
-        b->costumes[b->costume_count++] = name;
-        b->main_bytes += ((bytes + 31u) & ~31u) + 0x100u;
-        return;
-    }
     bytes = gmSquad_FileSize(name, &entry);
     for (i = 0; i < b->count; ++i) if (b->entries[i] == entry) return;
     if (entry < 0 || b->count == 128 || bytes == 0xFFFFFFFFu) {
@@ -442,21 +407,9 @@ bool gmSquad_Budget(const GmSquadMember* members, int count, int stage)
 {
     SquadFileBudget b;
     int i, j;
-    const bool fixed = squad_fixed_budget();
-    const u32 allm = fixed ? MU_SQUAD_ONLINE_ALLM : s_allm_budget;
-    const u32 alla = fixed ? MU_SQUAD_ONLINE_ALLA : s_alla_budget;
+    const u32 allm = s_allm_budget;
+    const u32 alla = s_alla_budget;
     u32 stage_bytes = 0;
-    if (s_console_over && mu_console_active()) {
-        OSReport("squad: a costume's standard copy is over its size, Friends squads refused\n");
-        return false;
-    }
-    /* Friends decides on the floors; this machine must also be able to load what they admit, as
-     * online refuses its search (gmSquad_OnlineBudget). Every native host boots over them. */
-    if (mu_console_active() && (s_allm_budget < MU_SQUAD_ONLINE_ALLM || s_alla_budget < MU_SQUAD_ONLINE_ALLA)) {
-        OSReport("squad: platform below the Friends budget (%u/%u), squads refused\n",
-                 s_allm_budget, s_alla_budget);
-        return false;
-    }
     memset(&b, 0, sizeof b);
     if (stage >= 0) stage_bytes = squad_stage_bytes(stage);
     else {
@@ -533,26 +486,6 @@ void gmSquad_TrimOnline(StartMeleeData* start) { squad_trim(start); }
 
 /* ---- preloading ---------------------------------------------------------- */
 
-/* Friends' synced select charges costumes and hats at their fighter's fixed size (squad_budget_file)
- * on a main heap with no room over them, so while squads are in play in a console session the host
- * opens the disc's copy for a skin over its size, as online. Asked before every preload list, so it
- * holds before a coin's or a member's files load; the answer is the same on both machines of a
- * session (one canonical view). Off once when the session's squads or the session end. */
-static void squad_console_rule(void)
-{
-    const bool console = mu_console_active() != 0;
-    const bool want = console && gmSquad_ModeAllowed() && (gmSquad_Any() || s_live);
-    u8 answer;
-    if (!console) s_console_over = false;
-    if (!want && !s_console_rule) return;   /* nothing armed, nothing to switch off */
-    answer = gmSquad_ConsoleCostumes(want);
-    s_console_rule = want;
-    if (want && (answer == 2 || answer == 3)) {
-        if (!s_console_over) OSReport("squad: a costume's standard copy is over its size, Friends squads refused\n");
-        s_console_over = true;
-    }
-}
-
 void gmSquad_AddPreloads(struct GameCache* cache)
 {
     CharacterKind lineup[GMSQUAD_PORTS * GMSQUAD_SIZE];
@@ -563,7 +496,6 @@ void gmSquad_AddPreloads(struct GameCache* cache)
     int p, i, j;
 
     init();
-    squad_console_rule();
     if (!gmSquad_ModeAllowed() || !gmSquad_Any()) {
         return;
     }

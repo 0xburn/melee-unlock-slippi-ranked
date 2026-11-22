@@ -5,8 +5,6 @@
 #include "slippi_spectate.h"
 #include "slippi_net.h"
 #include "host.h"
-#include "yougame_link.h"
-#include "yougame_mode_policy.h"
 #include "../gx/render_options.h"
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -266,10 +264,9 @@ void server_thread(uint16_t port) {
 void start() {
   if (agent_lock::blocked(agent_lock::Operation::Spectator)) return;
   std::call_once(g_started, [] {
-    const bool yougame_mode = yougame::active();
-    if (!yougame::mode_policy::spectator_allowed(yougame_mode, gx::RenderOptions::live_slippi_spectator())) {
-      host::log(yougame_mode ? "yougame: Slippi spectator listener off (YouGame mode)"
-                             : "spectator: off in settings");
+    if (!gx::RenderOptions::live_slippi_spectator()) {
+      host::log(
+                          "spectator: off in settings");
       return;
     }
     const int port = gx::RenderOptions::live_slippi_spectator_port();

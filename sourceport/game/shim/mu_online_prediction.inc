@@ -17,7 +17,7 @@ static int load_opponent_inputs(PADStatus* stat, int frame, int predicting_allow
         latest = (int) be32(rxb + RXB_OPNT_FRAME_NUMS + 4 * count);
         if (latest - frame >= 0) {
             src = slots + (latest - frame) * PAD_SIZE;
-        } else if (predicting_allowed && (mu_online.console_active || frame >= START_SYNC_FRAME - mu_online.delay) &&
+        } else if (predicting_allowed && frame >= START_SYNC_FRAME - mu_online.delay &&
                    !mu_online.game_over)
         {
             /* Predicting (Slippi 3.7.0): the host's pad for this frame among the frames after the
@@ -30,8 +30,7 @@ static int load_opponent_inputs(PADStatus* stat, int frame, int predicting_allow
             u8 w = mu_online.predicted_write[count];
             const u8* early = early_pad(count, frame, latest);
             have_all = 0;
-            /* Console rollback fills no host predictions: it keeps predicting the latest pad. */
-            if (!mu_online.console_active && ahead < RXB_INPUTS_COUNT) {
+            if (ahead < RXB_INPUTS_COUNT) {
                 src = rxb + RXB_OPNT_PREDICTED_INPUTS + count * RXB_INPUTS_COUNT * PAD_SIZE + ahead * PAD_SIZE;
             }
             if (early != NULL) {
@@ -56,8 +55,8 @@ static int load_opponent_inputs(PADStatus* stat, int frame, int predicting_allow
             wire_to_pad(&stat[remote_port], src);
             /* A slot with no player has no pad to load, and on the oldest frame of the longest
              * rollback the index above runs past its inputs. Section 11 reads every slot's RNG
-             * bits, so these stay zero. Console rollback has no RNG bits: its analog A is real. */
-            if (!mu_online.console_active && count >= rxb[RXB_OPNT_COUNT]) {
+             * bits, so these stay zero. */
+            if (count >= rxb[RXB_OPNT_COUNT]) {
                 stat[remote_port].analogA = 0;
             }
         }
@@ -173,7 +172,6 @@ static void record_used_pads(const PADStatus* stat, int frame, int confirmed)
 static int pads_differ(const u8* a, const u8* b)
 {
     int t;
-    if (mu_online.console_active) return memcmp(a, b, 11) != 0;
     if ((a[0] & 0x1F) != (b[0] & 0x1F) || (a[1] & 0x7F) != (b[1] & 0x7F) || memcmp(a + 2, b + 2, 4) != 0) {
         return 1;
     }
@@ -305,7 +303,7 @@ static int check_predictions(int frame)
             if (offset < 0) {
                 break;   /* the inputs for the savestate frame have not arrived yet */
             }
-            if (!mu_online.console_active && ss <= mu_online.stable_finalized) {
+            if (ss <= mu_online.stable_finalized) {
                 if (latest > ss) {
                     goto inputs_match;   /* already finalized: advance without comparing */
                 }
@@ -315,7 +313,7 @@ static int check_predictions(int frame)
             predicted = mu_online.predicted[count][mu_online.predicted_read[count]];
             /* Slippi 3.7.0: section 11 marks a prediction when that frame's RNG used this player's
              * bits before they arrived. The frame is redone with them, even if the inputs match. */
-            if (!mu_online.console_active && predicted[PAD_RNG_ROLLBACK_MARKER] != 0) {
+            if (predicted[PAD_RNG_ROLLBACK_MARKER] != 0) {
                 mu_online.rng_rollbacks++;
                 rollback_required = 1;
                 break;
@@ -334,7 +332,6 @@ static int check_predictions(int frame)
                     differ = 1;
                 }
             }
-            if (mu_online.console_active) differ = pads_differ(actual, predicted);
             mu_online.predictions++;
             if (mu_online.predicted_early[count][mu_online.predicted_read[count]]) {
                 mu_online.early_scored[count]++;
@@ -375,7 +372,7 @@ static int check_predictions(int frame)
             }
         }
     }
-    if (!mu_online.console_active && !rollback_required && early_rollback_on() && mu_online.rxb_size > RXB_SIZE) {
+    if (!rollback_required && early_rollback_on() && mu_online.rxb_size > RXB_SIZE) {
         for (count = 0; count < REMOTES; count++) {
             if (mu_online.player_predicting[count] == 1 && early_contradicts(count)) {
                 rollback_required = 1;
@@ -396,16 +393,16 @@ static int check_predictions(int frame)
         values_set = 1;
     }
     mu_online.savestate_frame = savestate;
-    mu_online.finalized = mu_online.console_active ? savestate - 1 : savestate;
+    mu_online.finalized = savestate;
     if (savestate > (int) be32(rxb + RXB_SMALLEST_LATEST)) {
         mu_online.finalized = (int) be32(rxb + RXB_SMALLEST_LATEST);
     }
     if (rollback_required) {
         {
             unsigned long long mu_ticks_since_start(void);
-            if (!mu_online.console_active) mu_online.rollback_start_ticks = mu_ticks_since_start();
+            mu_online.rollback_start_ticks = mu_ticks_since_start();
         }
-        if (!mu_online.console_active && trace_renew()) {
+        if (trace_renew()) {
             unsigned long long mu_ticks_since_start(void);
             logf_("rollback trigger frame %d retrace %d tbms %d", frame,
                   (int) mu_online_abi_retrace_count(), (int) (mu_ticks_since_start() / 40500));

@@ -53,9 +53,6 @@ public:
   ~PcSettingsUI();
   bool begin(RenderOptions& options); // returns true when render configuration changed
   void draw(ID3D12GraphicsCommandList* list);
-  // The Coming soon stickers into the game picture texture the caller has bound (w x h), under a
-  // shader preset (coming_soon_overlay::picture_draw_data). Leaves ImGui's state on the list.
-  void draw_picture_overlay(ID3D12GraphicsCommandList* list, uint32_t w, uint32_t h);
   // The Arena card into the bound EFB (R8G8B8A8, `samples` per pixel) at the native select's mark
   // (arena_panel::under_hand_draw_data): the game picture lies at (x, y, w, h) of the target_w x
   // target_h target. The target's alpha stays. True when it drew; it leaves its own heap, pipeline,
@@ -74,8 +71,6 @@ public:
   ~PcSettingsUID3D11();
   bool begin(RenderOptions& options);
   void draw();   // into whatever render target the caller has bound
-  // The Coming soon stickers into the bound game picture texture (w x h) under a shader preset.
-  void draw_picture_overlay(uint32_t w, uint32_t h);
   // The Arena card into the bound EFB at the native select's mark (arena_panel::under_hand_draw_data):
   // the game picture lies at (x, y, w, h) of the target_w x target_h target. The target's alpha stays.
   // True when it drew; it leaves its own state bound.

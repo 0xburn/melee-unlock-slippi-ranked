@@ -51,16 +51,7 @@ std::filesystem::path exe_directory() {
   return std::filesystem::path(path).parent_path();
 }
 
-// The folders players drop media into. Under the YouGame app the program folder is read-only (the
-// sandbox grants it read and execute only), so they live in the game's data folder (YOUGAME_DATA).
 std::filesystem::path media_root(const char* name) {
-#if defined(_WIN32)
-  const wchar_t* data = _wgetenv(L"YOUGAME_DATA");
-  if (data && *data) return std::filesystem::path(data) / name;
-#elif !defined(__APPLE__)
-  const char* data = std::getenv("YOUGAME_DATA");
-  if (data && *data) return std::filesystem::u8path(data) / name;
-#endif
   return exe_directory() / name;
 }
 
@@ -729,7 +720,7 @@ Manager& manager() {
 }
 
 // ---- border art: a picture or looping video behind the game picture, in the bars beside it ----
-// Files come from the Borders folder (the game's data folder under YouGame, else beside the program):
+// Files come from the Borders folder beside the program:
 // PNG, JPG and BMP through the Windows imaging codecs, MP4 through the same decoder as the menu
 // videos. Presentation only.
 class Border {

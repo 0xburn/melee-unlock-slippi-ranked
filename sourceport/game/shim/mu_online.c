@@ -8,21 +8,18 @@
  * The console game gets online play from Slippi's patches: it exchanges pads with the host's Slippi
  * device every frame, saves and loads its state around rollbacks, and re-simulates the frames a
  * late remote input changed, all inside the engine loop (gm_801A4D34). This file is the native
- * equivalent, called from the same sites; each function names the patch it stands for. Nothing
- * Slippi's original paths run only for its online matches. An explicit console-only backend reuses
- * the predictor and runner, with its own lifecycle and input adapter (mu_console_rollback.inc).
+ * equivalent, called from the same sites; each function names the patch it stands for.
  *
  * Frame numbers: the online pad frame N (the number sent with each pad) is consumed by the engine
  * body whose unpaused-frame counter (gm_80479D58.unk_8) is N at its start; savestates and
  * checksums are keyed by that counter. Measured on the console code: 4746 of 4746 samples.
- * Console rollback instead keys each body by unk_0, including paused bodies.
  *
  * All of this bookkeeping is excluded from snapshots: a rollback load restores the game, never the
  * record of which frames were predicted or confirmed.
  */
 #include <string.h>
 #ifndef MU_NO_SLIPPI
-#include "mu_tourney_game.h"
+
 #endif
 #include <math.h>
 char* getenv(const char* name);
@@ -113,9 +110,7 @@ enum {
     TXB_INPUT_SOURCE_INDEX = TXB_PAD + PAD_SIZE,   /* controller port the local inputs come from */
     TXB_IS_LEAVING = TXB_INPUT_SOURCE_INDEX + 1,    /* the local player chose to leave the game */
     TXB_SIZE = TXB_IS_LEAVING + 1,                  /* 27 */
-    /* YouGame local partners: the partner's pad after Slippi's payload (8 input bytes and a zero RNG
-     * bits byte, the host's PAD_WIRE_SIZE); always sent, zero without a partner. */
-    TXB_PARTNER_PAD_SIZE = PAD_RNG_BITS + 1,
+
     /* The match state response (Slippi's MSRB), byte offsets. */
     MSRB_CONNECTION_STATE = 0,
     MSRB_LOCAL_READY = 1,
@@ -208,7 +203,6 @@ typedef struct MuOnlineState {
     u8 delay;
     int frame;                /* next online pad frame to fetch */
     unsigned int rng_offset;
-    u8 last_partner[PAD_SIZE];
     u8 last_local[PAD_SIZE];
     u8 delay_index;
     u8 delay_buffer[MAX_DELAY][PAD_SIZE];
@@ -289,24 +283,9 @@ typedef struct MuOnlineState {
     int loop_entered;         /* the scene's engine loop has reached its pad wait */
     int engine_started;       /* the engine body of frame 0 has begun */
     u8 match_state[RESPONSE_CAPACITY];
-    int console_setup, console_active, console_injecting;
-    unsigned int console_epoch;
 } MuOnlineState;
 
 static MuOnlineState mu_online;
-
-/* These operations are the version-26 host ABI, private to console sessions. */
-enum { CONSOLE_QUERY, CONSOLE_MATCH_BEGIN, CONSOLE_FORWARD, CONSOLE_INPUTS,
-       CONSOLE_REPLAY, CONSOLE_MATCH_END, CONSOLE_FAIL,
-       CONSOLE_BOUNDARY, CONSOLE_BODY_END, CONSOLE_CONFIRM, CONSOLE_COMMIT, CONSOLE_SERVICE,
-       CONSOLE_VALIDATED };
-int mu_console_abi(int operation, unsigned int body, u8* local, u8* rxb,
-                   unsigned int* epoch, int* local_port);
-static void console_frame_begin(void);
-static int console_frame_end(void);
-static int console_pad_renew(PADStatus* stat);
-static void console_match_exit(void);
-
 
 /* GPDO_CUR_GAME of Slippi's game prep data: the online games since the player last searched for an
  * opponent, 1 for the first. It outlives each match (arming clears mu_online) and only changes
@@ -364,7 +343,7 @@ unsigned int mu_online_codes(void)
 {
     if (!mu_online.active && !mu_online.pending
 #ifndef MU_NO_SLIPPI
-        && !mu_tourney_playing()
+
 #endif
     ) {
         return 0;
@@ -378,12 +357,12 @@ unsigned int mu_online_codes(void)
 /* The patches' short-circuit: an online match is running and the scene is not being left. */
 static int hooks_on(void)
 {
-    return (mu_online.active || mu_online.console_active) && mu_gm_engine_state()->unk_C == 0;
+    return mu_online.active && mu_gm_engine_state()->unk_C == 0;
 }
 
 static int global_frame(void)
 {
-    return (int) (mu_online.console_active ? mu_gm_engine_state()->unk_0 : mu_gm_engine_state()->unk_8);
+    return (int) mu_gm_engine_state()->unk_8;
 }
 
 /* The whole bookkeeping block, for the snapshot exclusion list (mu_online_abi.c). */
@@ -827,7 +806,6 @@ int mu_online_pad_alarm_gate(void)
     if (!hooks_on()) {
         return 0;
     }
-    if (mu_online.console_active) return 1; /* body hook owns console queue injection */
     mu_online.frame_advance = 0;
     if (mu_online.direct_renew != 0) {
         return 0;   /* the rollback logic asked for these pads */
@@ -857,7 +835,6 @@ void mu_online_after_pad_renew(void)
 /* SkipNewInputFetchOnRollback (80376A20): nonzero skips PADRead during a rollback. */
 int mu_online_skip_pad_read(void)
 {
-    if (mu_online.console_active) return mu_online.console_injecting;
     return hooks_on() && mu_online.rollback_active && !mu_online.rollback_should_load;
 }
 
@@ -918,12 +895,11 @@ static void clamp_stick_at_rest(PADStatus* pad)
 int mu_online_pad_renew(PADStatus* stat)
 {
     int frame, i;
-    u8 tx[TXB_SIZE + TXB_PARTNER_PAD_SIZE];
+    u8 tx[TXB_SIZE];
     u8 local[PAD_SIZE];
     unsigned int got = 0;
     PADStatus* source;
 
-    if (mu_online.console_active) return console_pad_renew(stat);
     if (!hooks_on()) {
         return 0;
     }
@@ -1045,22 +1021,6 @@ int mu_online_pad_renew(PADStatus* stat)
     /* Slippi 3.7.0: the random bits the last reply gave go out with this pad. They reach the delay
      * buffer with it (section 8) and section 11 takes them out again before the game sees them. */
     tx[TXB_PAD + PAD_RNG_BITS] = mu_online.rxb[RXB_NEXT_PAD_RNG_BITS];
-    /* A local partner's pad follows Slippi's payload: its inputs and an RNG bits byte that is always
-     * zero (one machine's random bits go out once, with the main pad). */
-    memset(tx + TXB_SIZE, 0, TXB_PARTNER_PAD_SIZE);
-    {
-        const int partner_source = mu_lobby_partner_source();
-        if (partner_source >= 0 && partner_source < 4) {
-            PADStatus* second = &stat[partner_source];
-            clamp_stick_at_rest(second);
-            if (second->err == -3) wire_to_pad(second, mu_online.last_partner);
-            pad_to_wire(mu_online.last_partner, second);
-            memcpy(tx + TXB_SIZE, mu_online.last_partner, PAD_RNG_BITS);
-        }
-    }
-    /* The second pad is sampled only on a new frame. Its delayed confirmed queue comes back as
-     * a virtual remote port: the existing remote_inputs history saves and replays it on rollback.
-     * Early input/ring samples remain main-port only; this pad never needs an early prediction. */
     /* The host asks for its full reply capacity; the answer lands in the command buffer and the
      * part this code reads (Slippi's reply and the early inputs after it) is copied out. */
     mu_online.rxb_size = 0;
@@ -1177,12 +1137,6 @@ int mu_online_pad_renew(PADStatus* stat)
  * Nonzero: run the engine now (with *count samples). */
 int mu_online_engine_gate(int* count)
 {
-    int mu_console_engine_gate(int* count);
-    /* Match bodies own their stable rollback fields at frame_begin, before TE. */
-    if (mu_online.console_active) return mu_console_engine_gate(count);
-    if (mu_console_engine_gate(count)) {
-        return 1;
-    }
     if (!hooks_on()) {
         return *count != 0;
     }
@@ -1348,10 +1302,6 @@ void mu_online_frame_begin(void)
     DesyncLocal* written;
     DesyncLocal* confirmed;
 
-    if (mu_online.console_setup || mu_online.console_active) {
-        console_frame_begin();
-        return;
-    }
     if (!hooks_on()) {
         return;
     }
@@ -1563,7 +1513,6 @@ static void camera_tasks(void)
     }
 }
 
-#include "mu_console_rollback.inc"
 
 #if MU_SQUAD
 /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
@@ -1586,7 +1535,6 @@ static void squad_digest_observe(int ending)
 int mu_online_frame_end(void)
 {
     int current;
-    if (mu_online.console_active) return console_frame_end();
     if (!hooks_on()) {
         return ENGINE_CONTINUE;
     }
@@ -1984,10 +1932,6 @@ void mu_online_match_exit(void)
  * here, as it would have on its last frame. */
 void mu_online_scene_loop_exit(void)
 {
-    if (mu_online.console_active || mu_online.console_setup) {
-        console_match_exit();
-        return;
-    }
 #if MU_SQUAD
     /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
      * The terminal body bypasses frame_end; record it before scene teardown. */

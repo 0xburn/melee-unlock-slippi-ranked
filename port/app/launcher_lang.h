@@ -173,11 +173,7 @@ inline std::wstring trw(const char* key, Args args) { return wide(tr(key, args))
 
 // Reads lang/<code>.txt. Unknown keys are kept (harmless); a missing file leaves the table empty.
 inline bool read_file(const std::wstring& path, Table& out) {
-#ifdef _WIN32
-  std::ifstream in(path, std::ios::binary);
-#else
   std::ifstream in(std::filesystem::path(path), std::ios::binary);
-#endif
   if (!in) return false;
   std::string line;
   bool first = true;

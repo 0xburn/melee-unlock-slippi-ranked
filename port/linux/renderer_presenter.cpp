@@ -178,8 +178,8 @@ bool capture_threaded(gx::Backend& backend, const std::filesystem::path& path) {
   return false;
 }
 
-bool presenter_self_test(SDL_Window* window, const std::filesystem::path& cache) {
-  auto backend = create_threaded(window, cache, 1, 240, false);
+bool presenter_self_test(SDL_Window* window, const std::filesystem::path& cache, double target_fps) {
+  auto backend = create_threaded(window, cache, 1, target_fps, false);
   double start = 0;
   PresenterStats baseline;
   for (unsigned source = 0; source < 10; ++source) {
@@ -237,8 +237,13 @@ bool presenter_self_test(SDL_Window* window, const std::filesystem::path& cache)
   std::fprintf(stderr, "Linux presenter test counts: %llu source, %llu display, %llu subframes, %llu re-posed draws\n",
     static_cast<unsigned long long>(stats.simulation), static_cast<unsigned long long>(stats.presentation),
     static_cast<unsigned long long>(stats.subframes), static_cast<unsigned long long>(stats.posed));
-  if (stats.simulation != 8 || stats.presentation <= stats.simulation || !stats.subframes || !stats.posed)
-    throw std::runtime_error("Linux authored presenter self-test did not produce sampled subframes");
+  if (stats.simulation != 8) throw std::runtime_error("unexpected presenter source tick count");
+  if (target_fps > 60.5) {
+    if (stats.presentation <= stats.simulation || !stats.subframes || !stats.posed)
+      throw std::runtime_error("authored presenter did not render intermediate frames");
+  } else if (stats.presentation != stats.simulation || stats.subframes || stats.posed) {
+    throw std::runtime_error("unexpected intermediate frame at the simulation rate");
+  }
   std::fprintf(stderr, "Linux authored presenter self-test: %llu source, %llu display, %llu re-posed draws\n",
     static_cast<unsigned long long>(stats.simulation), static_cast<unsigned long long>(stats.presentation), static_cast<unsigned long long>(stats.posed));
   return true;

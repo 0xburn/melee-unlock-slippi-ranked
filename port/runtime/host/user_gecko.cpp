@@ -61,7 +61,6 @@ const FunctionRow* function_row(uint32_t console) {
 std::string g_path;
 std::vector<Code> g_codes;
 bool g_code_patches_allowed = false;
-bool g_sources_allowed = true;
 StaticRunner g_static_run = nullptr;
 StaticReserve g_static_reserve = nullptr;
 StaticStart g_static_start = nullptr;
@@ -813,7 +812,6 @@ void restore_original(Code& c) {
 
 }  // namespace
 
-void set_sources_allowed(bool allowed) { g_sources_allowed = allowed; }
 void set_code_patches_allowed(bool allowed) { g_code_patches_allowed = allowed; }
 void set_native_writer(NativeWrite write) { g_native_write = write; }
 void set_native_reader(NativeRead read) { g_native_read = read; }
@@ -891,7 +889,6 @@ void static_memory_start(uint32_t address, uint32_t bytes) { if (g_static_start)
 void load(const std::string& path, const std::vector<std::string>& enabled_names, bool chosen) {
   g_path = path;
   g_codes.clear();
-  if (!g_sources_allowed) return;
   std::ifstream f(path);
   if (!f) { host::log("gecko: no user codes (%s not found)", path.c_str()); return; }
   std::vector<std::string> ini_enabled;
@@ -1021,7 +1018,6 @@ std::vector<Code>& codes() { return g_codes; }
 bool any_enabled() { return std::any_of(g_codes.begin(), g_codes.end(), [](const Code& c) { return c.enabled; }); }
 
 std::string add(const std::string& name, const std::string& body) {
-  if (!g_sources_allowed) return "Game mods come from the YouGame listing.";
   Code c; c.name = name;
   std::istringstream in(body);
   std::string line;
@@ -1057,7 +1053,7 @@ void remove(const std::string& name) {
 }
 
 bool save() {
-  if (!g_sources_allowed || g_path.empty()) return false;
+  if (g_path.empty()) return false;
   std::ofstream f(g_path, std::ios::trunc);
   if (!f) return false;
   f << "[Gecko]\n";
@@ -1075,7 +1071,7 @@ bool save() {
 }
 
 void apply() {
-  if (host::gameplay::vanilla_only() || !g_sources_allowed) { suspend_function_patches(); return; }   // preserve enabled choices, suppress execution
+  if (host::gameplay::vanilla_only()) { suspend_function_patches(); return; }   // preserve enabled choices, suppress execution
   if (!g_code_patches_allowed) { apply_native(); return; }   // the Source Port has no console memory to write
   if (g_static_run) { g_static_run(g_codes); return; }
   for (Code& c : g_codes) {

@@ -17,8 +17,6 @@
 #include "exi_slippi.h"
 #include "host.h"
 #include "mod_scan.h"
-#include "yougame_link.h"
-#include "yougame_mode_policy.h"
 #include "slippi_online.h"
 #include "slippi_playback.h"
 
@@ -46,15 +44,7 @@ bool forced_by_env() {
 // The Mods folder result, then (tests only) MELEE_TEST_20XX_AI_DISC=<disc image> for runs that skip the scan.
 void look_for_disc() {
   namespace mods = source_port::mods;
-  if (!yougame::mode_policy::mod_sources(yougame::active()).folders) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_blob.clear();
-    g_status = {};
-    g_status.looked = true;
-    g_status.message = "Game mods come from the YouGame listing.";
-    g_looked_after_scan = true;
-    return;
-  }
+
   Status s;
   s.looked = true;
   std::vector<uint8_t> blob;
@@ -221,7 +211,7 @@ template <int N> void scene_entry_hooked(ppc::Context& c, uint8_t* m) {
 }  // namespace
 
 void boot() {
-  if (gameplay::vanilla_only() || !yougame::mode_policy::mod_sources(yougame::active()).folders) return;
+  if (gameplay::vanilla_only()) return;
   look_for_disc();
   if (g_hooked) return;
   const ppc::Fn hooks[3] = {scene_entry_hooked<0>, scene_entry_hooked<1>, scene_entry_hooked<2>};

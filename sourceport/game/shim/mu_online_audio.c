@@ -3,7 +3,7 @@
  * Audio lives outside rollback snapshots, as on the console: a load leaves every voice playing.
  * So a re-executed frame must not start its sounds a second time, and the sounds the replaced
  * timeline started that the new one does not must be stopped. This file keeps, per engine frame
- * (unk_8 for Slippi, pause-safe unk_0 for console), the sounds the last execution of that frame started ("stable") and the
+ * (unk_8), the sounds the last execution of that frame started ("stable") and the
  * ones the running execution starts ("pending"): a re-executed start adopts the matching stable
  * voice and its instance id, and the frame end stops every stable voice nobody adopted. It is
  * the native form of the online code's PreventDuplicateSounds, AssignSoundInstanceId, the sound
@@ -59,7 +59,6 @@ typedef struct MuOnlineAudio {
     /* Rumble of the local player's port, sent to the physical port its pad is read from. */
     int local_index, input_source;
     int motor_want, motor_on;
-    int console_finished;
 } MuOnlineAudio;
 
 static MuOnlineAudio audio;
@@ -83,15 +82,14 @@ static void logf_(const char* fmt, int a, int b, int c, int d, int e, int f)
 
 static int engine_frame(void)
 {
-    return (int) (mu_console_rollback_active() ? mu_gm_engine_state()->unk_0 :
-                                                 mu_gm_engine_state()->unk_8);
+    return (int) mu_gm_engine_state()->unk_8;
 }
 
 /* The patches' short-circuit (online match, scene not being left), plus: inside an engine body.
  * A sound an event handler starts between bodies belongs to no frame a re-simulation repeats. */
 static int sfx_hooks_on(void)
 {
-    return (mu_online_active() || mu_console_rollback_active()) && (mu_gm_engine_state()->unk_C == 0 || mu_console_rollback_active()) && audio.in_body;
+    return mu_online_active() && mu_gm_engine_state()->unk_C == 0 && audio.in_body;
 }
 
 /* What the ring holds for a frame that can no longer be rolled back, sorted, for comparing runs. */
@@ -176,7 +174,7 @@ void mu_online_audio_match_start(int local_index, int input_source)
 
 void mu_online_audio_frame_begin(void)
 {
-    if ((mu_online_active() || mu_console_rollback_active()) && (mu_gm_engine_state()->unk_C == 0 || mu_console_rollback_active())) {
+    if (mu_online_active() && mu_gm_engine_state()->unk_C == 0) {
         audio.in_body = 1;
     }
 }
@@ -272,7 +270,7 @@ void mu_online_audio_frame_end(void)
 {
     SfxFrame* s;
     int current, i, n = 0;
-    if (!(mu_online_active() || mu_console_rollback_active()) || (mu_gm_engine_state()->unk_C != 0 && !mu_console_rollback_active())) {
+    if (!mu_online_active() || mu_gm_engine_state()->unk_C != 0) {
         return;
     }
     audio.in_body = 0;
@@ -319,9 +317,9 @@ void mu_online_audio_frame_end(void)
  * request wins (a switch is a stop then a start) and is done when the rollback ends. */
 int mu_online_music_defer(int op, const char* path, int volume, int track)
 {
-    if (!(mu_online_active() || mu_console_rollback_active()) ||
-        (!mu_online_resim_active() && !(mu_console_rollback_active() && audio.in_body)) ||
-        (mu_gm_engine_state()->unk_C != 0 && !mu_console_rollback_active())) {
+    if (!mu_online_active() ||
+        !mu_online_resim_active() ||
+        mu_gm_engine_state()->unk_C != 0) {
         return 0;
     }
     audio.music_op = op;
@@ -351,7 +349,7 @@ static void music_flush(void)
  * pad is read from. Commands of a re-simulation are dropped; the rollback end reconciles. */
 int mu_online_motor_port(int chan, unsigned int command)
 {
-    if (!(mu_online_active() || mu_console_rollback_active())) {
+    if (!mu_online_active()) {
         return chan;
     }
     if (chan != audio.local_index) {
@@ -411,7 +409,7 @@ void mu_online_audio_console_commit(int body)
 
 void mu_online_audio_rollback_end(void)
 {
-    if (!(mu_online_active() || mu_console_rollback_active())) {
+    if (!mu_online_active()) {
         return;
     }
     if (audio.music_op != 0) {
@@ -423,12 +421,8 @@ void mu_online_audio_rollback_end(void)
 void mu_online_audio_match_exit(void)
 {
     int i;
-    if (!(mu_online_active() || mu_console_rollback_active())) {
+    if (!mu_online_active()) {
         return;
-    }
-    if (mu_console_rollback_active()) {
-        if (audio.console_finished) return;
-        audio.console_finished = 1;
     }
     audio.in_body = 0;
     /* The exit path stops the music itself; a request deferred by an unfinished rollback is moot. */

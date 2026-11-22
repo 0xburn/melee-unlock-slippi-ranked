@@ -35,9 +35,6 @@ void apply(host::PadState pads[4], bool allow_automatic = true);
 // The native game keeps its fighters in its own layout, so it hands the values this helper reads
 // over itself (MuGameApi.lcancel_view). Unset, they are read from guest memory (recompiled build).
 void set_native_view(void (*fill)(MuLcancelView* out));
-#ifdef YOUGAME_AGENT_TEST_HOOK
-void agent_test_view(MuLcancelView* out);
-#endif
 
 // The indicator itself needs nothing from the UI: feedback tints the fighter through
 // gx::set_player_tint, which is a renderer-side colour and never a write into the game.

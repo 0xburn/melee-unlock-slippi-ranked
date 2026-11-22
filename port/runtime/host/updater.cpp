@@ -38,7 +38,7 @@
 namespace host::updater {
 namespace {
 // The release list rather than /releases/latest: that endpoint skips pre-releases (betas).
-const char* REPO_API = "https://api.github.com/repos/hero88go/melee-unlocked/releases?per_page=100";
+const char* REPO_API = "https://api.github.com/repos/0xburn/melee-unlocked/releases?per_page=100";
 std::atomic<State> g_state{State::Idle};
 std::atomic<bool> g_check_failed{false};   // the last Failed came from the release check, not a download
 std::atomic<bool> g_stopping{false};       // shutdown(): a check waiting to ask again stops waiting
@@ -224,8 +224,7 @@ bool safe_version(const std::string& s) {
   return true;
 }
 bool release_url(const std::string& url) {
-  return url.rfind("https://github.com/Hero88go/melee-unlocked/releases/download/", 0) == 0 ||
-         url.rfind("https://github.com/hero88go/melee-unlocked/releases/download/", 0) == 0;
+  return url.rfind("https://github.com/0xburn/melee-unlocked/releases/download/", 0) == 0;
 }
 void rollback_message(const std::string& s) { std::lock_guard<std::mutex> lk(g_mutex); g_rollback_message = s; }
 // The release download for this platform: the Windows zip, or the Linux archive beside it.
@@ -506,7 +505,7 @@ bool unpack_tar_gz(const std::filesystem::path& archive, const std::filesystem::
 // players) ran out and their update check failed with HTTP 403 (player report 11-20). The releases feed on
 // github.com itself has no such limit: its ten newest releases, turned into the API's shape with this
 // platform's download at its usual address (no size or digest: the API alone lists those).
-constexpr const char* kReleasesFeed = "https://github.com/hero88go/melee-unlocked/releases.atom";
+constexpr const char* kReleasesFeed = "https://github.com/0xburn/melee-unlocked/releases.atom";
 // &lt; &gt; &quot; &apos; &amp; and &#NN; (ASCII) back to their characters; anything else stays as written.
 std::string unescape_entities(const std::string& s) {
   static const std::pair<const char*, char> kNamed[] = {{"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''}, {"&amp;", '&'}};
@@ -587,7 +586,7 @@ std::string releases_from_feed(const std::string& feed) {
     const std::string name = "MeleeUnlocked-" + tag.substr(1) + kPlatformAsset;
     list.push_back({{"tag_name", tag}, {"published_at", updated}, {"body", notes},
                     {"assets", nlohmann::json::array({{{"name", name},
-                        {"browser_download_url", "https://github.com/Hero88go/melee-unlocked/releases/download/" + tag + "/" + name}}})}});
+                        {"browser_download_url", "https://github.com/0xburn/melee-unlocked/releases/download/" + tag + "/" + name}}})}});
   }
   return list.empty() ? std::string() : list.dump();
 }
@@ -1333,7 +1332,7 @@ void compat_build_download(const std::string& game_dir_utf8) {
   // MeleeUnlocked-<version>-compat-win64.zip comes from that version's parts release (parts-<version>,
   // beside the release itself since 0.9.204, so the release page lists only what a player downloads).
   const std::string version = file.substr(14, file.find("-compat-") - 14);
-  const std::string url = "https://github.com/hero88go/melee-unlocked/releases/download/parts-" + version + "/" + file;
+  const std::string url = "https://github.com/0xburn/melee-unlocked/releases/download/parts-" + version + "/" + file;
   fetch_part(g_compat, "the build for your processor", "about 80 MB", url, sha, game_dir_utf8, "compat-download",
              [sha](const std::filesystem::path& files, const std::filesystem::path& dir) -> std::string {
                namespace fs = std::filesystem;
@@ -1425,7 +1424,7 @@ void rtx_pack_download(const std::string& game_dir_utf8) {
   std::string sha, file;
   if (!rtx_pack_record(game_dir_utf8, &sha, &file)) return;
   const std::string version = file.substr(14, file.find("-RTX-Pack") - 14);
-  const std::string url = "https://github.com/hero88go/melee-unlocked/releases/download/parts-" + version + "/" + file;
+  const std::string url = "https://github.com/0xburn/melee-unlocked/releases/download/parts-" + version + "/" + file;
   fetch_part(g_rtx_pack, "the RTX Pack", kRtxPackSize, url, sha, game_dir_utf8, "rtxpack-download",
              [sha](const std::filesystem::path& files, const std::filesystem::path& dir) -> std::string {
                namespace fs = std::filesystem;

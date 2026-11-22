@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from online_menu_test import compiler_command
-from yougame_console_wiring_test import body
+from source_test_helpers import body
 
 ROOT = Path(__file__).resolve().parents[2]
 SDL = (ROOT / 'port/linux/window_sdl.inl').read_text()
@@ -21,7 +21,7 @@ HARNESS = r'''
 #include <atomic>
 #include <mutex>
 #include <thread>
-static int checks, native_calls, polls, commands, events, detaches, mac_pumps;
+static int checks, native_calls, polls, events, mac_pumps;
 static std::atomic<int> logs{0};
 #define CHECK(x) do { ++checks; if (!(x)) { std::fprintf(stderr,"line %d: %s\n",__LINE__,#x); std::abort(); } } while(0)
 struct SDL_Window {} window;
@@ -34,23 +34,6 @@ void SDL_SetWindowTitle(SDL_Window*,const char*) { ++native_calls; }
 const char* SDL_GetWindowTitle(SDL_Window*) { ++native_calls; return "game"; }
 void SDL_DestroyWindow(SDL_Window*) { ++native_calls; }
 namespace linux_compat { void set_game_window(void*) { ++native_calls; } }
-namespace yougame {
-bool stdio_bridge() { ++native_calls; return false; }
-bool embedded() { ++native_calls; return true; }
-namespace shortcuts { struct Commands { bool take_settings() { ++native_calls; return false; } } commands; }
-namespace parity { struct Signals { void emit(int) { ++native_calls; } } signals; }
-void relay_key(const char*) { ++native_calls; }
-namespace agent_test {
-struct KeyScript {
-  using Clock=std::chrono::steady_clock;
-  template<class... Args> void pump(Args&&...) { ++native_calls; }
-} key_script;
-}
-}
-namespace mac_embed {
-bool pump() { ++native_calls; ++mac_pumps; return false; }
-void destroy() { ++native_calls; }
-}
 namespace host {
 SdlVideoThread g_sdl_video_thread;
 void log(const char*, const char* message) { if (std::strcmp(message,"window: pump skipped on a non-video thread")) std::abort(); ++logs; }
@@ -63,11 +46,6 @@ bool exit_requested(); void request_exit(int);
 void request_user_exit() { request_exit(0); }
 void* g_hwnd=&window;
 bool g_closed=false, g_deferred_fullscreen_show=false, g_escape_left_fullscreen=false, g_fullscreen=false;
-int g_x11_embed_storage;
-int* g_x11_embed=&g_x11_embed_storage;
-std::atomic<bool> g_x11_embed_active{true};
-bool g_embed_focus_requested=false;
-struct Overlay { int cancel() { ++native_calls; return 0; } } g_overlay_key;
 std::atomic<bool> g_escape_press{false}, g_ui_capture{false};
 std::atomic<uint64_t> g_pending_client_size{0};
 bool g_pointer_rested=true; uint64_t g_pointer_moved=0, kPointerRestMs=3000;
@@ -75,12 +53,8 @@ uint64_t GetTickCount64() { ++native_calls; return 0; }
 SDL_Window* sdl_window() { return static_cast<SDL_Window*>(g_hwnd); }
 void apply_client_size(int,int) { ++native_calls; }
 void handle_event(const SDL_Event& e) { ++native_calls; ++events; if (e.type==1) { g_closed=true; request_user_exit(); } }
-void pump_embed_commands() { ++native_calls; ++commands; }
-void update_embed_size() { ++native_calls; }
 void show_cursor(bool) { ++native_calls; }
 void hidraw_stop() { ++native_calls; }
-void yg_embed_x11_detach(int*) { ++native_calls; ++detaches; }
-bool window_embedded() { ++native_calls; return true; }
 std::wstring window_title_base() { return L"game"; }
 std::string utf8_title(const wchar_t*) { return "title"; }
 std::wstring g_title_before_loading; bool g_loading_shown=false;
@@ -117,21 +91,12 @@ int main() {
  while (!waiting) std::this_thread::yield();
  CHECK(native_calls==0); CHECK(logs==3); CHECK(g_hwnd==&window); CHECK(handed_titles>0);
  window_pump(); CHECK(polls==1); CHECK(events==0);
-#ifdef MELEE_LINUX_X11_EMBED
- CHECK(commands==1);
-#endif
-#ifdef __APPLE__
- CHECK(mac_pumps==1);
-#endif
  loading_show(L"shaders",0,1); CHECK(polls>=2);
  loading_close(); CHECK(!g_loading_shown);
  // The actual host.cpp atomic exit flag reaches the non-owner frame-0-style waiter.
  pending_event=1; window_pump(); waiter.join();
  CHECK(saw_exit); CHECK(exit_requested()); CHECK(events==1); CHECK(logs==3);
  window_destroy(); CHECK(g_hwnd==nullptr);
-#ifdef MELEE_LINUX_X11_EMBED
- CHECK(detaches==1); CHECK(!g_x11_embed_active);
-#endif
  const int before=native_calls; window_pump(); CHECK(native_calls==before);
  std::printf("production SDL pump: %d checks\n",checks);
 }
@@ -140,7 +105,7 @@ int main() {
 
 class SdlVideoThreadWiring(unittest.TestCase):
     def test_entry_guards_precede_all_state_and_platform_work(self):
-        for name, kind in (('window_pump', 'Pump'), ('pump_embed_commands', 'EmbedCommands'),
+        for name, kind in (('window_pump', 'Pump'),
                            ('handle_event', 'Event'), ('loading_show', 'LoadingShow'),
                            ('loading_close', 'LoadingClose'), ('window_destroy', 'Destroy'),
                            ('window_set_title', 'Title')):
@@ -157,9 +122,8 @@ class SdlVideoThreadWiring(unittest.TestCase):
                 self.assertTrue(code.startswith(guard), name)
         create = body(SDL, 'window_create')
         self.assertLess(create.index('g_sdl_video_thread.claim()'), create.index('SDL_InitSubSystem'))
-        self.assertLess(create.index('g_sdl_video_thread.claim()'), create.index('mac_embed::configure'))
         destroy = body(SDL, 'window_destroy')
-        self.assertGreater(destroy.index('g_sdl_video_thread.release()'), destroy.index('mac_embed::destroy()'))
+        self.assertGreater(destroy.index('g_sdl_video_thread.release()'), destroy.index('SDL_DestroyWindow('))
         self.assertIn('#ifndef _WIN32\n#include "sdl_video_thread.h"',
                       (ROOT / 'port/runtime/host/window.cpp').read_text())
 
@@ -176,16 +140,14 @@ class SdlVideoThreadWiring(unittest.TestCase):
         # Select production branches after system headers: undefining Apple's compiler macro
         # on the command line would break the native libc++ headers rather than test Linux.
         for platform, defines in (('linux', '#undef __APPLE__\n'),
-                                  ('x11', '#undef __APPLE__\n#define MELEE_LINUX_X11_EMBED\n'),
                                   ('mac', '#ifndef __APPLE__\n#define __APPLE__\n#endif\n')):
-            for hook in (False, True):
-                self.compile_pump(platform, defines, hook, functions)
+            self.compile_pump(platform, defines, functions)
 
-    def compile_pump(self, platform, defines, hook, functions):
-        with self.subTest(platform=platform, hook=hook), tempfile.TemporaryDirectory(prefix='sdl-video-') as directory:
+    def compile_pump(self, platform, defines, functions):
+        with self.subTest(platform=platform), tempfile.TemporaryDirectory(prefix='sdl-video-') as directory:
             source = Path(directory) / 'test.cpp'
             exe = Path(directory) / 'test'
-            source.write_text(HARNESS + defines + ('#define YOUGAME_AGENT_TEST_HOOK\n' if hook else '') + functions + TAIL)
+            source.write_text(HARNESS + defines + functions + TAIL)
             subprocess.run(compiler_command() + ['-std=c++17', '-pthread', '-I',
                            str(ROOT / 'port/runtime/host'), str(source), '-o', str(exe)],
                            check=True)
@@ -194,18 +156,9 @@ class SdlVideoThreadWiring(unittest.TestCase):
     def test_waiting_phases_keep_owner_pumping_and_atomic_exit(self):
         main = (ROOT / 'port/app/main.cpp').read_text()
         worker = (ROOT / 'port/runtime/gx/threaded_backend.cpp').read_text()
-        self.assertLess(main.index('backend = gx::create_threaded_backend('),
-                        main.index('yougame::wait_identity(10000)'))
-        self.assertIn('threaded = false;', main[main.index('#ifdef __APPLE__\n  // Embedded launch'):])
+        self.assertIn('threaded = false;', main)
         self.assertLess(worker.index('host::window_pump();'), worker.index('queue.try_pop(incoming)'))
         self.assertIn('queue.wait_available(std::chrono::milliseconds(2));\n        continue;', worker)
-        source = (ROOT / 'port/app/source_host.cpp').read_text()
-        responsive = source[source.index('hooks.responsive ='):][:400]
-        self.assertIn('host::window_pump();', responsive)
-        self.assertIn('if (host::exit_requested())', responsive)
-        engine = (ROOT / 'port/runtime/hle/yougame_console_engine.cpp').read_text()
-        self.assertEqual(engine.count('if (hooks_.responsive) hooks_.responsive();'), 3)
-        self.assertGreaterEqual(engine.count('if (!active_) return false;'), 3)
         host = (ROOT / 'port/runtime/host/host.cpp').read_text()
         self.assertIn('static std::atomic<bool> g_exit{false};', host)
         self.assertIn('g_exit.store(true)', body(host, 'request_exit'))

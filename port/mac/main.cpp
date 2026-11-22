@@ -9,6 +9,8 @@
 #include "gx_host_compat.h"
 #include "renderer_presenter.h"
 #include <SDL.h>
+#include <future>
+#include <CoreFoundation/CoreFoundation.h>
 #endif
 #include <cerrno>
 #include <chrono>
@@ -33,7 +35,7 @@ void crash_trace(int signal) {
   _Exit(128 + signal);
 }
 #ifdef MELEE_LINUX_GRAPHICS
-std::filesystem::path shader_cache_override;   // --shader-cache, from the YouGame launch spec
+std::filesystem::path shader_cache_override;   // --shader-cache
 constexpr bool threaded_presenter = false;   // see the presentation.open call in main
 std::filesystem::path shader_cache() {
   if (!shader_cache_override.empty()) return shader_cache_override;
@@ -145,7 +147,7 @@ int main(int argc,char** argv) {
     cfg.no_gc_adapter=true;
     std::string digest_path, graphics_capture, capture_path, capture_dir;
     bool presenter_test = false, hidden = false;
-    double display_fps = 60;
+    double display_fps = 0;  // 0 leaves each entry point at its default.
     for (int i=1;i<argc;++i) {
       const std::string arg=argv[i];
       auto next=[&]() { if (++i>=argc) throw std::runtime_error("missing value after "+arg); return argv[i]; };
@@ -193,7 +195,7 @@ int main(int argc,char** argv) {
 #ifdef MELEE_LINUX_GRAPHICS
       else if (arg=="--shader-cache") shader_cache_override=next();
 #endif
-      // The YouGame launch spec is shared with the Windows build. This offline Mac host has no settings
+      // The launch options are shared with the full Windows host. This offline Mac host has no settings
       // panel, Slippi, replays or mods yet, so it accepts those options and ignores them.
       else if (arg=="--threaded-renderer") {}
       else if (arg=="--settings-path" || arg=="--sys-dir" || arg=="--user-dir" || arg=="--replay-dir") next();
@@ -210,7 +212,15 @@ int main(int argc,char** argv) {
     if (presenter_test) {
       Presentation presentation;
       presentation.open_window(true);
-      if (!linux_renderer::presenter_self_test(presentation.window, shader_cache() / "presenter-test"))
+      // SDL creates the render thread's OpenGL context on the main dispatch queue.
+      // Keep AppKit processing that queue until the independent presenter test finishes.
+      auto test = std::async(std::launch::async, [&] {
+        return linux_renderer::presenter_self_test(presentation.window, shader_cache() / "presenter-test", display_fps ? display_fps : 240);
+      });
+      while (test.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, false);
+      }
+      if (!test.get())
         throw std::runtime_error("Mac presenter self-test failed");
       std::puts("Mac presenter: PASS"); return 0;
     }
@@ -239,7 +249,7 @@ int main(int argc,char** argv) {
     if (!cfg.headless) {
       // The threaded presenter creates its GL context on a render thread, which deadlocks against
       // AppKit on macOS; the experimental build presents from the main thread at 60 Hz.
-      presentation.open(hidden, threaded_presenter, display_fps);
+      presentation.open(hidden, threaded_presenter, display_fps ? display_fps : 60);
       linux_host::set_video_sinks(fifo, nullptr, nullptr);
     }
 #endif

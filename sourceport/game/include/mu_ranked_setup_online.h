@@ -15,8 +15,8 @@ void mu_ranked_setup_set_draft(const MuRankedSetupChoice*);
 int mu_ranked_setup_submit(const MuRankedSetupChoice*, int automatic);
 /* Capture the finalized online winner before scene exit destroys fighter data. */
 void mu_ranked_setup_game_result(int winner, unsigned end_mode, int disconnected);
-int mu_ranked_setup_finish_game(int connected, MuYgU16 stage);
-/* True only with paired host/game YOUGAME_AGENT_TEST_HOOK builds and rankedCpu. */
+int mu_ranked_setup_finish_game(int connected, MuRankU16 stage);
+/* True only with paired host/game MU_RANKED_TEST_CPU builds and rankedCpu. */
 int mu_ranked_setup_cpu(void);
 /* Update guard persists through room cleanup until the result reveal was drawn. */
 int mu_ranked_update_busy(void);

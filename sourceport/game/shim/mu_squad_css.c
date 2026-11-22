@@ -54,7 +54,6 @@ int snprintf(char* buffer, __SIZE_TYPE__ size, const char* format, ...);
 
 #include <melee/gm/gm_1601.h>
 #include "mu_squad.h"
-#include <mu_lobby_wire.h>
 #include <melee/lb/lb_00B0.h>
 #include <melee/lb/lbarchive.h>
 #include <melee/lb/lbdvd.h>
@@ -65,19 +64,17 @@ int snprintf(char* buffer, __SIZE_TYPE__ size, const char* format, ...);
 #include <sysdolphin/baselib/aobj.h>
 #include <sysdolphin/baselib/gobjplink.h>
 #include <sysdolphin/baselib/tobj.h>
-int mu_console_active(void);
 
 /* The online event CSS has one virtual door/cursor at 0, regardless of
  * the controller used to enter it. Offline/Friends retain their four doors. */
 static bool squad_css_kind(void)
 {
-    return mnCharSel_804D6CB0->match_type == VS_MELEE ||
-        (gmSquad_OnlineChosen() && mnCharSel_804D6CB0->match_type == 0xE);
+    return mnCharSel_804D6CB0->match_type == VS_MELEE;
 }
 static PlayerInitData* squad_player(int door)
 {
     return &mnCharSel_804D6CB0->vs.start.players[
-        gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : door];
+        door];
 }
 
 static const char* const squad_names[ChKind_Max] = {
@@ -149,27 +146,6 @@ static u8 squad_coin_holder[4];
  * drop. */
 static u8 squad_coin_seen[4];
 static int squad_canvas = -1;
-static HSD_Text* squad_lobby_label;
-static bool squad_heading_hidden;
-extern void mu_squad_lobby_label_draw(void* object);
-static void squad_lobby_heading(void)
-{
-    HSD_JObj* heading = NULL;
-    if (!mu_lobby_css() || mnCharSel_804D6CC0 == NULL) return;
-    lb_80011E24(mnCharSel_804D6CC0, &heading, 36, -1);
-    if (heading) {
-        if (gmSquad_LobbyChosen()) HSD_JObjSetFlagsAll(heading, JOBJ_HIDDEN);
-        else if (squad_heading_hidden) HSD_JObjClearFlagsAll(heading, JOBJ_HIDDEN);
-        squad_heading_hidden = gmSquad_LobbyChosen();
-    }
-    if (!squad_lobby_label && squad_canvas >= 0) {
-        squad_lobby_label = HSD_SisLib_803A6754(0, squad_canvas);
-        if (squad_lobby_label) {
-            HSD_SisLib_803A6B98(squad_lobby_label, 0, 0, " ");
-            squad_lobby_label->render_callback = mu_squad_lobby_label_draw;
-        }
-    }
-}
 static HSD_Text* squad_texts[4];
 static u32 squad_shown[4];
 /* The online row: its empty places (squad_slot_places) and the used-fighter marks on the
@@ -280,8 +256,6 @@ static void mnCharSel_SquadReset(int canvas)
     squad_logged_valid = false;
     squad_agent_wait = -1;
     squad_canvas = canvas;
-    squad_lobby_label = NULL;
-    squad_heading_hidden = false;
     for (i = 0; i < GMSQUAD_SIZE; i++) {
         squad_slot_texts[i] = NULL; /* freed with the last screen's canvas */
         squad_marks[i] = NULL;
@@ -345,7 +319,7 @@ static u8 squad_coin_color(int port)
 static bool squad_door_open(int port)
 {
     u8 type;
-    if (gmSquad_OnlineChosen() && port != 0) return false;
+
     type = squad_player(port)->slot_type;
     return type == Gm_PKind_Human || type == Gm_PKind_Cpu;
 }
@@ -380,7 +354,7 @@ static int squad_players(void)
 /* Another port has this character in this colour (coin pick or member). */
 static bool squad_clash(int port, u8 ck, u8 color)
 {
-    if (gmSquad_LobbyChosen()) return false; /* the frozen setup resolves costume indices */
+     /* the frozen setup resolves costume indices */
     int p, i;
     for (p = 0; p < 4; p++) {
         PlayerInitData* pl;
@@ -509,9 +483,9 @@ static int squad_member_under_cursor(int port, int* owner)
 {
     struct CSSCursorData* cursor;
     int ck, i, q;
-    if (gmSquad_OnlineChosen() && !gmSquad_OnlineEditable()) return -1;
+
     if (port < 0 || port >= 4 || mnCharSel_804D6CB0 == NULL ||
-        !squad_css_kind() || (mnCharSel_804D6CF5 == 1 && !gmSquad_OnlineChosen()) ||
+        !squad_css_kind() || (mnCharSel_804D6CF5 == 1) ||
         !gmSquad_ModeAllowed() || mnCharSel_804D6CB0->vs.start.rules.is_teams)
     {
         return -1;
@@ -550,7 +524,7 @@ static bool squad_fill_mode(void);
 
 static bool mnCharSel_SquadTakesLR(int port)
 {
-    if (gmSquad_OnlineChosen() && !gmSquad_OnlineEditable()) return false;
+
     if (squad_fill_mode()) return false; /* the online row's keys are A and B: L/R stay the game's */
     struct CSSCursorData* cursor;
     int target;
@@ -559,31 +533,15 @@ static bool mnCharSel_SquadTakesLR(int port)
     if (!cursor) return false;
     target = cursor->x5 == 1 ? cursor->x6 : port;
     return target >= 0 && target < 4 && gmSquad_Count(target) > 0 &&
-           (HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].button & (HSD_PAD_L | HSD_PAD_R)) != 0 &&
-           !(HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].trigger & (HSD_PAD_X | HSD_PAD_Y));
+           (HSD_PadCopyStatus[port].button & (HSD_PAD_L | HSD_PAD_R)) != 0 &&
+           !(HSD_PadCopyStatus[port].trigger & (HSD_PAD_X | HSD_PAD_Y));
 }
 
 static bool squad_budget(int coin_port, u8 coin_ck, u8 coin_color)
 {
     GmSquadMember members[GMSQUAD_PORTS * GMSQUAD_SIZE];
     int p, count = 0;
-    if (gmSquad_LobbyChosen()) {
-        const MuLobbyView* v = mu_lobby_read();
-        if (!v || v->my_seat >= 4) return false;
-        for (p = 0; p < GMSQUAD_PORTS; ++p) {
-            const MuLobbySeat* seat = &v->seats[p];
-            int i;
-            if (seat->kind != MU_LOBBY_KIND_HUMAN) continue;
-            if (p == v->my_seat) {
-                count += gmSquad_Lineup(p, p == coin_port ? coin_ck : squad_coin_pick(p),
-                    p == coin_port ? coin_color : squad_coin_color(p), &members[count]);
-            } else for (i = 0; i < seat->lineup_count; ++i) {
-                members[count].ckind = seat->lineup[i][0];
-                members[count++].color = mu_squad_color(seat->lineup[i][0], seat->lineup[i][1]);
-            }
-        }
-        return gmSquad_Budget(members, count, -1);
-    }
+
     for (p = 0; p < GMSQUAD_PORTS; ++p) {
         if (!squad_door_open(p)) continue;
         count += gmSquad_Lineup(p, p == coin_port ? coin_ck : squad_coin_pick(p),
@@ -601,7 +559,7 @@ static void squad_add(int target, u8 ck)
     bool preview = squad_door_shows(target, &shown_ck, &shown_color) &&
                    shown_ck == ck && shown_color < squad_num_colors(ck);
 
-    if (!gmSquad_LobbyChosen() && squad_players() > 2) { lbAudioAx_80024030(3); return; }
+    if (squad_players() > 2) { lbAudioAx_80024030(3); return; }
     if (squad_coin_pick(target) == ck) {
         lbAudioAx_80024030(3); /* already your coin pick */
         return;
@@ -674,7 +632,7 @@ static bool squad_add_member(int target, u8 ck, u8 color)
  * comes straight back to the hand; the fourth stays down as the last pick. */
 static bool squad_fill_mode(void)
 {
-    return gmSquad_LobbyChosen() || (gmSquad_OnlineChosen() && gmSquad_OnlineEditable());
+    return false;
 }
 
 /* Put the door's coin in cursor cport's hand, exactly as an A press on the
@@ -907,7 +865,7 @@ static bool squad_xy(int port, u32 pressed)
     if (!(pressed & (HSD_PAD_X | HSD_PAD_Y))) return false;
     index = squad_member_under_cursor(port, &owner);
     if (index < 0) return false;
-    HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].trigger &= ~(HSD_PAD_X | HSD_PAD_Y);
+    HSD_PadCopyStatus[port].trigger &= ~(HSD_PAD_X | HSD_PAD_Y);
     if (squad_cycle_color(owner, index, (pressed & HSD_PAD_X) ? 1 : -1)) {
         sfxMove();
     } else {
@@ -929,7 +887,7 @@ static bool squad_xy(int port, u32 pressed)
  * disconnect. */
 static void squad_fill_buttons(int port, struct CSSCursorData* cursor, u32 pressed)
 {
-    const int pad = gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port;
+    const int pad = port;
     const bool picks = gmSquad_Count(port) > 0 || squad_coin_pick(port) != GMSQUAD_NONE;
     /* B's press is its edge from squad_b_track, never the pad's trigger bit: hiding B from .button
      * below makes the next frame's trigger (HSD_PadRenewCopyStatus derives it from the edited
@@ -981,14 +939,14 @@ static void squad_fill_buttons(int port, struct CSSCursorData* cursor, u32 press
         squad_coin_held(port) && squad_on_random(cursor))
     {
         HSD_PadCopyStatus[pad].trigger &= ~HSD_PAD_A;
-        if (!gmSquad_LobbyChosen() && squad_players() > 2) { lbAudioAx_80024030(3); return; }
+        if (squad_players() > 2) { lbAudioAx_80024030(3); return; }
         squad_random_pick(port, cursor);
     }
 }
 
 static void squad_buttons(int port)
 {
-    if (gmSquad_OnlineChosen() && !gmSquad_OnlineEditable()) return;
+
     struct CSSCursorData* cursor = mnCharSel_804A0BC0[port];
     u32 pressed;
     int target;
@@ -996,12 +954,12 @@ static void squad_buttons(int port)
     if (cursor == NULL) {
         return;
     }
-    pressed = HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].trigger;
+    pressed = HSD_PadCopyStatus[port].trigger;
     if (squad_fill_mode()) {
         squad_fill_buttons(port, cursor, pressed);
         return;
     }
-    if (!(HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].button & HSD_PAD_L)) {
+    if (!(HSD_PadCopyStatus[port].button & HSD_PAD_L)) {
         squad_l_held[port] = 0;
     } else if (squad_l_held[port] < 0xFF) {
         squad_l_held[port]++;
@@ -1011,8 +969,8 @@ static void squad_buttons(int port)
      * even though the clear action will not fire for another 89 bodies. */
     target = cursor->x5 == 1 ? cursor->x6 : port;
     if (target >= 0 && target < 4 && gmSquad_Count(target) > 0 &&
-        (HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].button & HSD_PAD_L))
-        HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].trigger &= ~HSD_PAD_L;
+        (HSD_PadCopyStatus[port].button & HSD_PAD_L))
+        HSD_PadCopyStatus[port].trigger &= ~HSD_PAD_L;
     if (!(pressed & (HSD_PAD_Z | HSD_PAD_R | HSD_PAD_DPADUP)) &&
         squad_l_held[port] != SQUAD_CLEAR_HOLD)
     {
@@ -1035,8 +993,8 @@ static void squad_buttons(int port)
      * the D-pad's existing behavior until the player explicitly picks Z. */
     if (gmSquad_Count(target) > 0) {
         u32 consumed = HSD_PAD_L | HSD_PAD_R;
-        if (!mu_console_active() && !gmSquad_OnlineChosen()) consumed |= HSD_PAD_DPADUP;
-        HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].trigger &= ~consumed;
+        consumed |= HSD_PAD_DPADUP;
+        HSD_PadCopyStatus[port].trigger &= ~consumed;
     }
     if (squad_l_held[port] == SQUAD_CLEAR_HOLD) {
         /* Held for 1.5 s: the whole squad goes, once per hold. */
@@ -1047,7 +1005,7 @@ static void squad_buttons(int port)
         return;
     }
     /* Friends reserves the D-pad; removal there uses R only. */
-    if ((pressed & HSD_PAD_R) || ((pressed & HSD_PAD_DPADUP) && !mu_console_active() && !gmSquad_OnlineChosen())) {
+    if ((pressed & HSD_PAD_R) || (pressed & HSD_PAD_DPADUP)) {
         if (gmSquad_Count(target) == 0) return;
         if (squad_remove_last(target)) {
             sfxBack();
@@ -1061,15 +1019,15 @@ static void squad_buttons(int port)
     }
     if (!(pressed & HSD_PAD_Z)) return;
     if (squad_on_random(cursor)) {
-        HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].trigger &= ~HSD_PAD_Z;
-        if (!gmSquad_LobbyChosen() && squad_players() > 2) { lbAudioAx_80024030(3); return; }
+        HSD_PadCopyStatus[port].trigger &= ~HSD_PAD_Z;
+        if (squad_players() > 2) { lbAudioAx_80024030(3); return; }
         squad_random_pick(target, cursor);
         return;
     }
     {
         int ck = squad_hovered(cursor);
         if (ck >= 0 && ck < 26) {
-            HSD_PadCopyStatus[gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : port].trigger &= ~HSD_PAD_Z;
+            HSD_PadCopyStatus[port].trigger &= ~HSD_PAD_Z;
             squad_add(target, (u8) ck);
         }
     }
@@ -1100,14 +1058,10 @@ static void squad_line(int port, char* out, size_t size)
     out[0] = '\0';
     if (port >= 0 && port < 4 && squad_note[port] && gmSquad_ModeAllowed()) {
         /* A refused pick (squad_fits): why, instead of the lineup, for SQUAD_NOTE_FRAMES. */
-        snprintf(out, size, gmSquad_OnlineChosen() ? "Squad too big to load online: pick a lighter fighter."
-                                                   : "Squads too big to load together: pick a lighter fighter.");
+        snprintf(out, size, "Squads too big to load together: pick a lighter fighter.");
         return;
     }
-    if ((gmSquad_OnlineChosen() || gmSquad_LobbyChosen()) && gmSquad_ModeAllowed()) {
-        squad_slots_line(port, out, size);
-        return;
-    }
+
     if (!gmSquad_ModeAllowed() || gmSquad_Count(port) == 0) return;
     n = gmSquad_Lineup(port, squad_coin_pick(port), squad_coin_color(port), order);
     for (i = 0; i < n && used < (int) size; i++) {
@@ -1253,7 +1207,7 @@ static void squad_slot_places(const u8* cks, int n, f32 x0, f32 gap, f32 cy)
 
 /* A row of stock icons above door p's nametag: coin pick, then members.
  * The online row's four places go under its name tag instead. */
-static bool squad_icon_row(int p, const MuLobbyView* v)
+static bool squad_icon_row(int p)
 {
     u8 cks[SQUAD_ICONS_MAX];
     u8 colors[SQUAD_ICONS_MAX];
@@ -1273,18 +1227,7 @@ static bool squad_icon_row(int p, const MuLobbyView* v)
     if (squad_icon_model == NULL || mnCharSel_804D6CC0 == NULL) {
         return false;
     }
-    if (gmSquad_LobbyChosen()) {
-        if (v && p != v->my_seat) {
-            const MuLobbySeat* seat = &v->seats[p];
-            for (i = 0; i < seat->lineup_count; ++i) {
-                cks[n] = seat->lineup[i][0]; colors[n++] = mu_squad_color(cks[i], seat->lineup[i][1]);
-            }
-        } else {
-            GmSquadMember order[GMSQUAD_SIZE];
-            const int count = gmSquad_Lineup(p, squad_coin_pick(p), squad_coin_color(p), order);
-            for (i = 0; i < count; ++i) { cks[n] = order[i].ckind; colors[n++] = order[i].color; }
-        }
-    } else if (gmSquad_ModeAllowed() && (gmSquad_Count(p) != 0 || gmSquad_OnlineChosen())) {
+    if (gmSquad_ModeAllowed() && (gmSquad_Count(p) != 0)) {
         /* In fighting order, the coin pick among the others. */
         GmSquadMember order[GMSQUAD_SIZE];
         int count = gmSquad_Lineup(p, squad_coin_pick(p),
@@ -1296,7 +1239,7 @@ static bool squad_icon_row(int p, const MuLobbyView* v)
         }
         /* The online row always shows four places: empty ones stay empty
          * in their own slot, so slots 1 to 4 never move. */
-        while (gmSquad_OnlineChosen() && n < SQUAD_ICONS_MAX) {
+        while (false) {
             cks[n] = GMSQUAD_NONE;
             colors[n] = 0;
             n++;
@@ -1325,35 +1268,7 @@ static bool squad_icon_row(int p, const MuLobbyView* v)
         squad_slot_places(cks, 0, 0.0f, 0.0f, 0.0f);
         return true;
     }
-    if (gmSquad_OnlineChosen()) {
-        /* Pick order left to right, under the username. */
-        f32 cx, cy, cz;
-        if (!squad_online_row_spot(&cx, &cy, &cz)) {
-            static int logged_spot;
-            if (!logged_spot) {
-                logged_spot = 1;
-                OSReport("squad: name tag not built yet, picks shown as text for now\n");
-            }
-            squad_icons_shown[p] = 0; /* try again next frame */
-            return false;
-        }
-        x0 = cx + squad_icon_dx - squad_icon_gap * (n - 1) / 2.0f;
-        for (i = 0; i < n; i++) {
-            if (cks[i] != GMSQUAD_NONE) {
-                squad_icons[p][i] = squad_icon_create(cks[i], colors[i], x0 + squad_icon_gap * i,
-                                                      cy + squad_icon_dy, cz + squad_icon_dz, 0.0f, true);
-            }
-        }
-        squad_slot_places(cks, n, x0, squad_icon_gap, cy + squad_icon_dy);
-        {
-            static int logged_online;
-            if (logged_online < 2) {
-                logged_online++;
-                OSReport("squad: online picks row under the name tag at (%.2f, %.2f, %.2f)\n", cx, cy, cz);
-            }
-        }
-        return true;
-    }
+
 
     /* The row sits just above the nametag (whose joint is at the tag's
      * left end, vertically centred), or above the CPU level / handicap
@@ -1411,7 +1326,7 @@ static void squad_grid_marks(int p)
     u32 key = 2166136261u;
     int i, n = 0;
     if (squad_canvas < 0) return;
-    if (gmSquad_ModeAllowed() && (gmSquad_OnlineChosen() || gmSquad_LobbyChosen())) {
+    if (gmSquad_ModeAllowed() && false) {
         n = gmSquad_Lineup(p, squad_coin_pick(p), squad_coin_color(p), order);
     }
     for (i = 0; i < n; i++) key = (key ^ order[i].ckind) * 16777619u;
@@ -1462,14 +1377,9 @@ static void squad_banners(void)
     for (p = 0; p < 4; p++) {
         if (squad_note[p]) --squad_note[p];
     }
-    if (mu_lobby_css()) {
-        const MuLobbyView* v = mu_lobby_read();
-        for (p = 0; p < 4; ++p) squad_icon_row(p, v);
-        if (v && v->my_seat < 4) squad_grid_marks(v->my_seat);
-        return;
-    }
 
-    if (squad_canvas >= 0 && gmSquad_OnlineChosen()) {
+
+    if (squad_canvas >= 0 && false) {
         char line[128];
         HSD_Text* text = squad_texts[0];
         if (!text) {
@@ -1488,7 +1398,7 @@ static void squad_banners(void)
         /* The picks as fighter icons under the name tag and used fighters marked on the grid, so
          * the bottom line is empty: the panel already says what START does. It shows only a
          * refused pick's reason, or the lineup as text if the icons couldn't load. */
-        if (squad_icon_row(0, NULL) && !squad_note[0]) line[0] = '\0';
+        if (squad_icon_row(0) && !squad_note[0]) line[0] = '\0';
         else squad_line(0, line, sizeof line);
         squad_grid_marks(0);
         HSD_SisLib_803A70A0(text, 0, "%s", line);
@@ -1502,7 +1412,7 @@ static void squad_banners(void)
         u32 key;
         size_t k;
         HSD_Text* text = squad_texts[p];
-        if (squad_icon_row(p, NULL) && !squad_note[p]) {
+        if (squad_icon_row(p) && !squad_note[p]) {
             /* Icons drawn: no text banner (a refusal note that just ended is wiped). */
             if (text != NULL && squad_shown[p] != 0) {
                 text->bg_color.a = 0;
@@ -1603,7 +1513,7 @@ static void squad_restore_stocks(void)
 static void squad_sync_stocks(void)
 {
     GameRules* rules = gmMainLib_GetGameRules();
-    if (gmSquad_OnlineChosen() || mu_lobby_css()) return; /* online stocks come from exchanged lineups */
+     /* online stocks come from exchanged lineups */
     bool active = gmSquad_ModeAllowed() &&
         !mnCharSel_804D6CB0->vs.start.rules.is_teams &&
         gmSquad_Any() && rules->mode == Mode_Stock;
@@ -1710,7 +1620,7 @@ static void squad_b_track(void)
 {
     int p;
     for (p = 0; p < 4; p++) {
-        const int pad = gmSquad_OnlineChosen() ? mnCharSel_804D6CF0 : p;
+        const int pad = p;
         const bool down = (HSD_PadCopyStatus[pad].button & HSD_PAD_B) != 0;
         squad_b_edge[p] = down && !squad_b_down[p];
         squad_b_down[p] = down;
@@ -1731,22 +1641,8 @@ static void mnCharSel_SquadFrame(void)
         return;
     }
     squad_b_track();
-    if (mu_lobby_css()) {
-        const MuLobbyView* v = mu_lobby_read();
-        if (!gmSquad_LobbyChosen() || !v || v->my_seat >= 4) {
-            if (squad_icons_tried) squad_banners();
-            return;
-        }
-        p = v->my_seat;
-        if (!(v->flags & MU_LOBBY_F_STARTED) && mnCharSel_804D6CF6 == 0) {
-            squad_fill_on_drop(p);
-            squad_buttons(p);
-            gmSquad_TrackCoin(p, squad_coin_pick(p) != GMSQUAD_NONE);
-        }
-        squad_banners();
-        return;
-    }
-    if (!squad_css_kind() || (mnCharSel_804D6CF5 == 1 && !gmSquad_OnlineChosen())) {
+
+    if (!squad_css_kind() || (mnCharSel_804D6CF5 == 1)) {
         return;
     }
     if (!gmSquad_ModeAllowed() || mnCharSel_804D6CB0->vs.start.rules.is_teams) {
@@ -1758,25 +1654,12 @@ static void mnCharSel_SquadFrame(void)
         return;
     }
 
-    if (gmSquad_OnlineChosen() && !gmSquad_OnlineEditable()) {
-        squad_log_picks();
-        squad_banners();
-        return;
-    }
+
     /* A visit with no picks yet opens with the coin in the hand. Coming back to the screen, the
      * game sets the coin down on the character it kept (C. Falcon, kind 0, after a back-out),
      * which read as a first pick nobody made. A lineup carried into this visit keeps its coin. */
-    if (gmSquad_OnlineChosen() && !squad_open_checked && mnCharSel_804A0BC0[0] != NULL &&
-        mnCharSel_804A0BD0[0] != NULL) {
-        bool members = false;
-        squad_open_checked = true;
-        for (i = 0; i < GMSQUAD_EXTRA; i++) members |= gmSquad_rows[0][i].ckind != GMSQUAD_NONE;
-        if (!members && squad_coin_pick(0) != GMSQUAD_NONE) {
-            squad_regrab(0, 0);
-            OSReport("squad: visit opens with the coin in hand\n");
-        }
-    }
-    if (gmSquad_OnlineChosen()) squad_agent_lineup();
+
+
     for (p = 0; p < 4; p++) {
         if (!squad_door_open(p)) {
             gmSquad_Clear(p); /* a closed door has no squad */
@@ -1808,8 +1691,8 @@ static void mnCharSel_SquadFrame(void)
     lbDvd_GetPreloadCacheScene()->game_cache.mu_squad_key = gmSquad_Any() ? gmSquad_Key() : 0;
 
     squad_sync_stocks();
-    if (gmSquad_OnlineChosen()) squad_log_picks();
-    if (gmSquad_Any() || squad_icons_tried || gmSquad_OnlineChosen() || squad_any_note()) squad_banners();
+
+    if (gmSquad_Any() || squad_icons_tried || squad_any_note()) squad_banners();
 }
 
 /* A deliberate return to the main menu leaves normal VS rules behind.
@@ -1866,7 +1749,7 @@ int gmSquad_CssPickCount(void)
 {
     GmSquadMember lineup[GMSQUAD_SIZE];
     u8 ck, color;
-    if (!gmSquad_OnlineChosen() || mnCharSel_804D6CB0 == NULL || !squad_css_kind()) return -1;
+    return -1;
     return gmSquad_CssPreview(&ck, &color, lineup);
 }
 

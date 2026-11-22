@@ -6,8 +6,7 @@
 #include <vector>
 #include <array>
 #include <string>
-#include "yougame_ranked_policy.h"
-#include "yougame_ranked.h"
+#include "mu_ranked_wire.h"
 extern "C" {
 #include <mu_native.h>
 #include <mu_ranked_setup_online.h>
@@ -71,15 +70,15 @@ int mu_slippi_cmd(unsigned cmd,const void* data,unsigned n,void* reply,unsigned 
 }
 }
 static void reset(unsigned seat=0,unsigned game=1,bool cpu=false,bool mirror=false) {
-  match={};state={};peer_set={};peer={};policy=yougame::ranked_policy::slippi_v1();commands.clear();set_lines.clear();overwritten={};
+  match={};state={};peer_set={};peer={};policy=mu_slippi_ranked_policy();commands.clear();set_lines.clear();overwritten={};
   exits=cleanups=merges=c0_count=c2_count=c2_mode=0;
   no_remote=invalid_remote=fail_load=fail_policy=stadium_counterpick=false;fail_command=0;selected={};
   state.max_games=3;state.cur_game=game;state.prev_winner=game>1?0:255;
   state.last_stage_win[0]=state.last_stage_win[1]=65535;
   match.connection_state=MU_SLP_MM_CONNECTION_SUCCESS;match.local_ready=match.remote_ready=1;
   match.local_index=(unsigned char)seat; match.remote_index=(unsigned char)!seat;
-  mu_yg_put16(match.game_info+0xE,31);match.game_info[0x60]=2;match.game_info[0x84]=mirror?2:20;
-#if defined(YOUGAME_AGENT_TEST_HOOK) || (defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+  mu_rank_put16(match.game_info+0xE,31);match.game_info[0x60]=2;match.game_info[0x84]=mirror?2:20;
+#if defined(MU_RANKED_TEST_CPU)
   if(cpu)std::strcpy(match.match_id,"agent-ranked-cpu");
 #else
   (void)cpu;
@@ -99,7 +98,7 @@ static void normal() {
     while(mu_ranked_setup_current(mu_ranked_setup_model()))step();
     auto* m=mu_ranked_setup_model();CHECK(m->status==MU_SETUP_COMPLETE);
     CHECK(!std::memcmp(&m->result,&peer.result,sizeof m->result));
-    CHECK(mu_yg_get16(overwritten.data())==m->result.stage && overwritten[2] && overwritten[5]);
+    CHECK(mu_rank_get16(overwritten.data())==m->result.stage && overwritten[2] && overwritten[5]);
     CHECK(overwritten[8]==0 && overwritten[11]==0);
     CHECK(merges==(game>1?1u:0u) && c0_count>0 && !exits);
     match.remote_ready=0;mu_ranked_setup_frame();CHECK(!exits);
@@ -121,7 +120,7 @@ static void game_two_counterpick() {
     }
     CHECK(m->removed_count==1 && m->removed[0]==31); // winner bans Battlefield
     CHECK(m->result.stage==3 && peer.result.stage==3); // loser picks Stadium
-    CHECK(mu_yg_get16(overwritten.data())==3 && overwritten[2] && overwritten[5]);
+    CHECK(mu_rank_get16(overwritten.data())==3 && overwritten[2] && overwritten[5]);
     CHECK(merges==1 && selected.stage_id==3 && selected.stage_opt==MU_SLP_STAGE_PICK);
     mu_ranked_setup_frame();CHECK(exits==1 && !cleanups);
   }
@@ -164,64 +163,8 @@ static void tiebreak() {
   CHECK(mu_ranked_setup_model()->status==MU_SETUP_COMPLETE);mu_ranked_setup_frame();CHECK(exits==1);
   reset();state.tiebreak_num=5;begin();mu_ranked_setup_frame();CHECK(exits==1 && c2_count==1 && cleanups==1);
 }
-static void desync_replay_hosts() {
-  using namespace yougame::ranked;
-  Set hosts[2];
-  std::vector<json> reports[2];
-  const int placements[4]={255,255,255,255};
-  for(unsigned seat=0;seat<2;++seat) {
-    auto& host=hosts[seat];host.configure(seat,{"a","b"});
-    host.start_game("replay-game");
-    for(const auto& msg:host.due(1,seat==0,1))host.sent(msg);
-    host.receive({{"t","start"},{"matchId","set"}});
-    for(const auto& msg:host.due(1,seat==0,1))host.sent(msg);
-    // h_replay_event publishes method 7 with placements first. Both remote
-    // pausers would award opposite winners if this record were classified.
-    CHECK(no_contest_waits_for_report(7,true,true));
-    CHECK(!no_contest_waits_for_report(7,true,false)); // casual policy unchanged
-    CHECK(game_winner(7,!seat,-1,placements)==(int)seat);
-    CHECK(!host.awaiting_receipt() && !host.over());
-    CHECK(!no_contest_waits_for_report(7,false,true));
-    auto game=game_outcome(7,!seat,-2,nullptr); // finalized connected desync
-    CHECK(game.winner==-1 && !game.forfeit);
-    host.report_game(game);
-    CHECK(host.awaiting_receipt() && !host.decided());
-    reports[seat]=host.due(2,seat==0,1);
-    CHECK(reports[seat].size()==1 && reports[seat][0]["t"]=="game-report");
-    CHECK(reports[seat][0]["void"]==true && !reports[seat][0].count("winner"));
-    host.sent(reports[seat][0]);
-  }
-  CHECK(reports[0][0]==reports[1][0]);
-  // The room settles the agreeing void reports. The production readiness
-  // predicate must release both clients before the scene can replay.
-  for(auto& host:hosts) {
-    host.receive({{"t","game-result"},{"matchId","set"},
-      {"id",reports[0][0]["id"]},{"void",true},{"ranking",{"a","b"}}});
-    CHECK(host.games_received()==1);
-    CHECK(!host.awaiting_receipt() && !host.over() && !host.decided());
-    CHECK(host.due(3,false,1).empty()); // no set finish, and no forfeit latch
-  }
-  for(unsigned seat=0;seat<2;++seat) {
-    reset(seat);mu_ranked_setup_game_result(-1,7,0);
-    CHECK(mu_ranked_setup_finish_game(1,31)==MU_SETUP_TIEBREAK);
-    begin();CHECK(mu_ranked_setup_model()->status==MU_SETUP_COMPLETE);
-    match.local_ready=!(hosts[seat].awaiting_receipt() || hosts[seat].over());
-    match.remote_ready=!(hosts[!seat].awaiting_receipt() || hosts[!seat].over());
-    mu_ranked_setup_frame();CHECK(exits==1 && !cleanups && !c2_count);
-  }
-  // A real disconnect still names the same losing port on both hosts and
-  // immediately decides the set by forfeit, retaining the readiness hold.
-  for(auto& host:hosts) {
-    host.start_game("disconnect-game");
-    auto game=game_outcome(7,1,-3,nullptr);
-    CHECK(game.winner==0 && game.forfeit);
-    host.report_game(game);CHECK(host.decided() && host.over());
-    reset();mu_ranked_setup_game_result(-1,7,1);
-    CHECK(mu_ranked_setup_finish_game(1,31)==MU_SETUP_SET_ABORTED);
-  }
-}
 static void cpu() {
-#if defined(YOUGAME_AGENT_TEST_HOOK) || (defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+#if defined(MU_RANKED_TEST_CPU)
   for(unsigned game=1;game<=3;++game) {
     reset(0,game,true,true);begin();CHECK(mu_ranked_setup_cpu());
     unsigned frames=0;
@@ -259,7 +202,7 @@ static void update_lifecycle() {
 }
 static void result_logging() {
   for(unsigned seat=0;seat<2;++seat) for(bool practice : {false,true}) {
-#if !defined(YOUGAME_AGENT_TEST_HOOK) && !(defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+#if !defined(MU_RANKED_TEST_CPU)
     if(practice)continue;
 #endif
     const std::string p = practice ? "1" : "0";
@@ -316,4 +259,4 @@ static void result_logging() {
     CHECK(mu_ranked_update_busy());mu_ranked_update_result_shown();CHECK(!mu_ranked_update_busy());
   }
 }
-int main() {normal();game_two_counterpick();disconnects();timers();tiebreak();desync_replay_hosts();cpu();update_lifecycle();result_logging();std::printf("Ranked setup adapter: %u checks passed\n",checks);}
+int main() {normal();game_two_counterpick();disconnects();timers();tiebreak();cpu();update_lifecycle();result_logging();std::printf("Ranked setup adapter: %u checks passed\n",checks);}

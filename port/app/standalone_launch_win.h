@@ -1,13 +1,5 @@
-// Windows: a plain double-click on melee_source.exe (or melee_source_compat.exe) starts the game.
-// SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Started with no arguments at all, the Source Port used to print its usage to a console that a
-// double-click does not have and exit, so a player saw nothing. Now it finds the player's own Melee
-// NTSC 1.02 disc (the one it remembered, else the one an earlier run used, the YouGame app's runs
-// included (disc_memory.h), else melee.iso beside the exe, else a file picker), remembers
-// it, and starts a copy of itself exactly the way MeleeUnlocked.bat and the YouGame app do: settings, saves, replays,
-// the log and the shader cache in %LOCALAPPDATA%\MeleeUnlocked-YouGame, Sys beside the exe, the same
-// flags. Any argument at all (the app, the .bat, a shortcut, a test) skips this entirely.
+// Standalone Windows startup and local disc selection.
+
 #pragma once
 #if defined(_WIN32) && defined(MELEE_SOURCE_PORT)
 #include <windows.h>
@@ -36,7 +28,7 @@ inline fs::path data_dir() {
   wchar_t local[MAX_PATH] = {};
   const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
   if (n == 0 || n >= MAX_PATH) return {};
-  return fs::path(local) / L"MeleeUnlocked-YouGame";
+  return fs::path(local) / L"MeleeUnlocked";
 }
 
 // Melee NTSC 1.02: game ID GALE01 at the start of the disc, disc revision 2 at offset 7.
@@ -52,7 +44,7 @@ inline bool is_melee_102(const fs::path& iso) {
 }
 
 // The disc an earlier run used: this double-click's own pick first, then any run with --iso, the
-// YouGame app's (in its AppContainer folders) included. Every one needs the 1.02 header; one from
+// Each disc needs the 1.02 header. A disc from
 // another run's launcher.ini (possibly a mod run) must also be the unmodified disc, by the same
 // whole-disc check the game itself makes for --vanilla-only (mod_scan identify_vanilla).
 inline fs::path earlier_disc(const fs::path& local_app_data) {

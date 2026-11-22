@@ -1,20 +1,6 @@
-// Where a double-clicked Melee Unlocked finds the disc an earlier run already used.
+// Locate the previously selected disc in local launcher settings.
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
-// Every run started with --iso records that disc as "iso=<path>" in %LOCALAPPDATA%\MeleeUnlocked\
-// launcher.ini (main.cpp remember_iso), and a double-click records its own pick in
-// %LOCALAPPDATA%\MeleeUnlocked-YouGame\standalone.ini. A run the YouGame app starts on Windows is
-// in an AppContainer, where Windows points LOCALAPPDATA at %LOCALAPPDATA%\Packages\<profile>\AC, so
-// its launcher.ini lands there (the profiles are named YouGame.Game.<hash>, YouGame.Staging.Game.<hash>
-// and so on: desktop/src/sandbox-policy.ts). A double-click outside the app could not see that copy,
-// so it asked for a disc the player had already set up in the app (found in a test walk, 11-17).
-// Only paths are read here, all written by Melee Unlocked itself. launcher.ini (and so each
-// AppContainer copy) records the disc of every --iso run, mod runs included, so a disc found there
-// is only taken when the whole file is the unmodified NTSC 1.02 disc (the caller's `unmodified`,
-// mod_scan's whole-disc check): a 20XX or Hack Pack ISO has the same GALE01 rev 2 header. The started
-// game would refuse such a disc (main.cpp, --vanilla-only), but a double-click has no window to say
-// so, and the bare launch would then remember it. standalone.ini holds only discs that passed.
-// Portable on purpose (no Windows calls), so the host tests run anywhere.
+
 #pragma once
 #include <algorithm>
 #include <cctype>
@@ -54,35 +40,12 @@ enum class Encoding { Utf8, Ansi };
 // full_check: the disc may be from a mod run, so the header is not enough (see above).
 struct Place { fs::path ini; Encoding encoding; bool full_check = true; };
 
-inline bool yougame_profile(const std::string& name) {
-  static const char prefix[] = "yougame.";
-  if (name.size() <= sizeof prefix - 1) return false;
-  for (size_t i = 0; i < sizeof prefix - 1; ++i)
-    if (std::tolower((unsigned char)name[i]) != prefix[i]) return false;
-  return true;
-}
-
-// The files to look in, best first: the double-click's own pick, then the last run outside the
-// app, then the YouGame app's runs, the most recently written first.
 inline std::vector<Place> places(const fs::path& local_app_data) {
-  std::vector<Place> out;
-  if (local_app_data.empty()) return out;
-  out.push_back({local_app_data / "MeleeUnlocked-YouGame" / "standalone.ini", Encoding::Utf8, false});
-  out.push_back({local_app_data / "MeleeUnlocked" / "launcher.ini", Encoding::Ansi, true});
-  std::vector<std::pair<fs::file_time_type, fs::path>> app_runs;
-  std::error_code ec;
-  fs::directory_iterator it(local_app_data / "Packages", ec), end;
-  for (; !ec && it != end; it.increment(ec)) {
-    if (!yougame_profile(it->path().filename().u8string())) continue;
-    const fs::path ini = it->path() / "AC" / "MeleeUnlocked" / "launcher.ini";
-    std::error_code fe;
-    if (!fs::is_regular_file(ini, fe)) continue;
-    const auto when = fs::last_write_time(ini, fe);
-    if (!fe) app_runs.emplace_back(when, ini);
-  }
-  std::stable_sort(app_runs.begin(), app_runs.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-  for (const auto& run : app_runs) out.push_back({run.second, Encoding::Ansi, true});
-  return out;
+  if (local_app_data.empty()) return {};
+  const auto current = local_app_data / "MeleeUnlocked";
+  return {{current / "standalone.ini", Encoding::Utf8, false},
+          {current / "launcher.ini", Encoding::Ansi, true},
+          {local_app_data / "MeleeUnlocked-YouGame" / "standalone.ini", Encoding::Utf8, false}};
 }
 
 // Records the disc a double-click used in standalone.ini (UTF-8), through a temporary file.

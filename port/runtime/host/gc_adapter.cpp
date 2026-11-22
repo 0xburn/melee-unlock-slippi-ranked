@@ -1,21 +1,27 @@
 #include "test_env.h"
 #ifdef __APPLE__
 #include "host.h"
-#include "gc_adapter_mirror_mac.h"
+#include <mutex>
 namespace host {
-// PhobGCC (0.9.80): the settings shape the adapter's own reports, but the app's mirror decodes pads
-// before they reach this process, so on macOS the settings are kept for the menu and not applied yet;
-// there is no raw stick report to calibrate from or to show in the scope menus. Defined here, not in
-// gc_adapter_mirror_mac.h: pad_mirror_posix_test includes that header with its own minimal host stand-ins.
-namespace { phob::Settings g_phob_settings[4]; }
+// SDL owns controller input on macOS. The direct USB adapter driver is used on Windows and Linux.
+namespace { std::mutex g_phob_mutex; phob::Settings g_phob_settings[4]; }
+double gcadapter_poll_rate_hz() { return 0; }
+std::string gcadapter_problem() { return "Use an SDL controller on macOS"; }
+bool gcadapter_reset_pending() { return false; }
+bool gcadapter_request_reset() { return false; }
+uint32_t gcadapter_poll(PadState[4]) { return 0; }
+void gcadapter_recalibrate(int) {}
+void gcadapter_rumble(int, bool) {}
+void gcadapter_shutdown() {}
+bool steam_running() { return false; }
 void gcadapter_phob_set(int port, const phob::Settings& settings) {
   if (port < 0 || port > 3) return;
-  std::lock_guard<std::mutex> lock(g_app_mutex);
+  std::lock_guard<std::mutex> lock(g_phob_mutex);
   g_phob_settings[port] = settings;
 }
 phob::Settings gcadapter_phob_get(int port) {
   if (port < 0 || port > 3) return {};
-  std::lock_guard<std::mutex> lock(g_app_mutex);
+  std::lock_guard<std::mutex> lock(g_phob_mutex);
   return g_phob_settings[port];
 }
 bool gcadapter_phob_raw(int, phob::HardwareInput&) { return false; }
@@ -37,10 +43,6 @@ void gcadapter_test_script_start() {}
 // adapter through as a HID device, and on Windows for an adapter still on its stock HID driver.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "host.h"
-#include "yougame_link.h"
-#ifndef _WIN32
-#include "pad_mirror_posix.h"
-#endif
 #include "phob.h"
 #include "phob_adapter_input.h"
 #define NOMINMAX
@@ -73,7 +75,7 @@ namespace {
 
 // The app's helper is the sole adapter owner in stdio-bridge mode. Keep this check at
 // startup and at the transport entry points, including reset and the I/O workers.
-bool direct_adapter_allowed() { return !options.no_gc_adapter && !yougame::stdio_bridge(); }
+bool direct_adapter_allowed() { return !options.no_gc_adapter; }
 #ifdef GC_ADAPTER_TEST_HOOK
 unsigned g_test_scanner_starts = 0, g_test_libusb_opens = 0, g_test_hid_opens = 0;
 #endif
@@ -183,87 +185,6 @@ std::atomic<bool> g_rumble_dirty{false};
 std::thread g_writer;
 std::mutex g_rumble_mutex;
 std::condition_variable g_rumble_wake;
-
-// Launched by YouGame, the game never opens the adapter: the YouGame app's controller helper holds
-// it (and inside the app's sandbox no USB device can be opened at all). The helper keeps every raw
-// report it reads in a shared section, the "pad mirror", whose handle the app passes over the bridge
-// (yougame_link.h pad_mirror_handle), and takes the rumble back from it. The reports are the
-// adapter's own bytes, so everything below (neutral points, triggers, recalibration) is unchanged.
-// The layout is the helper's (desktop/native/src/main.cpp in the YouGame repository).
-#ifdef _WIN32
-struct PadMirror {
-  char magic[4];               // "YGPM"
-  uint32_t version;            // 1
-  volatile LONG seq;           // even: stable; odd: being written
-  uint32_t reports;            // reports written
-  double at_ms;                // the helper's clock
-  float rate_hz;               // the helper's reads per second
-  uint8_t connected;           // the adapter is open and reporting
-  uint8_t report[37];          // the raw report
-  uint8_t reserved[2];
-  volatile LONG rumble_seq;    // ours: bumped after each rumble change
-  uint8_t rumble[4];           // ours: motor on per port
-};
-static_assert(offsetof(PadMirror, report) == 29 && offsetof(PadMirror, rumble_seq) == 68 && sizeof(PadMirror) == 80, "the helper's layout");
-PadMirror* g_mirror = nullptr;           // under g_mutex
-uintptr_t g_mirror_handle = 0;
-uint32_t g_mirror_reports = 0;
-std::chrono::steady_clock::time_point g_mirror_moved;
-
-// Maps the section the app named, once per handle (a restarted helper hands over a new one).
-void attach_mirror() {
-  const uintptr_t handle = yougame::pad_mirror_handle();
-  if (!handle || handle == g_mirror_handle) return;
-  if (g_mirror) UnmapViewOfFile(g_mirror);
-  g_mirror_handle = handle;
-  g_mirror = (PadMirror*)MapViewOfFile((HANDLE)handle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(PadMirror));
-  if (g_mirror && (std::memcmp(g_mirror->magic, "YGPM", 4) != 0 || g_mirror->version != 1)) {
-    UnmapViewOfFile(g_mirror);
-    g_mirror = nullptr;
-  }
-  for (auto& o : g_origin) o.set = false;
-  log(g_mirror ? "gc adapter: reading the YouGame app's adapter" : "gc adapter: the YouGame app's adapter could not be read (error %lu)", GetLastError());
-}
-
-// The latest report from the mirror; false when there is none, the adapter is gone or it went quiet.
-bool read_mirror(uint8_t rep[37]) {
-  for (int attempt = 0; attempt < 8; ++attempt) {
-    const LONG before = g_mirror->seq;
-    if (before & 1) { YieldProcessor(); continue; }
-    MemoryBarrier();
-    std::memcpy(rep, g_mirror->report, 37);
-    const bool connected = g_mirror->connected != 0;
-    const uint32_t reports = g_mirror->reports;
-    const float rate = g_mirror->rate_hz;
-    MemoryBarrier();
-    if (g_mirror->seq != before) continue;
-    const auto now = std::chrono::steady_clock::now();
-    if (reports != g_mirror_reports) { g_mirror_reports = reports; g_mirror_moved = now; }
-    // The helper rewrites the report on every read, changed or not, so half a second without a new
-    // one means the helper or the adapter stopped.
-    const bool live = connected && reports && now - g_mirror_moved < std::chrono::milliseconds(500) && rep[0] == 0x21;
-    g_poll_rate_hz.store(live ? rate : 0.0, std::memory_order_relaxed);
-    return live;
-  }
-  g_poll_rate_hz.store(0.0, std::memory_order_relaxed);
-  return false;
-}
-
-// A live report from an attached mirror (read_mirror itself assumes one is attached).
-bool mirror_live(uint8_t rep[37]) { return g_mirror && read_mirror(rep); }
-#else
-yougame::pad_mirror::Reader g_posix_mirror;
-void attach_mirror() {
-  g_posix_mirror.attach_once(yougame::pad_mirror_attachment(),
-      [] { for (auto& o : g_origin) o.set = false; }, log);
-}
-bool read_mirror(uint8_t rep[37]) {
-  const bool live = g_posix_mirror.read(rep);
-  g_poll_rate_hz.store(g_posix_mirror.rate_hz(), std::memory_order_relaxed);
-  return live;
-}
-bool mirror_live(uint8_t rep[37]) { return g_posix_mirror.attached() && read_mirror(rep); }
-#endif
 
 // Finds the adapter and records the VID:PID of everything else, so a log from someone whose adapter
 // is not recognised says what they actually had plugged in.
@@ -775,22 +696,12 @@ void scanner_thread() {
 
 double gcadapter_poll_rate_hz() {
   if (options.no_gc_adapter) return 0.0;
-  if (yougame::stdio_bridge()) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    attach_mirror();
-    uint8_t rep[37];
-    if (!mirror_live(rep)) return 0.0;
-  }
+
   return g_poll_rate_hz.load(std::memory_order_relaxed);
 }
 
 std::string gcadapter_problem() {
-  if (yougame::stdio_bridge()) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    attach_mirror();
-    uint8_t rep[37];
-    return mirror_live(rep) ? "Controllers come from the YouGame app" : "No GameCube adapter from the YouGame app";
-  }
+
   ensure_scanner_started();
   std::lock_guard<std::mutex> lock(g_problem_mutex);
   return g_problem;
@@ -841,19 +752,7 @@ uint32_t gcadapter_poll(PadState out[4]) {
   uint8_t rep[37];
   // Held for the whole report: the scanner thread resets the origins under it when the adapter closes.
   std::unique_lock<std::mutex> lk(g_mutex, std::defer_lock);
-  if (yougame::stdio_bridge()) {
-    // YouGame: the app's adapter through the pad mirror, never our own USB.
-    lk.lock();
-    attach_mirror();
-#ifdef _WIN32
-    if (!g_mirror || !read_mirror(rep)) return 0;
-#else
-    if (!read_mirror(rep)) return 0;
-#endif
-    // The PhobGCC settings (calibration, trigger modes, filters) run on every report, as they do on
-    // the adapter's own reports below; without this a YouGame launch ignored the whole PhobGCC menu.
-    phob_process(rep, std::chrono::steady_clock::now());
-  } else {
+  {
     ensure_scanner_started();
     auto now = std::chrono::steady_clock::now();
     if (!g_running.load()) return 0;
@@ -914,16 +813,7 @@ void gcadapter_rumble(int port, bool on) {
   if (options.no_gc_adapter || port < 0 || port > 3) return;
   if (g_resetting.load()) on = false;
   uint8_t v = on ? 1 : 0;
-  if (yougame::stdio_bridge()) {
-#ifdef _WIN32
-    std::lock_guard<std::mutex> lk(g_mutex);
-    if (g_mirror && g_mirror->rumble[port] != v) { g_mirror->rumble[port] = v; InterlockedIncrement(&g_mirror->rumble_seq); }
-#else
-    static std::once_flag said;
-    std::call_once(said, [] { log("gc adapter: rumble unavailable through the YouGame app on this system"); });
-#endif
-    return;
-  }
+
   if (g_rumble[port] != v) { g_rumble[port] = v; g_rumble_dirty = true; g_rumble_wake.notify_one(); }
 }
 
@@ -1046,11 +936,7 @@ phob::Settings gcadapter_phob_get(int port) {
 bool gcadapter_phob_raw(int port, phob::HardwareInput& in) {
   if (port < 0 || port > 3 || options.no_gc_adapter) return false;
   std::lock_guard<std::mutex> lk(g_mutex);
-  if (yougame::stdio_bridge()) {
-    attach_mirror();
-    uint8_t report[37];
-    return mirror_live(report) && phob::mirror_input(report, port, g_origin[port], in);
-  }
+
   if (!g_have_report || !g_origin[port].set) return false;
   const uint8_t* c = g_report + 1 + port * 9;
   if (!(c[0] & 0x30)) return false;
@@ -1060,13 +946,7 @@ bool gcadapter_phob_raw(int port, phob::HardwareInput& in) {
 
 int gcadapter_scope(int port, GCScopeSample* out, int max) {
   if (port < 0 || port > 3 || max <= 0) return 0;
-  if (yougame::stdio_bridge()) {
-    phob::HardwareInput in;
-    if (!gcadapter_phob_raw(port, in)) return 0;
-    const auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    out[0] = phob::live_sample<GCScopeSample>(in, (uint32_t)us);
-    return 1;
-  }
+
   std::lock_guard<std::mutex> lk(g_mutex);
   const uint32_t head = g_scope_head[port];
   const int n = (int)std::min<uint32_t>((uint32_t)std::min(max, kScopeLen), head);

@@ -1,4 +1,4 @@
-// In-client updater: asks GitHub for the latest release of hero88go/melee-unlocked, and on request
+// In-client updater: asks GitHub for the latest release of 0xburn/melee-unlocked, and on request
 // downloads its zip and hands over to a small batch script that swaps the files in after the
 // game exits and relaunches. Everything network-side runs on a background thread.
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -113,7 +113,7 @@ std::string rr_message();
 constexpr const char* kRrSize = "about 25 MB";
 // Where the parts that never change with a version live (Fight a pro's matchup policies, the Lab
 // packs): one release, so no update carries them again.
-constexpr const char* kContentBase = "https://github.com/hero88go/melee-unlocked/releases/download/content-1/";
+constexpr const char* kContentBase = "https://github.com/0xburn/melee-unlocked/releases/download/content-1/";
 
 // AMD FSR (amd_fidelityfx_loader_dx12/vk.dll and amd_fidelityfx_upscaler_dx12/vk.dll), its own download:
 // AMD's signed files from their FSR SDK repository at a pinned tag (nothing re-hosted), each checked

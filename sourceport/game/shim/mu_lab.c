@@ -251,11 +251,9 @@ static void lab_bubbles_release(void)
  * (the lab's own setting wins in Training while the lab is on). Switching it off puts the model back. */
 void mu_te_frame_begin(void)
 {
-    int mu_console_frame_begin(void);
     static int shown;
     int want;
     HSD_GObj* gobj;
-    mu_console_frame_begin();
     want = mu_te2(MU_TE2_BUBBLES) && !lab_owns_bubbles();
     if (mu_te2(MU_TE2_COLOR_OVERLAYS)) {
         /* 20XX TE "Color overlays": green on every frame a fighter can act, so gaps between

@@ -18,7 +18,6 @@
 
 int mu_online_active(void);
 int mu_online_pending(void);
-int mu_console_rollback_active(void);
 
 /* Off in an online match: HQ FoD reflections allocates a bigger image in the game heap and the
  * V-cancel sound takes a voice inside the simulation, so either could differ between two peers. */
@@ -28,7 +27,7 @@ int mu_code_feature(unsigned int bit)
 {
     static unsigned int logged = ~0u;
     unsigned int on = mu_display_options() & MU_DISPLAY_CODES_ALL;
-    if (mu_online_active() || mu_online_pending() || mu_console_rollback_active()) {
+    if (mu_online_active() || mu_online_pending()) {
         on &= ~MU_CODES_OFFLINE_ONLY;
     }
     if (on != logged) {

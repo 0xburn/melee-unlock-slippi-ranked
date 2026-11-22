@@ -42,7 +42,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/sourceport/game/shim/mu_20xx_ai.c")
 target_include_directories(port_production_integrity_test PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}" "${PROJECT_SOURCE_DIR}/port/runtime/abi")
-foreach(mode plain yougame vanilla)
+foreach(mode plain vanilla)
   add_test(NAME port_native_ai_env_${mode} COMMAND port_production_integrity_test --native-ai-${mode})
 endforeach()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)

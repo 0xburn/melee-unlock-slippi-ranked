@@ -109,7 +109,7 @@ int main(int, char** argv) {
         self.assertIn('changed |= settings_toggle("Performance overlay", &options.performance_overlay);', ui)
 
     def test_backend_summary_uses_actual_factory_result_including_fallbacks(self):
-        from yougame_console_wiring_test import body
+        from source_test_helpers import body
         win = (ROOT / 'port/runtime/gx/gx_backend.cpp').read_text()
         header = (ROOT / 'port/runtime/gx/gx_backend.h').read_text()
         start = header.index('inline std::atomic<const char*> started_backend_name')
@@ -181,7 +181,7 @@ int main() {
         end = ui.index('  // Test runs (MELEE_TEST_PANEL_NAV', start)
         self.assertLess(end, ui.index('  ImGui::NewFrame();', start))
         branch = ui[start:end]
-        from yougame_console_wiring_test import body
+        from source_test_helpers import body
         helper = (ROOT / 'port/runtime/gx/settings_imgui_input.h').read_text()
         mapping = body(helper, 'gamepad')
         menu.OnlineMenuTest().compile_fixture('settings-routed-nav', r'''
@@ -246,7 +246,7 @@ int main() {
     def test_capture_keeps_ui_pads_and_neutralizes_all_game_ports(self):
         host = (ROOT / 'port/runtime/host/window.cpp').read_text()
         start = host.index('    g_ui_pad = pads[0];')
-        end = host.index('#ifdef YOUGAME_AGENT_TEST_HOOK', start)
+        end = host.index('\n  }\n};', start)
         capture = host[start:end]
         menu.OnlineMenuTest().compile_fixture('settings-pad-capture', r'''
 #include <atomic>

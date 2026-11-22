@@ -11,9 +11,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
-#include <mu_lobby_wire.h>
-static int mu_lobby_css(void) { return 0; }
-static int mu_lobby_send(const unsigned char* p, unsigned n) { (void)p; (void)n; return 1; }
 bool gmSquad_LobbyChosen(void);
 #if !MU_SQUAD_ONLINE_FIXTURE
 bool gmSquad_LobbyChosen(void) { return false; }

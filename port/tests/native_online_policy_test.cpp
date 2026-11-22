@@ -8,36 +8,17 @@ int main() {
   using slippi::online::NativeGameplayProfile;
   using slippi::online::native_profile_mode_error;
   for (int mode = 0; mode <= 4; ++mode) {
-    CHECK((native_profile_mode_error(NativeGameplayProfile::Vanilla, mode) == nullptr) == (mode != 0));
+    CHECK(native_profile_mode_error(NativeGameplayProfile::Vanilla, mode) == nullptr);
     CHECK((native_profile_mode_error(NativeGameplayProfile::Akaneia, mode) == nullptr) == (mode == 2 || mode == 3));
     // Every gameplay mod is Direct and Teams only (against the same build, checked in netplay).
     CHECK((native_profile_mode_error(NativeGameplayProfile::OtherMod, mode) == nullptr) == (mode == 2 || mode == 3));
   }
-  // Ranked is refused for every profile, with a message the game can show on its search screen.
-  for (auto profile : {NativeGameplayProfile::Vanilla, NativeGameplayProfile::Akaneia, NativeGameplayProfile::OtherMod}) {
-    const char* reason = native_profile_mode_error(profile, 0);
-    CHECK(reason != nullptr && std::strstr(reason, "Ranked") != nullptr && std::strlen(reason) <= 120);
-  }
-  // Full YouGame matrix: Ranked/Unranked mods are allowed; Party stays vanilla-only.
-  for (int mode = 0; mode <= 4; ++mode) {
-    CHECK(native_profile_mode_error(NativeGameplayProfile::Vanilla, mode, true) == nullptr);
-    for (auto profile : {NativeGameplayProfile::Akaneia, NativeGameplayProfile::OtherMod}) {
-      CHECK((native_profile_mode_error(profile, mode, true) == nullptr) == (mode == 0 || mode == 1 || mode == 2 || mode == 3));
-    }
-  }
-  CHECK(native_profile_mode_error(NativeGameplayProfile::Vanilla, 0, true) == nullptr);
-  CHECK(native_profile_mode_error(NativeGameplayProfile::Akaneia, 0, true) == nullptr);
-  CHECK(native_profile_mode_error(NativeGameplayProfile::OtherMod, 0, true) == nullptr);
+
+  CHECK(native_profile_mode_error(NativeGameplayProfile::Vanilla, -1) != nullptr);
   CHECK(native_profile_mode_error(NativeGameplayProfile::Vanilla, 5) != nullptr);
-  CHECK(std::strstr(native_profile_mode_error(NativeGameplayProfile::Akaneia, 1), "Direct") != nullptr);
-  CHECK(std::strstr(native_profile_mode_error(NativeGameplayProfile::OtherMod, 1), "Direct") != nullptr);
-  // Verified cosmetic packs retain their full files offline and advertise retail gameplay in
-  // every online mode, so a one-sided look cannot cause a Direct build mismatch.
-  for (bool yougame : {false, true}) {
-    CHECK(slippi::online::native_source_mod_view(true, -1, yougame, false, true, "", true));
-    for (int mode = 0; mode <= 4; ++mode)
-      CHECK(!slippi::online::native_source_mod_view(true, mode, yougame, false, true, std::string(64, 'a'), true));
-    CHECK(slippi::online::native_source_mod_view(true, 2, yougame, false, true, std::string(64, 'a')));
+  for (auto mod : {NativeGameplayProfile::Akaneia, NativeGameplayProfile::OtherMod}) {
+    const auto* reason = native_profile_mode_error(mod, 0);
+    CHECK(reason && std::strstr(reason, "Ranked"));
   }
   std::puts("native_online_policy: ok");
 }

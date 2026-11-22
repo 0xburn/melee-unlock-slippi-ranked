@@ -15,8 +15,6 @@ void mu_replay_apply_game_info(StartMeleeData* data, const unsigned char* info);
 #include <mu_bm.h>
 #endif
 #include <string.h>
-#include "mu_tourney_game.h"
-#include "mu_doubles_game.h"
 #include <melee/cm/camera.h>
 #include <melee/cm/types.h>
 #include <melee/ft/fighter.h>
@@ -96,8 +94,7 @@ int mu_replay_on(void)
  * Dolphin always runs the sections these codes come from). */
 int mu_replay_code(unsigned int code)
 {
-    return (mu_replay_abi_codes() & code) != 0 || (mu_online_codes() & code) != 0 ||
-           (mu_console_rollback_codes() & code) != 0;
+    return (mu_replay_abi_codes() & code) != 0 || (mu_online_codes() & code) != 0;
 }
 
 /* A code the native game runs as part of the General Codes: during playback it runs only when the
@@ -127,25 +124,11 @@ int mu_online_is_test_run(void);
 int mu_online_test_wait(void);
 const unsigned char* mu_online_pending_game_info(void);
 
-int mu_console_active(void);
-void mu_console_load_save(void);
-
 void mu_replay_boot_mode(u8* mode)
 {
-    /* Frozen session state only: every seat takes retail VS on the same first
-     * scene boundary, before any body or frame-zero digest. No local input. */
-    if (mu_console_active()) {
-        mu_console_load_save();
-#ifdef MELEE_DOUBLES
-        mu_doubles_boot();
-#endif
-        *mode = GM_VS;
-        return;
-    }
     if (mu_replay_on() || mu_online_is_test_run()) {
         *mode = GM_DEBUG_VS;
-    } else if (mu_tourney_boot()) {
-        *mode = GM_VS;
+
     }
 }
 
@@ -396,8 +379,6 @@ void mu_replay_fountain_heights(float* left, float* right)
 
 void mu_replay_scene_think(int match_result)
 {
-    mu_tourney_tick();
-    mu_tourney_report(match_result);
     if (gm_801A4BA8() == 0) {
         match_frame = FIRST_FRAME;
         fountain_height[0] = 28.0f;
@@ -900,16 +881,6 @@ static void emit_game_end(int end_method);
 
 void mu_replay_match_exit(void)
 {
-    mu_tourney_report(gmVs_GetSceneState()->match_result);
-#ifdef MELEE_DOUBLES
-    /* Doubles reports its result from the Game End record. Without a recording (no spectator
-     * server, no --record-native) nothing sends one, so send it at the scene's exit, when the
-     * last frame can no longer be rolled back. */
-    if (!recording_active && !mu_replay_on() && mu_doubles_active()) {
-        emit_game_end(gmVs_GetSceneState()->match_result);
-        return;
-    }
-#endif
     if (recording_active) {
         /* The scene ends without the game end having been sent (a reset, a disconnect): end the
          * recording here with what the scene knows. */

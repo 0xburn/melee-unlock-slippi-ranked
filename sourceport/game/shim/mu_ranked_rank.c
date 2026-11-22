@@ -1,6 +1,5 @@
 /* Online CSS RankInfo, adapted from project-slippi/slippi-ssbm-c
  * Scenes/CSS/RankInfo/RankInfo.c:25-188 and Scenes/CSS/Main.c (GPL-3.0).
- * YouGame supplies the standing, words and badge; no Slippi art or server IO.
  * This panel only reads UI state. The post-set reveal belongs to Track C.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include <mu_native.h>
@@ -21,11 +20,10 @@ static struct {
     HSD_Text* text;
     MuRankBadge* badges[2];
     float badge_x[2];
-    MuYgRank shown[2];
+    MuPlayerRank shown[2];
     char lines[LINE_COUNT][64];
     unsigned frames;
     int matched;
-    MuYgU8 left_status, left;   /* the room's final for a set it gave by a leave, else 0 */
 } panel;
 static const GXColor white = { 255, 255, 255, 255 };
 static const GXColor gray = { 160, 165, 175, 255 };
@@ -67,10 +65,10 @@ static void free_panel(void* unused)
     memset(&panel, 0, sizeof panel);
 }
 
-static void rank_panel(int player, const MuYgRank* rank, int status)
+static void rank_panel(int player, const MuPlayerRank* rank, int status)
 {
     char detail[64], label[32], rating[24];
-    MuYgRank display = *rank;
+    MuPlayerRank display = *rank;
     int id = player ? OPP_DETAIL : LOCAL_DETAIL;
     if (!rank->known) {
         const char* state = status == 0 ? "Loading..." : status == 2 ? "Rank unavailable" : "Unknown";
@@ -79,13 +77,11 @@ static void rank_panel(int player, const MuYgRank* rank, int status)
         mu_rank_text_label(label, rank);
         strcpy(display.label, label);
         mu_rank_number(rating, rank->rating);
-        sprintf(detail, mu_ranked_practice() ? "Practice rating %s" : "Rating %s", rating);
+        sprintf(detail, "Rating %s", rating);
     } else {
-        /* Preserve YouGame's label, including IV and Challenger. No E3 enum is
-         * used for art or words: it compresses YouGame's four divisions. */
         display.label[sizeof display.label - 1] = 0;
         mu_rank_number(rating, rank->rating);
-        sprintf(detail, mu_ranked_practice() ? "Practice rating %s" : "Rating %s", rating);
+        sprintf(detail, "Rating %s", rating);
     }
     if (!player && status == 0 && rank->known) strcat(detail, " - Loading...");
     if (!player && status == 2) strcpy(detail, "Rank unavailable");
@@ -129,18 +125,15 @@ static void rank_panel(int player, const MuYgRank* rank, int status)
 
 static void refresh(void)
 {
-    MuYgRanks ranks;
-    MuYgU8 e3[16];
+    MuPlayerRanks ranks;
+    MuRankU8 e3[16];
     unsigned got = 0;
     int status = 1;
     int ok = mu_ranked_read_ranks(&ranks);
-    line(LOCAL_TITLE, mu_ranked_practice() ? "Practice - not rated" : "Your rank");
+    line(LOCAL_TITLE, "Your rank");
     const MuMatchState* ms = mu_slippi_css_msrb();
     int matched = ms->connection_state == MU_SLP_MM_OPPONENT_CONNECTING ||
                   ms->connection_state == MU_SLP_MM_CONNECTION_SUCCESS;
-    panel.left = ok && (ranks.result.reason == MU_YG_REASON_FORFEIT_WON ||
-                        ranks.result.reason == MU_YG_REASON_FORFEIT_LOST) ? ranks.result.reason : 0;
-    panel.left_status = panel.left ? ranks.result.status : 0;
     if (!ok) status = 2;
     else {
         if (mu_slippi_cmd(0xE3, NULL, 0, e3, sizeof e3, &got) == 0 && got == sizeof e3)
@@ -149,7 +142,7 @@ static void refresh(void)
     }
     rank_panel(0, &ranks.self, status);
     if (matched) {
-        line(OPP_TITLE, mu_ranked_practice() ? "CPU practice rank" : "Opponent rank");
+        line(OPP_TITLE, "Opponent rank");
         /* A missing roster standing is unknown, not an invented placement or
          * a loader that can never finish. A failed record read is an error. */
         rank_panel(1, &ranks.opponent, ok ? 1 : 2);
@@ -194,10 +187,12 @@ void mu_ranked_rank_enter(void)
     GObj_InitUserData(owner, 4, free_panel, NULL);
     line(LOCAL_TITLE, "Your rank");
     line(LOCAL_DETAIL, "Loading...");
-    /* E4 is host-local (YouGame's result already arrives through its room).
-     * As RankInfo does, request it only on return from a game, not menu entry. */
-    if (mu_ranked_set()->cur_game > 1 || mu_ranked_set()->score[0] || mu_ranked_set()->score[1])
-        mu_slippi_cmd(0xE4, NULL, 0, NULL, 0, NULL);
+    /* The match result request is issued once per finished set. */
+    const unsigned need = (mu_ranked_set()->max_games + 1u) / 2u;
+    if (!mu_ranked_set()->result_requested && need &&
+        (mu_ranked_set()->score[0] >= need || mu_ranked_set()->score[1] >= need)) {
+        mu_ranked_set_mut()->result_requested = mu_slippi_cmd(0xE4, NULL, 0, NULL, 0, NULL) == 0;
+    }
     refresh();
 }
 
@@ -220,13 +215,7 @@ void mu_ranked_rank_frame(void)
         refresh();
     }
     set = mu_ranked_set();
-    if (panel.left && ms->connection_state == MU_SLP_MM_IDLE && !mu_ranked_practice()) {
-        /* The room gave the set by a leave. A leave in game 1 has no score line below, so this
-         * is the only word of it on the CSS; it stays until START, like the score. */
-        if (panel.left == MU_YG_REASON_FORFEIT_WON) strcpy(score, "Opponent left: you win");
-        else strcpy(score, panel.left_status == MU_YG_RESULT_RECORDED ?
-                    "You left: counted as a loss" : "You left the set");
-    } else if (set->cur_game > 1 && set->max_games &&
+    if (set->cur_game > 1 && set->max_games &&
         (ms->connection_state == MU_SLP_MM_IDLE || matched)) {
         /* By port in the set; the local player's count first, as on the setup screen. */
         const unsigned me = (ms->local_index & 3) == 1, need = (set->max_games + 1u) / 2u;

@@ -4,7 +4,6 @@
 #include "host.h"
 #include "keyboard_ui_navigation.h"
 #include "settings_imgui_input.h"
-#include "../runtime/hle/yougame_parity.h"
 #include "imgui_internal.h"
 #include <cstdio>
 #include <cstdlib>
@@ -104,37 +103,23 @@ void activate(ImGuiKey backend, int vk, host::BindAction action, bool rebound = 
   CHECK(menu.clicks[0] == 1 && menu.clicks[1] == 0 && menu.clicks[2] == 0);
 }
 
-// Reproduce the second Escape owner in real ImGui, then prove embedded routing
-// leaves NavCancel idle even with Escape rebound to B in the raw gameplay pad.
-void escape_cancel(bool routed) {
+// Escape closes an ImGui popup even when the raw gameplay pad rebinds it to B.
+void escape_cancel() {
   ++scenarios;
   Menu menu;
   Keyboard keyboard;
   keyboard.bindings.vk[(int)host::BindAction::B] = VK_ESCAPE;
   menu.request_popup = true;
-  menu.frame({}); menu.frame({});
+  menu.frame({});
+  menu.frame({});
   CHECK(menu.popup_visible);
-  int back_steps = 0, relays = 0;
   for (int frame = 0; frame < 60; ++frame) {
-    if (frame < 3) {
-      const bool capture_key = yougame::parity::embedded_escape(
-          frame != 2, false, frame == 1, false,
-          [&](const char* key) { CHECK(std::string(key) == "escape"); ++relays; },
-          [&] { ++back_steps; });
-      CHECK(!capture_key);
-      if (!routed && frame != 1) ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, frame == 0);
-    }
+    if (frame == 0 || frame == 2) ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, frame == 0);
     keyboard.poll(frame < 2 ? VK_ESCAPE : 0);
-    CHECK(keyboard.navigation.button == 0); // Round-31 pad copy still filters Escape.
+    CHECK(keyboard.navigation.button == 0);
     menu.frame(keyboard.navigation);
-    if (routed) {
-      CHECK(!ImGui::IsKeyDown(ImGuiKey_Escape));
-      CHECK(!ImGui::IsKeyDown(ImGuiKey_GamepadFaceRight));
-      CHECK(menu.popup_visible); // No extra NavCancel: game back callback is the sole owner.
-    }
   }
-  CHECK(back_steps == 1 && relays == 1);
-  if (!routed) CHECK(!menu.popup_visible); // Old backend path independently cancels the popup too.
+  CHECK(!menu.popup_visible);
 }
 
 void binding_audit() {
@@ -194,8 +179,7 @@ int main() {
   activate(ImGuiKey_Enter, VK_RETURN, host::BindAction::A);
   activate(ImGuiKey_None, 'J', host::BindAction::A, true);
   activate(ImGuiKey_None, VK_F10, host::BindAction::A, true);
-  escape_cancel(false);
-  escape_cancel(true);
+  escape_cancel();
   binding_audit();
   std::printf("keyboard_navigation: %d checks; %d real ImGui scenarios, 60 frames each; default/rebound/controller, delayed polling, old double move, activation, all 27 bindings, box history and Escape NavCancel ownership\n", checks, scenarios);
 }

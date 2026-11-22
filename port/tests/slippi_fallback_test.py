@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class SlippiFallbackTest(unittest.TestCase):
     def test_ticket_parser_preserves_one_entry_per_remote(self):
         source = (ROOT / 'port/runtime/hle/slippi_net.cpp').read_text()
-        from yougame_console_wiring_test import body
+        from source_test_helpers import body
         helpers = source[source.index('static const json* json_member('):source.index('uint64_t time_us()')]
         parser = source[source.index('static Matchmaking::ParsedTicket parse_ticket('):source.index('bool Matchmaking::ingest_ticket(')]
         fixture = ('#include "slippi_net.h"\n#include "slippi_address.h"\n'

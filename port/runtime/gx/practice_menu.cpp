@@ -2694,7 +2694,7 @@ Side side_of(const Geo& g, float want) {
   return s;
 }
 
-// The banner's words: SEARCHING YOUGAME SQUAD STRIKE 0:42, or OPPONENT FOUND.
+// The banner's words: SEARCHING SLIPPI RANKED 0:42, or OPPONENT FOUND.
 std::string banner_mode(const SearchBanner& b) {
   std::string s = b.service.empty() ? std::string() : b.service + " ";
   return caps(s + (b.mode.empty() ? std::string("Unranked") : b.mode));

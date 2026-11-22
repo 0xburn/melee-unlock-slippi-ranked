@@ -97,7 +97,7 @@ unsigned mu_ranked_timer_text(char out[8], unsigned seconds, unsigned frames, in
 static unsigned stage_mask(const MuRankedSetupModel* m)
 {
     unsigned i, bits=0, n=m->set->cur_game == 1 ? 5 : 6;
-    const MuYgU16* pool=n==5 ? m->policy.starters : m->policy.counterpicks;
+    const MuRankU16* pool=n==5 ? m->policy.starters : m->policy.counterpicks;
     for (i=0; i<n; ++i) if (mu_ranked_setup_stage_allowed(m, pool[i])) bits |= 1u<<i;
     return bits;
 }
@@ -155,7 +155,7 @@ int mu_ranked_view_input(MuRankedSetupView* v, const MuRankedSetupModel* m, unsi
         if (down & MU_SETUP_A) {
             if (v->picker == 26) {
                 /* Cosmetic random selection without consuming simulation RNG. */
-                v->draft.character=(MuYgU8)(m->frames%26);
+                v->draft.character=(MuRankU8)(m->frames%26);
                 v->draft.color=mu_ranked_setup_next_color(m,m->local_player,v->draft.character,0,0);
             }
             v->dialog=v->button=0; v->confirming=1; return 0;
@@ -185,12 +185,12 @@ int mu_ranked_view_input(MuRankedSetupView* v, const MuRankedSetupModel* m, unsi
         return 0;
     } else {
         unsigned n=m->set->cur_game == 1 ? 5 : 6, i;
-        const MuYgU16* pool=n==5 ? m->policy.starters : m->policy.counterpicks;
+        const MuRankU16* pool=n==5 ? m->policy.starters : m->policy.counterpicks;
         /* Buttons precede scroll so A cannot accidentally choose a new hover. */
         if (down & MU_SETUP_B) v->draft.count=0;
         else if ((down & MU_SETUP_A) && v->cursor >= 0 &&
                  mu_ranked_setup_stage_allowed(m,pool[v->cursor])) {
-            MuYgU16 stage=pool[v->cursor];
+            MuRankU16 stage=pool[v->cursor];
             for (i=0; i<v->draft.count; ++i) if (v->draft.stages[i] == stage) break;
             if (i<v->draft.count) {
                 for (; i+1<v->draft.count; ++i) v->draft.stages[i]=v->draft.stages[i+1];
@@ -264,8 +264,7 @@ struct MuRankedWidgets {
     Part labels[5], arrows[5], dialog;
     MuRankBadge* badges[2];
     HSD_Text *text, *names[2];
-    unsigned missing, canvas, ranks_frames, forfeit_frames;
-    int forfeit;
+    unsigned missing, canvas, ranks_frames;
     /* The player's own keys for A, B and X/Y: a keyboard port's bound keys, else the GameCube names. */
     char key_a[16], key_b[16], key_xy[40];
     int keyboard_xy;   /* X/Y are keyboard keys: the disc's "Press X/Y to change" art names the wrong ones */
@@ -475,16 +474,14 @@ static void header_score(MuRankedWidgets* w, const MuRankedSetupModel* m)
 {
     char line[64];
     if (!m->set) return;
-    /* Practice (agent runs only) says so on this row: a fifth row under the stage panel
-     * touched the strip's top border (build 29). */
-    sprintf(line,"%sGame %u - %u:%u",mu_ranked_practice() ? "Practice  " : "",(unsigned)m->set->cur_game,
+    sprintf(line,"Game %u - %u:%u",(unsigned)m->set->cur_game,
         (unsigned)m->set->score[m->local_player],(unsigned)m->set->score[!m->local_player]);
     text_set(w->text,5,line);
 }
 static void header_ranks(MuRankedWidgets* w, const MuRankedSetupModel* m)
 {
-    MuYgRanks ranks;
-    const MuYgRank* r[2];
+    MuPlayerRanks ranks;
+    const MuPlayerRank* r[2];
     unsigned seat;
     memset(&ranks,0,sizeof ranks);
     mu_ranked_read_ranks(&ranks);
@@ -494,27 +491,6 @@ static void header_ranks(MuRankedWidgets* w, const MuRankedSetupModel* m)
         if (!w->badges[seat]) w->badges[seat]=mu_rank_badge_create(NULL,side ? 584 : 28,52,1.4f,r[seat]);
         else mu_rank_badge_set(w->badges[seat],r[seat]);
     }
-}
-/* The room gave this player the set because the opponent left (CTO 11-01): its lines replace
- * DISCONNECTED. The result arrives after the leave, so poll at 4 Hz until it does; it is final. */
-static int forfeit_lines(MuRankedWidgets* w, const MuRankedSetupModel* m)
-{
-    MuYgRanks ranks;
-    char headline[64], standing[80], rating[48];
-    unsigned rgb;
-    GXColor white={255,255,255,255}, tier, chip={0x86,0xef,0xac,0xff};
-    if (w->forfeit || !w->text || !m->set || m->local_player>1) return w->forfeit;
-    if (w->forfeit_frames++ % 15) return 0;
-    memset(&ranks,0,sizeof ranks);
-    if (!mu_ranked_read_ranks(&ranks) || !mu_rank_text_forfeit(headline,standing,rating,&ranks.result,
-            m->set->score[m->local_player],m->set->score[!m->local_player])) return 0;
-    rgb=mu_rank_text_rgb(ranks.result.rank_after.tier);
-    tier=(GXColor){rgb >> 16,rgb >> 8,rgb,255};
-    if (ranks.result.after <= ranks.result.before) chip=white;
-    text_set(w->text,6,headline); HSD_SisLib_803A74F0(w->text,6,&white);
-    text_set(w->text,7,standing); HSD_SisLib_803A74F0(w->text,7,&tier);
-    text_set(w->text,8,rating); HSD_SisLib_803A74F0(w->text,8,&chip);
-    return w->forfeit=1;
 }
 MuRankedWidgets* mu_ranked_widgets_create(const MuRankedSetupModel* m)
 {
@@ -631,21 +607,19 @@ void mu_ranked_widgets_draw(MuRankedWidgets* w, const MuRankedSetupModel* m, con
 {
     const MuRankedSetupStep* s=mu_ranked_setup_current(m);
     unsigned i,j,n=m->set && m->set->cur_game == 1 ? 5 : 6;
-    const MuYgU16* pool=n==5 ? m->policy.starters : m->policy.counterpicks;
+    const MuRankU16* pool=n==5 ? m->policy.starters : m->policy.counterpicks;
     int local=s && s->player == m->local_player;
     int char_step=s && (s->type == MU_SETUP_COLOR || s->type == MU_SETUP_CHARACTER);
     int active=s != NULL, disconnected=m->status == MU_SETUP_DISCONNECTED || m->status == MU_SETUP_INVALID;
-    int forfeit, color_hint;
+    int color_hint;
     char timer[8], line[256];
     unsigned col=mu_ranked_timer_text(timer,s ? s->seconds : 0,m->frames,local);
     GXColor colors[3]={{255,255,255,255},{254,202,52,255},{255,50,50,255}};
     if (!w) return;
-    forfeit=m->status == MU_SETUP_DISCONNECTED && forfeit_lines(w,m);
     header_score(w,m);
-    if (forfeit) text_set(w->text,5,""); /* the headline has the games; not "Game 2 - 1:0" */
     text_set(w->text,0,active ? timer : "");
     if (w->text) HSD_SisLib_803A74F0(w->text,0,&colors[col]);
-    visibility(&w->disconnect,disconnected && !forfeit);
+    visibility(&w->disconnect,disconnected);
     if (disconnected && w->disconnect.root) tint(w->disconnect.root,1,(GXColor){255,0,0,255});
     material(&w->description,0,disconnected ? RETURN_CSS : s ? description(m,s) : GET_READY);
     /* The colour step's art reads "Same color selected. Press X/Y to change". On a keyboard those

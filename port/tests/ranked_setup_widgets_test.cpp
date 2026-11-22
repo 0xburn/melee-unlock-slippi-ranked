@@ -1,9 +1,10 @@
 // Native GameSetup presentation against A1's actual model. GPL-3.0-or-later.
 #include "mu_ranked_widgets.h"
-#include "yougame_ranked_policy.h"
+#include "mu_ranked_wire.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 static unsigned checks;
 #define CHECK(x) do { ++checks; if (!(x)) { std::fprintf(stderr,"%d: %s\n",__LINE__,#x); std::exit(1); } } while(0)
 struct Fixture {
@@ -14,9 +15,9 @@ struct Fixture {
     set.max_games=3; set.cur_game=game; set.prev_winner=game>1?0:255;
     set.last_stage_win[0]=set.last_stage_win[1]=65535;
     if(game>1) {set.score[0]=1;set.game_results[0]=0;}
-    auto policy=yougame::ranked_policy::slippi_v1();
+    auto policy=mu_slippi_ranked_policy();
     MuRankedSetupResult result{}; result.stage=31;
-    result.fighters[0]={2,0}; result.fighters[1]={(MuYgU8)(mirror?2:20),0};
+    result.fighters[0]={2,0}; result.fighters[1]={(MuRankU8)(mirror?2:20),0};
     CHECK(mu_ranked_setup_model_init(&model,&policy,&set,seat,&result));
     mu_ranked_view_sync(&view,&model);
   }

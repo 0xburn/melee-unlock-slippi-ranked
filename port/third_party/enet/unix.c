@@ -18,7 +18,6 @@
 
 #define ENET_BUILDING_LIB 1
 #include "enet/enet.h"
-#include "enet/yg_enet_socket.h"
 
 #ifdef __APPLE__
 #ifdef HAS_POLL
@@ -99,14 +98,6 @@ enet_time_set (enet_uint32 newTimeBase)
 int
 enet_address_set_host (ENetAddress * address, const char * name)
 {
-    if (yg_enet_selected ())
-    {
-        enet_uint32 host = inet_addr (name); /* virtual numeric addresses only; no DNS */
-        if ((ENET_NET_TO_HOST_32 (host) & 0xFFFF0000u) != 0x0AFF0000u) return -1;
-        address -> host = host;
-        return 0;
-    }
-
     struct hostent * hostEntry = NULL;
 #ifdef HAS_GETHOSTBYNAME_R
     struct hostent hostData;
@@ -162,8 +153,6 @@ enet_address_get_host_ip (const ENetAddress * address, char * name, size_t nameL
 int
 enet_address_get_host (const ENetAddress * address, char * name, size_t nameLength)
 {
-    if (yg_enet_selected ()) return enet_address_get_host_ip (address, name, nameLength);
-
     struct in_addr in;
     struct hostent * hostEntry = NULL;
 #ifdef HAS_GETHOSTBYADDR_R
@@ -200,9 +189,6 @@ enet_address_get_host (const ENetAddress * address, char * name, size_t nameLeng
 int
 enet_socket_bind (ENetSocket socket, const ENetAddress * address)
 {
-    if (yg_enet_is_socket (socket)) return yg_enet_bind (socket, address);
-    if (yg_native_adopted_bind (socket, address)) return 0;
-
     struct sockaddr_in sin;
 
     memset (& sin, 0, sizeof (struct sockaddr_in));
@@ -228,8 +214,6 @@ enet_socket_bind (ENetSocket socket, const ENetAddress * address)
 int
 enet_socket_get_address (ENetSocket socket, ENetAddress * address)
 {
-    if (yg_enet_is_socket (socket)) return yg_enet_get_address (socket, address);
-
     struct sockaddr_in sin;
     socklen_t sinLength = sizeof (struct sockaddr_in);
 
@@ -245,31 +229,18 @@ enet_socket_get_address (ENetSocket socket, ENetAddress * address)
 int 
 enet_socket_listen (ENetSocket socket, int backlog)
 {
-    if (yg_enet_is_socket (socket)) return -1;
-
     return listen (socket, backlog < 0 ? SOMAXCONN : backlog);
 }
 
 ENetSocket
 enet_socket_create (ENetSocketType type)
 {
-    ENetSocket adopted;
-    if (yg_enet_selected ())
-    {
-        yg_native_adopt_next (0);
-        return type == ENET_SOCKET_TYPE_DATAGRAM ? yg_enet_create () : ENET_SOCKET_NULL;
-    }
-    adopted = yg_native_take_parked (type);   /* the own-UDP punch socket (yg_native_park) */
-    if (adopted != ENET_SOCKET_NULL) return adopted;
-
     return socket (PF_INET, type == ENET_SOCKET_TYPE_DATAGRAM ? SOCK_DGRAM : SOCK_STREAM, 0);
 }
 
 int
 enet_socket_set_option (ENetSocket socket, ENetSocketOption option, int value)
 {
-    if (yg_enet_is_socket (socket)) return 0;
-
     int result = -1;
     switch (option)
     {
@@ -328,8 +299,6 @@ enet_socket_set_option (ENetSocket socket, ENetSocketOption option, int value)
 int
 enet_socket_get_option (ENetSocket socket, ENetSocketOption option, int * value)
 {
-    if (yg_enet_is_socket (socket)) { *value = 0; return 0; }
-
     int result = -1;
     socklen_t len;
     switch (option)
@@ -348,8 +317,6 @@ enet_socket_get_option (ENetSocket socket, ENetSocketOption option, int * value)
 int
 enet_socket_connect (ENetSocket socket, const ENetAddress * address)
 {
-    if (yg_enet_is_socket (socket)) return -1;
-
     struct sockaddr_in sin;
     int result;
 
@@ -369,8 +336,6 @@ enet_socket_connect (ENetSocket socket, const ENetAddress * address)
 ENetSocket
 enet_socket_accept (ENetSocket socket, ENetAddress * address)
 {
-    if (yg_enet_is_socket (socket)) return ENET_SOCKET_NULL;
-
     int result;
     struct sockaddr_in sin;
     socklen_t sinLength = sizeof (struct sockaddr_in);
@@ -394,16 +359,12 @@ enet_socket_accept (ENetSocket socket, ENetAddress * address)
 int
 enet_socket_shutdown (ENetSocket socket, ENetSocketShutdown how)
 {
-    if (yg_enet_is_socket (socket)) return 0;
-
     return shutdown (socket, (int) how);
 }
 
 void
 enet_socket_destroy (ENetSocket socket)
 {
-    if (yg_enet_is_socket (socket)) { yg_enet_destroy (socket); return; }
-
     if (socket != -1)
       close (socket);
 }
@@ -414,8 +375,6 @@ enet_socket_send (ENetSocket socket,
                   const ENetBuffer * buffers,
                   size_t bufferCount)
 {
-    if (yg_enet_is_socket (socket)) return yg_enet_send (socket, address, buffers, bufferCount);
-
     struct msghdr msgHdr;
     struct sockaddr_in sin;
     int sentLength;
@@ -456,8 +415,6 @@ enet_socket_receive (ENetSocket socket,
                      ENetBuffer * buffers,
                      size_t bufferCount)
 {
-    if (yg_enet_is_socket (socket)) return yg_enet_receive (socket, address, buffers, bufferCount);
-
     struct msghdr msgHdr;
     struct sockaddr_in sin;
     int recvLength;
@@ -483,25 +440,23 @@ enet_socket_receive (ENetSocket socket,
        return -1;
     }
 
+#ifdef HAS_MSGHDR_FLAGS
+    if (msgHdr.msg_flags & MSG_TRUNC)
+      return -1;
+#endif
+
     if (address != NULL)
     {
         address -> host = (enet_uint32) sin.sin_addr.s_addr;
         address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
     }
 
-#ifdef HAS_MSGHDR_FLAGS
-    if (msgHdr.msg_flags & MSG_TRUNC)
-      return ENET_SOCKET_RECEIVE_TRUNCATED;
-#endif
-    return recvLength == 0 ? ENET_SOCKET_RECEIVE_EMPTY : recvLength;
+    return recvLength;
 }
 
 int
 enet_socketset_select (ENetSocket maxSocket, ENetSocketSet * readSet, ENetSocketSet * writeSet, enet_uint32 timeout)
 {
-    /* Virtual ids cannot be represented by fd_set. Reject before select(). */
-    if (yg_enet_selected () || maxSocket < 0 || maxSocket >= FD_SETSIZE) return -1;
-
     struct timeval timeVal;
 
     timeVal.tv_sec = timeout / 1000;
@@ -513,8 +468,6 @@ enet_socketset_select (ENetSocket maxSocket, ENetSocketSet * readSet, ENetSocket
 int
 enet_socket_wait (ENetSocket socket, enet_uint32 * condition, enet_uint32 timeout)
 {
-    if (yg_enet_is_socket (socket)) return yg_enet_wait (socket, condition, timeout);
-
 #ifdef HAS_POLL
     struct pollfd pollSocket;
     int pollCount;

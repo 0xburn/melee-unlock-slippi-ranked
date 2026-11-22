@@ -11,7 +11,7 @@ static int matching(unsigned a, unsigned ac, unsigned b, unsigned bc)
 unsigned mu_ranked_setup_color_count(unsigned c)
 {
     /* GameSetup.c:1426-1473, external CKIND ids (not internal fighter kinds). */
-    static const MuYgU8 colors[26] = {
+    static const MuRankU8 colors[26] = {
         6,5,4,4,6,4,5,4,5,5,4,4,5,4,4,5,5,6,5,5,4,5,5,5,4,5
     };
     return c < 26 ? colors[c] : 1;
@@ -48,11 +48,11 @@ const MuRankedSetupStep* mu_ranked_setup_current(const MuRankedSetupModel* m)
 {
     return m && m->status == MU_SETUP_ACTIVE && m->step < m->step_count ? &m->steps[m->step] : 0;
 }
-int mu_ranked_setup_stage_allowed(const MuRankedSetupModel* m, MuYgU16 stage)
+int mu_ranked_setup_stage_allowed(const MuRankedSetupModel* m, MuRankU16 stage)
 {
     const MuRankedSetupStep* s = mu_ranked_setup_current(m);
     unsigned i, n;
-    const MuYgU16* pool;
+    const MuRankU16* pool;
     int found = 0;
     if (!s || (s->type != MU_SETUP_STAGE && s->type != MU_SETUP_STRIKE)) return 0;
     n = m->set->cur_game == 1 ? 5 : 6;
@@ -100,7 +100,7 @@ int mu_ranked_setup_model_init(MuRankedSetupModel* m, const MuRankedPolicy* p,
     m->status = MU_SETUP_INVALID;
     if (!policy_valid(p) || !set || !previous || local > 1 || !set->cur_game ||
         (set->cur_game > 1 && set->prev_winner > 1)) return 0;
-    m->policy = *p; m->set = set; m->local_player = (MuYgU8)local;
+    m->policy = *p; m->set = set; m->local_player = (MuRankU8)local;
     m->result = *previous;
     /* :205-212 clamps extended costumes from CSS to vanilla palette. */
     for (i = 0; i < 2; ++i) {
@@ -132,7 +132,7 @@ int mu_ranked_setup_model_init(MuRankedSetupModel* m, const MuRankedPolicy* p,
         if (!collision) m->step = 2;
     } else {
         /* :295-364: ban, counterpick, winner character, loser character. */
-        static const MuYgU8 types[4] = { MU_SETUP_STRIKE, MU_SETUP_STAGE, MU_SETUP_CHARACTER, MU_SETUP_CHARACTER };
+        static const MuRankU8 types[4] = { MU_SETUP_STRIKE, MU_SETUP_STAGE, MU_SETUP_CHARACTER, MU_SETUP_CHARACTER };
         m->step_count = 4;
         for (i = 0; i < 4; ++i) {
             m->steps[i].type = types[i];
@@ -144,12 +144,12 @@ int mu_ranked_setup_model_init(MuRankedSetupModel* m, const MuRankedPolicy* p,
     return 1;
 }
 int mu_ranked_setup_packet(const MuRankedSetupModel* m, const MuRankedSetupChoice* draft,
-                          int timeout, MuYgU8 out[5])
+                          int timeout, MuRankU8 out[5])
 {
     const MuRankedSetupStep* s = mu_ranked_setup_current(m);
     MuRankedSetupChoice c;
     unsigned i, j, n;
-    const MuYgU16* pool;
+    const MuRankU16* pool;
     if (!s || !out) return 0;
     memset(&c, 0, sizeof c);
     c.character = m->result.fighters[s->player].character;
@@ -161,7 +161,7 @@ int mu_ranked_setup_packet(const MuRankedSetupModel* m, const MuRankedSetupChoic
         if (!fighter_valid(c.character, c.color)) return 0;
         if (!mu_ranked_setup_color_allowed(m, s->player, c.character, c.color)) {
             if (!timeout) return 0;
-            c.color = (MuYgU8)mu_ranked_setup_next_color(m, s->player, c.character, c.color, 1);
+            c.color = (MuRankU8)mu_ranked_setup_next_color(m, s->player, c.character, c.color, 1);
             if (!mu_ranked_setup_color_allowed(m, s->player, c.character, c.color)) return 0;
         }
         out[1] = c.character; out[2] = c.color;
@@ -187,17 +187,17 @@ int mu_ranked_setup_packet(const MuRankedSetupModel* m, const MuRankedSetupChoic
                 if (pool[i] == c.stages[0]) a = i;
                 if (pool[i] == c.stages[1]) b = i;
             }
-            if (a > b) { MuYgU16 tmp = c.stages[0]; c.stages[0] = c.stages[1]; c.stages[1] = tmp; }
+            if (a > b) { MuRankU16 tmp = c.stages[0]; c.stages[0] = c.stages[1]; c.stages[1] = tmp; }
         }
-        for (i = 0; i < c.count; ++i) out[3+i] = (MuYgU8)c.stages[i];
+        for (i = 0; i < c.count; ++i) out[3+i] = (MuRankU8)c.stages[i];
     }
     return 1;
 }
-int mu_ranked_setup_apply(MuRankedSetupModel* m, unsigned player, const MuYgU8 packet[5])
+int mu_ranked_setup_apply(MuRankedSetupModel* m, unsigned player, const MuRankU8 packet[5])
 {
     const MuRankedSetupStep* s = mu_ranked_setup_current(m);
     MuRankedSetupChoice c;
-    MuYgU8 checked[5];
+    MuRankU8 checked[5];
     unsigned i;
     if (!s || !packet || player != s->player || packet[0] != m->step) return 0;
     memset(&c, 0, sizeof c);
@@ -227,9 +227,9 @@ int mu_ranked_setup_apply(MuRankedSetupModel* m, unsigned player, const MuYgU8 p
     }
     return 1;
 }
-int mu_ranked_setup_remote(MuRankedSetupModel* m, const MuYgU8 response[6])
+int mu_ranked_setup_remote(MuRankedSetupModel* m, const MuRankU8 response[6])
 {
-    MuYgU8 packet[5];
+    MuRankU8 packet[5];
     const MuRankedSetupStep* s = mu_ranked_setup_current(m);
     if (!s || s->player == m->local_player || !response || !response[0]) return 0;
     packet[0] = m->step;
@@ -254,18 +254,18 @@ void mu_ranked_setup_disconnect(MuRankedSetupModel* m)
     if (m) m->status = MU_SETUP_DISCONNECTED;
 }
 int mu_ranked_setup_record_game(MuRankedSet* s, int winner, unsigned end_mode,
-                               MuYgU16 stage, int disconnected)
+                               MuRankU16 stage, int disconnected)
 {
     /* slippi-ssbm-asm Online/Slippi Online Scene/main.asm:617-741. */
-    s->last_end_mode = (MuYgU8)end_mode;
+    s->last_end_mode = (MuRankU8)end_mode;
     if (disconnected || winner < -1 || winner > 1 || !s->cur_game || s->cur_game > 9)
         return MU_SETUP_SET_ABORTED;
     if (winner < 0) {
         if (s->tiebreak_num < 255) ++s->tiebreak_num;
         return MU_SETUP_TIEBREAK;
     }
-    s->prev_winner = (MuYgU8)winner;
-    s->game_results[s->cur_game-1] = (MuYgU8)winner;
+    s->prev_winner = (MuRankU8)winner;
+    s->game_results[s->cur_game-1] = (MuRankU8)winner;
     ++s->score[winner]; s->last_stage_win[winner] = stage;
     if (s->score[winner] >= (s->max_games+1)/2) return MU_SETUP_SET_OVER;
     ++s->cur_game; s->tiebreak_num = 0;

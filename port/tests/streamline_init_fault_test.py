@@ -24,12 +24,10 @@ class StreamlineInitFaultTest(unittest.TestCase):
         self.assertIn("write_fault_note(", body)
         self.assertIn("return false;", body)
 
-    def test_note_and_logs_go_to_a_writable_folder(self):
-        self.assertIn('_wgetenv(L"YOUGAME_DATA")', SRC)
-        self.assertIn('g_fault_note = writable + L"/streamline-faulted.txt";', SRC)
-        self.assertIn('logs = writable + L"\\\\streamline-logs";', SRC)
-        self.assertIn("pref.pathToLogsAndData = logs_ok ? logs.c_str() : nullptr;", SRC)
-        self.assertNotIn('logs = exe_dir + L"\\\\streamline-logs"', SRC)
+    def test_failed_version_is_remembered(self):
+        self.assertIn('g_fault_note = exe_dir + L"/streamline-faulted.txt";', SRC)
+        self.assertIn('if (fault_noted())', SRC)
+        self.assertIn('pref.pathToLogsAndData = logs_ok ? logs.c_str() : nullptr;', SRC)
 
 
 if __name__ == "__main__":

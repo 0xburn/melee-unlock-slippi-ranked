@@ -9,7 +9,6 @@ logs below. Checked after deploy: GET 405, wrong type 415. No real or test repor
 
 Old and new launchers use the same existing `application/zip` upload and headers. The relay reads
 only the exact basenames `melee_port_crash.txt`, `melee_port.log`, `melee_port.prev.log`, `lobby.log`,
-`launcher.log` and `launcher-yougame.log` (why a Play started no game, why YouGame did not connect), scrubs them line
 by line, then builds a fresh stored ZIP with new checksums. Markdown uses the same scrubbed text.
 **The incoming ZIP is never forwarded. Binary minidumps are always dropped.** Raw diagnostics
 remain on the player's computer; settings and unknown file payloads are excluded.

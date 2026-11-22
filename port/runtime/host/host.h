@@ -197,10 +197,6 @@ extern void (*native_state_snapshot)(MuStatePod*);
 // absolute retrace, so the same script drives both builds into the same match despite differing
 // boot and menu timing. Safe to call every retrace; cheap either way.
 void current_scene(uint32_t* major, uint32_t* minor, uint32_t* match_frame);
-#ifdef YOUGAME_AGENT_TEST_HOOK
-// The same live snapshot used by digest logging, without opening a log.
-void agent_test_digest_state(MuStatePod* out);
-#endif
 void deliver_interrupt(uint32_t number);
 bool exit_requested();
 void request_exit(int code);

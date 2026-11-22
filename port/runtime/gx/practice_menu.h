@@ -142,7 +142,7 @@ void font_ensure();   // the game's font, loaded from the disc at first use
 // its own), so a picture of one moment is always the same.
 struct SearchBanner {
   int stage = 0;               // 0 nothing, 1 searching, 2 opponent found (counting down, then going back)
-  std::string service;         // "YouGame", "Slippi", "YouGame and Slippi"
+  std::string service;         // matchmaking service name
   std::string mode;            // "Unranked", "Ranked", "Friends", "Squad Strike"
   uint32_t elapsed_ms = 0;     // the search's own time (the timer)
   uint32_t shown_ms = 0;       // since the banner came in (slide in)

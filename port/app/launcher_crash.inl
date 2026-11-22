@@ -11,9 +11,8 @@
 
 namespace crash_report {
 
-// The relay (tools/crash_relay, deployed 2026-09-30): zip only, 8 MB, one report per IP per 2 minutes,
-// a fixed number a day from everyone together. Empty = GitHub fallback only.
-constexpr const wchar_t* kCrashRelayUrl = L"https://melee-crash-relay.firescribe-share-worker.workers.dev/report";
+// Use the fork's GitHub issue form and keep the diagnostic archive local.
+constexpr const wchar_t* kCrashRelayUrl = L"";
 
 FILETIME g_launch_time{};
 void note_launch() { GetSystemTimeAsFileTime(&g_launch_time); }
@@ -139,7 +138,7 @@ bool offer(HWND owner, const std::string& dir, const std::string& engine) {
                        (zip_saved ? " The companion ZIP contains the same sanitized diagnostic text." : "") :
        zip_saved ? "\n\nPlease attach melee_crash_report.zip from the folder that opened. The readable copy could not be saved." :
                    "\n\nThe report files could not be saved in the game folder. Please copy the error above into the issue.");
-  const std::string issue = "https://github.com/Hero88go/melee-unlocked/issues/new?title=" + url_encode("Crash: " + where.substr(0, 80)) +
+  const std::string issue = "https://github.com/0xburn/melee-unlocked/issues/new?title=" + url_encode("Crash: " + where.substr(0, 80)) +
                             "&body=" + url_encode(body);
   ShellExecuteW(nullptr, L"open", widen(issue).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
   MessageBoxW(owner, markdown_saved ?
@@ -252,7 +251,7 @@ void send_logs(HWND owner, const std::string& dir, const std::string& engine, co
   // Only a crash from this session's launch counts; an old crash file would mislead the report.
   auto files = launcher::crash::collect_logs(game_dir, g_dir, replay_dirs, newer_than_launch(game_dir + "\\melee_port_crash.txt"));
   // A report with the lobby log alone says nothing about the game (a 0.8.99 report arrived that way). The
-  // launcher's log is enough on its own: it says why a Play started no game, or why YouGame did not connect.
+  // launcher's log is enough on its own: it says why a Play started no game, before entering a game.
   const bool game_log = std::any_of(files.begin(), files.end(), [](const auto& f) {
     return f.first == "melee_port.log" || f.first == "melee_port.prev.log" || f.first == "melee_port_crash.txt" ||
            f.first == "launcher.log";
@@ -303,7 +302,6 @@ void send_logs(HWND owner, const std::string& dir, const std::string& engine, co
     else if (file.first == "melee_port_crash.txt") text += L"\n  - This session's crash file";
     else if (file.first == "lobby.log") text += L"\n  - Lobby log";
     else if (file.first == "launcher.log") text += L"\n  - Launcher log";
-    else if (file.first == "launcher-yougame.log") text += L"\n  - Launcher's YouGame log";
     else if (file.first == "session.trace") {
       size_t matches = 0;
       static const char mark[] = "# match ";

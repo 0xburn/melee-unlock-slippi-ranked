@@ -13,7 +13,6 @@
 #include <melee/ft/types.h>
 #include <melee/gm/gm_1A3F.h>
 #include <melee/gm/gmvs.h>
-#include "mu_yougame_pause.h"
 #include <melee/gm/types.h>
 #include <melee/gm/gmmain_lib.h>
 #include <melee/mn/types.h>
@@ -46,8 +45,7 @@
 
 int mu_replay_code(unsigned int code)
 {
-    return ((mu_online_active() || mu_online_pending()) && (code & MU_ROLLBACK_CODES) != 0) ||
-           (mu_console_rollback_codes() & code) != 0;
+    return ((mu_online_active() || mu_online_pending()) && (code & MU_ROLLBACK_CODES) != 0);
 }
 
 /* Off-screen damage (fighter.c, under MU_RC_OFFSCREEN_DAMAGE): nonzero when the fighter is outside
@@ -157,7 +155,6 @@ void mu_practice_enter_mode(int mode) { mu_boot_match_enter_mode(mode); }
  * moved a practice match into the online menus are refused. */
 int mu_practice_bridge(int op, int* a, int n)
 {
-    if (op == 15) return mu_yougame_page_pause(a, n);   /* MU_PRACTICE_PAGE_PAUSE */
     if (op == 35) {   /* MU_PRACTICE_BOOT_MATCH (agent test, shim/mu_boot_match.c) */
         int mu_boot_match_boot(void);
         return mu_boot_match_boot();
@@ -175,8 +172,6 @@ int mu_practice_bridge(int op, int* a, int n)
 static MuSlippiMenuState menu_state;   /* read by name entry and stage select; stays zero */
 
 int mu_slippi_menus_enabled(void) { return 0; }
-int mu_slippi_friends_available(void) { return 0; }
-int mu_slippi_yougame_menu(void) { return 0; }
 #if MU_SQUAD
 /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
  * The no-Slippi build keeps label/CPU callers but no command transport or title. */
@@ -187,7 +182,6 @@ int mu_slippi_cmd(unsigned int cmd, const void* payload, unsigned int size,
     if (got) *got = 0;
     return -1;
 }
-int mu_slippi_title_active(void) { return 0; }
 /* Shared with mu_replay.c: CPU observations still require the real fighter flags. */
 #define FLAG(v, n) ((u8) ((v) ? 0x80 >> (n) : 0))
 void mu_replay_fighter_flags(const Fighter* fp, unsigned char out[5])
@@ -211,14 +205,8 @@ void mu_replay_fighter_flags(const Fighter* fp, unsigned char out[5])
 #undef FLAG
 #endif
 int mu_slippi_menu_count(void) { return 8; }
-int mu_slippi_menu_option(int row) { return row; }
-int mu_slippi_menu_label_kind(int row) { (void) row; return 0; }
 /* The two online pages are part of the online menus: off here. */
-int mu_slippi_online_pages(void) { return 0; }
-int mu_online_pages_label(int row) { (void) row; return 0; }
-void mu_online_pages_describe(HSD_Text* text, int row) { (void) text; (void) row; }
 #if !MU_SQUAD
-void mu_slippi_signin_notice(HSD_GObj* menu) { (void) menu; }
 #endif
 MuSlippiMenuState* mu_slippi_state(void) { return &menu_state; }
 int mu_slippi_code_suggestion(const MuCodeSuggestionReq* in, MuCodeSuggestion* out)
@@ -266,18 +254,6 @@ void mu_slippi_online_menu_think(HSD_GObj* gp) { (void) gp; }
 void mu_slippi_scene_install(void) {}
 
 int mu_slippi_css_online(void) { return 0; }
-int mu_lobby_css(void) { return 0; }
-const struct MuLobbyView* mu_lobby_read(void) { return NULL; }
-int mu_lobby_send(const unsigned char* request, unsigned int size) { (void) request; (void) size; return 0; }
-void mu_lobby_css_exit(int where) { (void) where; }
-int mu_lobby_curtain(void) { return 0; }
-void mu_lobby_curtain_frame(const struct MuLobbyView* v) { (void) v; }
-void mu_lobby_watch_stage(void) {}
-void mu_lobby_pads(struct PADStatus* status) { (void) status; }
-int mu_lobby_partner_source(void) { return -1; }
-int mu_lobby_partner_want(void) { return 0; }
-void mu_lobby_set_partner_want(int want) { (void) want; }
-int mu_lobby_watch_pads(struct PADStatus* status) { (void) status; return 0; }
 int mu_slippi_css_teams(void) { return 0; }
 void mu_slippi_css_enter(struct CSSData** css, unsigned char* char_chosen, signed char* ctrl_port,
                          unsigned char* scene_request, signed char* name_entry_port,

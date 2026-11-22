@@ -8,7 +8,6 @@
 #include "pc_settings.h"
 #include "pc_settings_shared.h"
 #include "arena_panel.h"
-#include "coming_soon_overlay.h"
 #include "host.h"
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
@@ -275,11 +274,6 @@ void PcSettingsUID3D11::draw() {
   render_draw_data(impl_->renderer, ImGui::GetDrawData());
 }
 
-void PcSettingsUID3D11::draw_picture_overlay(uint32_t w, uint32_t h) {
-  if (!impl_->ready || !ImGui::GetCurrentContext()) return;
-  ImDrawData data;
-  if (coming_soon_overlay::picture_draw_data(&data, (float)w, (float)h)) render_draw_data(impl_->renderer, &data);
-}
 
 bool PcSettingsUID3D11::draw_under_hand(float x, float y, float w, float h, float target_w, float target_h) {
   if (!impl_->ready || !ImGui::GetCurrentContext()) return false;

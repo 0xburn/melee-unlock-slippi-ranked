@@ -17,5 +17,5 @@ PresenterStats presenter_stats(const gx::Backend& backend);
 // performs readback on the OpenGL owner thread and waits for the file to finish.
 bool capture_threaded(gx::Backend& backend, const std::filesystem::path& path);
 // Disc-free test of the real queue, authored-track sampling and independent clock.
-bool presenter_self_test(SDL_Window* window, const std::filesystem::path& cache);
+bool presenter_self_test(SDL_Window* window, const std::filesystem::path& cache, double target_fps = 240);
 } // namespace linux_renderer

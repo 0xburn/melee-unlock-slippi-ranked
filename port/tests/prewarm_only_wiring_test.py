@@ -22,7 +22,7 @@ class PrewarmOnlyWiring(unittest.TestCase):
 
     def test_entry_precedes_services(self):
         route = self.main.index("if (app::prewarm_only::requested(argc, argv)) {")
-        for service in ("yougame::start();", "source_port::reserve_memory()", "source_port::run(shutdown)", "host::disc_open(o.iso)", "host::audio_open("):
+        for service in ("source_port::reserve_memory()", "source_port::run(shutdown)", "host::disc_open(o.iso)", "host::audio_open("):
             self.assertLess(route, self.main.index(service))
         for required in ("gx::load_pc_settings(gfx, volume);", "prepare_render_backend(gfx);",
                          'L"Melee Unlocked prewarm", false', "gfx.pc_settings = false;",
@@ -32,7 +32,7 @@ class PrewarmOnlyWiring(unittest.TestCase):
                          "gx::cache_store::flush_result_name(saved)", "app::prewarm_only::with_cache_lock(cache"):
             self.assertIn(required, self.prewarm)
         self.assertLess(self.prewarm.index("with_cache_lock(cache"), self.prewarm.index("host::window_create("))
-        for forbidden in ("audio_open", "disc_open", "source_port::run", "yougame::start", "create_threaded_backend"):
+        for forbidden in ("audio_open", "disc_open", "source_port::run", "create_threaded_backend"):
             self.assertNotIn(forbidden, self.prewarm)
 
     def test_hidden_and_complete_startup(self):

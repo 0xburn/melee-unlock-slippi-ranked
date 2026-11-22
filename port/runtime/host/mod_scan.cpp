@@ -498,7 +498,7 @@ std::string cached_content_fingerprint(const fs::path& file, const DiscInfo& inf
   if (ec) return {};
   const auto absolute = fs::absolute(file, ec).u8string();
   if (ec) return {};
-  const std::string key = "yougame-gc-content-2|" + absolute + "|" + std::to_string(info.size) + "|" + std::to_string(static_cast<int64_t>(stamp));
+  const std::string key = "melee-gc-content-2|" + absolute + "|" + std::to_string(info.size) + "|" + std::to_string(static_cast<int64_t>(stamp));
   const fs::path cache = options.mods_dir / ".cache" / "fingerprints.txt";
   // Cache records are tab/newline delimited, just like the existing layer cache.
   const bool cacheable = options.use_cache && key.find_first_of("\t\r\n") == std::string::npos;

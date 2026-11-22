@@ -4,26 +4,6 @@
 #include <string.h>
 
 static MuRankedSet ranked_set;
-#if defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH && !defined(MU_NO_SLIPPI)
-int mu_ranked_practice(void)
-{
-    MuYgU8 sub = MU_YG_SUB_PRACTICE_STATUS, active = 0;
-    unsigned got = 0;
-    return mu_slippi_cmd(MU_YG_COMMAND, &sub, 1, &active, 1, &got) == 0 && got == 1 && active == 1;
-}
-int mu_ranked_practice_allowed(void)
-{
-    MuYgU8 sub = MU_YG_SUB_PRACTICE_ALLOWED, allowed = 0;
-    unsigned got = 0;
-    return mu_slippi_cmd(MU_YG_COMMAND, &sub, 1, &allowed, 1, &got) == 0 && got == 1 && allowed == 1;
-}
-int mu_ranked_practice_control(unsigned action)
-{
-    MuYgU8 request[2] = {MU_YG_SUB_PRACTICE, (MuYgU8)action}, ok = 0;
-    unsigned got = 0;
-    return mu_slippi_cmd(MU_YG_COMMAND, request, 2, &ok, 1, &got) == 0 && got == 1 && ok == 1;
-}
-#endif
 MuRankedSet* mu_ranked_set_mut(void) { return &ranked_set; }
 const MuRankedSet* mu_ranked_set(void) { return &ranked_set; }
 void mu_ranked_set_reset(void)
@@ -37,33 +17,80 @@ void mu_ranked_set_reset(void)
     memset(ranked_set.game_results, 0xFF, sizeof ranked_set.game_results);
     ranked_set.last_stage_win[0] = ranked_set.last_stage_win[1] = 0xFFFF;
 }
-int mu_ranked_read_ranks(MuYgRanks* out)
+static unsigned read_u32(const unsigned char* bytes)
 {
-    MuYgU8 sub = MU_YG_SUB_RANK;
-    MuYgU8 reply[MU_YG_RANK_RESPONSE_SIZE];
-    unsigned got = 0;
+    return ((unsigned)bytes[0] << 24) | ((unsigned)bytes[1] << 16) |
+           ((unsigned)bytes[2] << 8) | bytes[3];
+}
+
+static float read_float(const unsigned char* bytes)
+{
+    unsigned bits = read_u32(bytes);
+    float number;
+    memcpy(&number, &bits, sizeof(number));
+    return number;
+}
+
+static void describe_rank(MuPlayerRank* rank, int index, float ordinal, unsigned updates)
+{
+    static const char* labels[] = {
+        "Unranked", "Bronze I", "Bronze II", "Bronze III",
+        "Silver I", "Silver II", "Silver III", "Gold I", "Gold II", "Gold III",
+        "Platinum I", "Platinum II", "Platinum III", "Diamond I", "Diamond II", "Diamond III",
+        "Master I", "Master II", "Master III", "Grandmaster"
+    };
+    if (index < 0 || index > 19 || !(ordinal >= -1000000 && ordinal <= 1000000)) return;
+    rank->known = 1;
+    rank->placed = index > 0;
+    rank->tier = index ? 1 + (index - 1) / 3 : 0;
+    rank->division = index && index < 19 ? 1 + (index - 1) % 3 : 0;
+    rank->order = index;
+    rank->rating = (int)(ordinal * 10 + (ordinal < 0 ? -.5f : .5f));
+    rank->placement_total = 5;
+    rank->matches = updates > 65535 ? 65535 : updates;
+    strcpy(rank->label, labels[index]);
+}
+
+int mu_ranked_read_ranks(MuPlayerRanks* out)
+{
     if (!out) return 0;
-    memset(out, 0, sizeof(*out));
-#ifdef MU_NO_SLIPPI
-    return 0;
+    memset(out, 0, sizeof *out);
+#ifndef MU_NO_SLIPPI
+    unsigned char e3[16];
+    unsigned got = 0;
+    const MuMatchState* ms = mu_slippi_match_state();
+    if (mu_slippi_cmd(0xE3, NULL, 0, e3, sizeof e3, &got) || got != sizeof e3) return 0;
+    if ((e3[0] & 2) && ms->connection_state == MU_SLP_MM_CONNECTION_SUCCESS && ms->remote_index < 2) {
+        /* 3.7 match-state extension: four 16-byte port records after the original 962 bytes. */
+        const unsigned char* remote = ms->raw + 962 + 16 * ms->remote_index;
+        describe_rank(&out->opponent, ms->remote_index ? ms->opp_rank : ms->user_rank,
+                      read_float(remote), read_u32(remote + 4));
+    }
+    if (!(e3[0] & 1)) return 1;
+    if (e3[1] == 1) describe_rank(&out->self, e3[2], read_float(e3 + 3), read_u32(e3 + 7));
+    if (ranked_set.result_requested) {
+        MuRankResult* result = &out->result;
+        result->status = e3[1] == 0 ? MU_RANK_RESULT_RECORDING : MU_RANK_RESULT_ERROR;
+        if (e3[1] == 1 && out->self.known) {
+            const unsigned updates = read_u32(e3 + 7);
+            const float change = read_float(e3 + 11);
+            describe_rank(&result->rank_before, (int)e3[2] - (signed char)e3[15],
+                          read_float(e3 + 3) - change, updates ? updates - 1 : 0);
+            result->rank_after = out->self;
+            result->before = result->rank_before.rating;
+            result->after = out->self.rating;
+            result->status = MU_RANK_RESULT_RECORDED;
+        }
+    }
+    return 1;
 #else
-    /* Optional API-22 command: failure leaves an unknown rank for text fallback. */
-    return mu_slippi_cmd(MU_YG_COMMAND, &sub, 1, reply, sizeof reply, &got) == 0 &&
-           mu_yg_ranks_decode(out, reply, got);
+    return 0;
 #endif
 }
+
 int mu_ranked_read_policy(MuRankedPolicy* out)
 {
-    MuYgU8 sub = MU_YG_SUB_POLICY;
-    MuYgU8 reply[MU_YG_POLICY_SIZE];
-    unsigned got = 0;
     if (!out) return 0;
-    memset(out, 0, sizeof(*out));
-#ifdef MU_NO_SLIPPI
-    return 0;
-#else
-    /* No policy means Ranked refused: never guess a remix's stage mapping. */
-    return mu_slippi_cmd(MU_YG_COMMAND, &sub, 1, reply, sizeof reply, &got) == 0 &&
-           mu_yg_policy_decode(out, reply, got) && out->available;
-#endif
+    *out = mu_slippi_ranked_policy();
+    return 1;
 }

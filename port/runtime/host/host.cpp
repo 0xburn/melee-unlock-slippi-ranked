@@ -1,9 +1,6 @@
 // Host services: memory, disc, boot, event delivery, time, MMIO, logging.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "test_env.h"
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_paths.h"
-#endif
 #include "host.h"
 #if MU_SQUAD
 // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
@@ -41,7 +38,6 @@
 #include "jukebox.h"
 #include "slippi_online.h"
 #endif
-#include "yougame_link.h"
 #include "gecko_data.h"
 #include "render_options.h"
 #include <algorithm>
@@ -123,7 +119,7 @@ static void trace_ax_frame(const char* line) {
 
 // ---------------- logging ----------------
 // Milliseconds since this process was created (Windows: the kernel's creation time, so the loader
-// and static initialisation count, as they do for the YouGame app's caps deadline). Elsewhere, since
+// and static initialisation count, as they do for launch timing). Elsewhere, since
 // this file's static initialisation, which runs before main.
 static const auto g_process_start = std::chrono::steady_clock::now();
 uint64_t startup_ms() {
@@ -159,9 +155,7 @@ static void open_log_file() {
   std::string path = options.log_file.empty() ? "melee_port.log" : options.log_file;
   bool rotated = rotate_session_logs(path);
   g_log_file = std::fopen(path.c_str(), rotated ? "w" : "a");
-  // A copy the YouGame app runs in its sandbox (AppContainer) cannot write beside the program, and a relative
-  // name lands there: the log goes to the player's own folder instead (in the sandbox, the sandbox's copy of it),
-  // so a run that goes wrong there still leaves its log.
+  // Fall back to the user directory wherever the installation is read-only.
   if (!g_log_file && !std::filesystem::path(path).is_absolute()) {
     const std::filesystem::path user = sysgen::user_data_dir();
     std::error_code ec;
@@ -183,8 +177,7 @@ static void open_log_file() {
     char exe[MAX_PATH] = "";
     GetModuleFileNameA(nullptr, exe, MAX_PATH);
     const char* name = std::strrchr(exe, '\\');
-    // The full YouGame build too (0.9.120-online-test.103), so a report says exactly which one.
-    std::fprintf(g_log_file, "%s\n", startup::log_header(MELEE_PORT_VERSION, name ? name + 1 : exe, MELEE_YOUGAME_BUILD).c_str());
+    std::fprintf(g_log_file, "%s\n", startup::log_header(MELEE_PORT_VERSION, name ? name + 1 : exe).c_str());
     MEMORYSTATUSEX memory{};
     memory.dwLength = sizeof memory;
     if (GlobalMemoryStatusEx(&memory))
@@ -328,8 +321,7 @@ static void log_drain(bool wait_for_io) {
   std::string batch;
   { std::lock_guard<std::mutex> lock(g_log_mutex); batch.swap(g_log_pending); }
   if (batch.empty()) return;
-  // Under the YouGame app's stdio bridge stdout carries only the bridge's lines: the log goes to stderr.
-  FILE* out = yougame::stdio_bridge() ? stderr : stdout;
+  FILE* out = stdout;
   std::fwrite(batch.data(), 1, batch.size(), out);
   std::fflush(out);
   if (g_log_file) { std::fwrite(batch.data(), 1, batch.size(), g_log_file); std::fflush(g_log_file); }
@@ -1002,7 +994,7 @@ static void apply_mod_code() {
     build.name = title[0] ? std::string(title) : std::string("a modded disc");
     slippi::online::set_local_build(build);
     slippi::online::set_native_gameplay_profile(slippi::online::NativeGameplayProfile::OtherMod);
-    log(yougame::active() ? "mods: online plays Unranked, Direct and Teams against the same verified build (%s, %s)" : "mods: online plays Direct and Teams against the same mod (%s, %s)", build.name.c_str(), hex.substr(0, 16).c_str());
+    log("mods: online plays Direct and Teams against the same mod (%s, %s)", build.name.c_str(), hex.substr(0, 16).c_str());
   }
 }
 // At each retrace: code blocks written since the last look are compared again. A 64 KB block can
@@ -1294,7 +1286,6 @@ void boot_setup() {
   install_gecko_boot();
   if (g_mod_disc) apply_mod_code();
 #ifndef MELEE_NO_SLIPPI
-  slippi::online::load_ranked_rules();
 #endif
   // MELEE_TEST_INTERPRET=<addr>[,<addr>...]: run those functions in the interpreter on any disc, so
   // interpreted and compiled behaviour can be compared on the vanilla game. Test runs only (hidden
@@ -3120,12 +3111,6 @@ static void read_digest_state(MuStatePod& state) {
   }
 }
 
-#ifdef YOUGAME_AGENT_TEST_HOOK
-void agent_test_digest_state(MuStatePod* out) {
-  *out = {};
-  read_digest_state(*out);
-}
-#endif
 
 #if MU_SQUAD
 // Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
@@ -3273,27 +3258,6 @@ static void publish_lobby_status() {
 }
 
 void publish_lobby_result(int winner_index, int end_method, int lras, const uint8_t* placements) {
-  // session(): the app, or a YouGame row picked under Melee Unlocked's launcher (active() is the app only:
-  // under the launcher no result ever reached the room, so Ranked sets went unrecorded).
-  if (yougame::session() && slippi::online::session_mode() >= 0) {
-    yougame::GameEnd end;
-    end.winner = winner_index;
-    end.end_method = end_method;
-    end.lras = lras;
-    if (placements) {
-      end.has_placements = true;
-      for (int i = 0; i < 4; ++i) end.placements[i] = placements[i];
-    }
-    const auto facts = slippi::online::last_game_facts();
-    end.stage = facts.stage;
-    end.frames = facts.frames;
-    end.characters[0] = facts.characters[0];
-    end.characters[1] = facts.characters[1];
-    end.rng = facts.rng;
-    for (int i = 0; i < 4; ++i) end.teams[i] = facts.teams[i];
-    end.gone = slippi::online::disconnected_ports();   // the netcode's own call: ranked as forfeits, never left out
-    yougame::game_ended(end);
-  }
   const auto& cfg = slippi::online::config();
   if (cfg.lobby_code.empty() || cfg.lobby_status_file.empty()) return;
   const int local = slippi::online::local_player_index();
@@ -3658,11 +3622,7 @@ void retrace() {
       // percentile comparisons between the engines (the log above only names frames over 20 ms).
       static FILE* sim_times = [] {
         const char* path = std::getenv("MELEE_SIM_TIMES");
-        #ifdef YOUGAME_AGENT_TEST_HOOK
-          FILE* f = path && *path ? yougame::agent_paths::output(path, false, false, "w") : nullptr;
-#else
           FILE* f = path && *path ? std::fopen(path, "w") : nullptr;
-#endif
         if (f) {
           std::setvbuf(f, nullptr, _IOFBF, 1 << 20);
           std::fputs("retrace,scene_major,scene_minor,match_frame,sim_ms,cpu_ms", f);

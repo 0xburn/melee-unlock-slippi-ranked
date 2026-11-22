@@ -334,9 +334,6 @@ void set_flash_mode(int mode) {
 }
 int flash_mode() { return g_indicator.load(std::memory_order_relaxed); }
 void set_native_view(void (*fill)(MuLcancelView* out)) { g_native_view = fill; }
-#ifdef YOUGAME_AGENT_TEST_HOOK
-void agent_test_view(MuLcancelView* out) { gather(*out); }
-#endif
 void set_automatic(bool on) {
   // A parked session (warming up in Training) still counts: the opponent was told at connect time.
   g_automatic.store(policy::automatic_after_toggle(slippi::online::session_mode_or_parked(), automatic_enabled(), on),

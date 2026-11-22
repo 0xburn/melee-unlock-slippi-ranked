@@ -16,15 +16,10 @@ int main() {
   CHECK(line.rfind("disc: image prefetched into the file cache (1392 MB in 4.7 s)", 0) == 0);
   CHECK(line == "disc: image prefetched into the file cache (1392 MB in 4.7 s) (+21000 ms)");
 
-  CHECK(log_header("0.9.120", "melee_source.exe", "0.9.120-online-test.103") ==
-        "Melee Unlocked 0.9.120, melee_source.exe, YouGame build 0.9.120-online-test.103");
-  CHECK(log_header("0.9.120", "melee_source.exe", "") == "Melee Unlocked 0.9.120, melee_source.exe");
-  CHECK(log_header("0.9.120", "melee_source.exe", nullptr) == "Melee Unlocked 0.9.120, melee_source.exe");
+  CHECK(log_header("0.9.120", "melee_source.exe") == "Melee Unlocked 0.9.120, melee_source.exe");
   // tools/crash_relay/src/crash_markdown.js reads the version with this pattern.
   std::smatch m;
-  const std::string header = log_header("0.9.120", "melee_source.exe", "0.9.120-online-test.103");
+  const std::string header = log_header("0.9.120", "melee_source.exe");
   CHECK(std::regex_search(header, m, std::regex(R"(^Melee Unlocked (\d+(?:\.\d+){1,3}),)")) && m[1] == "0.9.120");
-  // Builds that set no label (Linux, Mac, bare targets) compile with an empty one.
-  CHECK(std::string(MELEE_YOUGAME_BUILD).empty());
-  std::puts("11 checks passed");
+  std::puts("Startup clock checks passed");
 }

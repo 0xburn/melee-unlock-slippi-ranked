@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_paths.h"
-#endif
 #include "exi_slippi.h"
 #include "jukebox.h"
 #include "slippi_spectate.h"
 #include "slippi_playback.h"
 #include "slippi_online.h"
-#include "yougame_link.h"
 #include "native_practice.h"
 #include "gecko_data.h"
 #include "unlock_code_policy.h"
@@ -18,9 +14,6 @@
 #include "sysgen_boot.h"
 #include "mod_scan.h"
 #include "lab_view.h"
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "yougame_agent_static.h"
-#endif
 #define NOMINMAX
 #include <windows.h>
 #include <cstdio>
@@ -146,11 +139,7 @@ void close_file() {
   std::fclose(g_file); g_file = nullptr;
   if (g_discard_replay) {
     g_discard_replay = false;
-    #ifdef YOUGAME_AGENT_TEST_HOOK
-    yougame::agent_paths::remove_output(g_replay_path);
-#else
     std::remove(g_replay_path.c_str());
-#endif
     host::log("slippi: replay not kept: %s (%s)", g_replay_path.c_str(),
               g_discard_reason ? g_discard_reason : "20XX CPUs were on, and a replay cannot hold what they do");
     g_discard_reason = nullptr;
@@ -158,9 +147,6 @@ void close_file() {
   }
   ++g_replays_written;
   host::log("slippi: replay written: %s (%u raw bytes, last frame %d)", g_replay_path.c_str(), g_written, g_last_frame);
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  host::log("replay: recording written to %s", g_replay_path.c_str());
-#endif
 }
 
 void create_file() {
@@ -168,18 +154,10 @@ void create_file() {
   // The folder is UTF-8 (a replay folder the player chose can have any name): wide calls, and its
   // parents too.
   std::error_code ec;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  if (!yougame::agent_paths::replay((std::filesystem::u8path(g_replay_dir) / "Game.slp").u8string()))
-#endif
   std::filesystem::create_directories(std::filesystem::u8path(g_replay_dir), ec);
   char stamp[32];
   std::strftime(stamp, sizeof stamp, "%Y%m%dT%H%M%S", std::localtime(&g_start_time));
-  g_replay_path = g_replay_dir + "\\Game_" + stamp + ".slp";
-#ifdef YOUGAME_AGENT_TEST_HOOK
-  if (yougame::agent_paths::replay(g_replay_path))
-    g_file = yougame::agent_paths::output(g_replay_path, true, true);
-  else
-#endif
+  g_replay_path = (std::filesystem::u8path(g_replay_dir) / (std::string("Game_") + stamp + ".slp")).u8string();
   g_file = _wfopen(std::filesystem::u8path(g_replay_path).wstring().c_str(), L"wb");
   if (!g_file) { host::log("slippi: cannot create %s", g_replay_path.c_str()); return; }
   const uint8_t header[] = {'{', 'U', 3, 'r', 'a', 'w', '[', '$', 'U', '#', 'l', 0, 0, 0, 0};
@@ -298,6 +276,7 @@ void write_to_file(const uint8_t* payload, uint32_t length, const char* option) 
   // exactly the stream the Lab view draws from. It only reads the bytes.
   // The silhouette view is hidden for now (see kLabViewAvailable in pc_settings.cpp); the stick figure
   // and capsule looks use the same view without its packs, so it is fed only while one is chosen.
+  online::record_report_event(payload, length);
   if (lab::active()) lab::feed(payload, length);
   if (std::strcmp(option, "create") == 0) { g_held_code_chunks.clear(); create_file(); }
   // What goes into the .slp also goes to the spectator server (Dolphin writes both from the same
@@ -931,23 +910,7 @@ void dma_write(uint32_t addr, uint32_t size) {
       case CMD_STOP_MUSIC: jukebox::stop(); break;
       case CMD_CHANGE_MUSIC_VOLUME: jukebox::set_melee_volume(mem[loc + 1]); break;
       case CMD_RECEIVE_COMMANDS: break;   // handled above
-#ifdef YOUGAME_AGENT_TEST_HOOK
-      case CMD_RECEIVE_GAME_INFO:
-        yougame::agent_test::static_match.event(yougame::agent_test::StaticEvent::GameStart,
-            !host::game_image && yougame::active() && online::session_mode() >= 0 && !playback::enabled(), [] {});
-        write_to_file(&mem[loc], payload + 1, "");
-        break;
-#endif
       case CMD_RECEIVE_GAME_END:
-#ifdef YOUGAME_AGENT_TEST_HOOK
-        yougame::agent_test::static_match.event(yougame::agent_test::StaticEvent::GameEnd,
-            !host::game_image && yougame::active() && !playback::enabled(), [] {});
-#endif
-        // ReportGameQuery has no placements. Teams needs the same Game End record that
-        // Source publishes; ReportGameQuery is not used for YouGame Teams.
-        if (!host::game_image && yougame::session() && online::session_mode() == 3 && !playback::enabled() && loc + payload < size)
-          host::publish_lobby_result(-1, payload ? mem[loc + 1] : 0,
-              payload >= 2 ? (int)(int8_t)mem[loc + 2] : -1, payload >= 6 ? &mem[loc + 3] : nullptr);
         write_to_file(&mem[loc], payload + 1, "close"); spectate::end_game(); break;
       case CMD_FRAME_BOOKEND: write_to_file(&mem[loc], payload + 1, ""); break;
       case CMD_PREPARE_REPLAY: playback::prepare_game_info(&mem[loc + 1], g_read_queue); break;

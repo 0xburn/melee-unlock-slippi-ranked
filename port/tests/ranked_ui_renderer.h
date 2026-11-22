@@ -105,7 +105,7 @@ enum { MU_SLP_MM_IDLE, MU_SLP_MM_OPPONENT_CONNECTING, MU_SLP_MM_CONNECTION_SUCCE
 struct { int mode=MU_SLP_MODE_RANKED; } menu;
 struct MuMatchState { int connection_state=MU_SLP_MM_CONNECTION_SUCCESS; int local_index=0; } match;
 static MuRankedSet set;
-static MuYgRanks ranks;
+static MuPlayerRanks ranks;
 static bool mu_slippi_css_online() { return true; }
 static auto* mu_slippi_state() { return &menu; }
 static const MuMatchState* mu_slippi_css_msrb() { return &match; }
@@ -114,7 +114,7 @@ static int mu_slippi_ranked_available() { return 1; }
 void mu_ranked_reveal_frame();
 const MuRankedSet* mu_ranked_set() { return &set; }
 static bool fail_ranks;
-int mu_ranked_read_ranks(MuYgRanks* out) { if (fail_ranks) return 0; *out=ranks; return 1; }
+int mu_ranked_read_ranks(MuPlayerRanks* out) { if (fail_ranks) return 0; *out=ranks; return 1; }
 #if defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH
 static bool practice_mode;
 int mu_ranked_practice() { return practice_mode; }

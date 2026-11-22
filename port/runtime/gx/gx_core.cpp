@@ -17,7 +17,6 @@ namespace gx { void settings_guest_options_frame(uint8_t menu, uint16_t selectio
 #include "audio.h"
 #include "native_pose_bridge.h"
 #include "replay_control.h"
-#include "yougame_parity.h"   // yg {"match":1|0} for the app, with or without Slippi
 #include "rtx_semantics.h"
 #include "../abi/mu_rtx_tokens.h"
 #ifdef MELEE_NO_SLIPPI
@@ -937,13 +936,6 @@ void bp_write(uint32_t value) {
           static uint16_t last_scene = 0xFFFF;
           const uint16_t scene = (uint16_t)(g_frame.scene_major << 8 | g_frame.scene_minor);
           if (scene != last_scene) { host::log("scene: major %02X minor %02X (frame %llu)", g_frame.scene_major, g_frame.scene_minor, (unsigned long long)g_frame.sequence); host::note_scene_memory(); last_scene = scene; }
-          static int last_match = -1;
-          const int in_match = frame_in_app_match(g_frame) ? 1 : 0;
-          if (in_match != last_match) {
-            last_match = in_match;
-            const int sent = yougame::parity::signals.sync_match(in_match);
-            if (sent >= 0) host::log("yougame: match %d", sent);
-          }
         }
         g_frame.time = host::now_seconds(); // completed snapshot availability anchors presentation
         g_frame.tick = host::tick_timing();

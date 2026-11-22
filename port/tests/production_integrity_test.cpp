@@ -3,6 +3,7 @@
 #include "mod_scan.h"
 #include "layer_fingerprint.h"
 #include "test_env.h"
+#include "gameplay_policy.h"
 #include "sysgen_paths.h"
 #include <chrono>
 #include <cctype>
@@ -16,7 +17,7 @@
 namespace fs = std::filesystem;
 using namespace source_port;
 using namespace source_port::mods;
-static bool& yougame_active = host::test_env::yougame_session;
+
 // The production native C functions are generated verbatim at configure time.
 #include "mu_host.h"
 static const MuHostApi* mu_host = nullptr;
@@ -35,13 +36,11 @@ static void set_env(const char* name, const char* value) {
 #endif
 }
 static int native_ai_test(const std::string& mode) {
-  yougame_active = mode == "--native-ai-yougame";
   host::gameplay::vanilla_only_session = mode == "--native-ai-vanilla";
   MuHostApi api{}; api.version = MU_HOST_API_VERSION; api.test_getenv = host::test_env::getenv; mu_host = &api;
   set_env("MELEE_TEST_20XX_AI", "1");
   set_env("MELEE_TE_FAKE_ATTACK", "1");
-  // Only YouGame sessions blank the knobs; --vanilla-only reads them as upstream does.
-  const bool restricted = yougame_active;
+  const bool restricted = false;
   CHECK(bool(mu_20xx_ai_enabled()) == !restricted);
   CHECK(bool(mu_test_getenv("MELEE_TE_FAKE_ATTACK")) == !restricted);
   set_env("MELEE_TE_FAKE_ATTACK", nullptr);
@@ -72,9 +71,7 @@ static void environment_tests() {
   set_env("MELEE_TEST_20XX_AI", "1"); set_env("MELEE_SNAPSHOT_EXCLUDE", "1-2");
   CHECK(std::strcmp(host::test_env::getenv("MELEE_TEST_20XX_AI"), "1") == 0);
   CHECK(host::test_env::getenv("MELEE_SNAPSHOT_EXCLUDE"));
-  yougame_active = true;
-  CHECK(!host::test_env::getenv("MELEE_TEST_20XX_AI")); CHECK(!host::test_env::getenv("MELEE_SNAPSHOT_EXCLUDE"));
-  yougame_active = false; host::gameplay::vanilla_only_session = true;
+  host::gameplay::vanilla_only_session = true;
   CHECK(host::test_env::getenv("MELEE_TEST_20XX_AI")); CHECK(host::test_env::getenv("MELEE_SNAPSHOT_EXCLUDE"));
   host::gameplay::vanilla_only_session = false;
   CHECK(host::test_env::getenv("MELEE_TEST_20XX_AI"));

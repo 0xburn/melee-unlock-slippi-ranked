@@ -501,7 +501,7 @@ struct RenderOptions {
   uint32_t capture_burst = 0;  // if set, capture this many consecutive presented frames from capture_frame
   uint64_t capture_sim_frame = 0;  // if set, the burst starts at the first presented frame whose simulation sequence >= this
   std::string shader_cache = "shadercache";   // directory for compiled shader blobs and the D3D12 pipeline library
-  bool shader_cache_shared = false;  // --shader-cache named it: another build (YouGame's copies) may use it too, so
+  bool shader_cache_shared = false;  // --shader-cache named it: another build may use it too, so
                                      // the other builds' shader folders are never pruned from it
   std::string dump_path;      // write a text dump of draw state + shaders at dump_frame
   uint32_t dump_frame = 0;

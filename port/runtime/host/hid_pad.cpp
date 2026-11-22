@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "hid_pad.h"
 #include "host.h"
-#include "controller_relay.h"
 #include "input_bindings.h"
 #define NOMINMAX
 #include <windows.h>
@@ -516,12 +515,6 @@ bool hidpad_frame1_dinput(int slot) {
 }
 
 std::string hidpad_name(int slot) {
-  if (controller_relay::active()) {
-    controller_relay::Sample s;
-    if (controller_relay::sample(CaptureDevice::HidPad,slot,s)) return s.name;
-    // YouGame: HID pads stay with this reader until the app sends raw HID ones (window.cpp
-    // relay_hid_poll). A name is only asked for a slot the reader in charge says is connected.
-  }
   if (slot < 0 || slot >= kHidPadSlots) return {};
   std::lock_guard<std::mutex> lock(g_mutex);
   return g_slots[slot].ready ? g_slots[slot].name : std::string();

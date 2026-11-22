@@ -4,7 +4,6 @@
 #include "pacing_diagnostics.h"
 #include "host.h"
 #include "window.h"
-#include "yougame_link.h"
 #include <windows.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
@@ -73,7 +72,7 @@ class WindowsRecorder {
   void metadata(IDXGISwapChain* chain, HWND hwnd, bool exclusive) {
     // Observe the actual HWND: adoption may fail even when an embed launch was requested.
     const bool child = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) != 0;
-    const int window = child ? 0 : yougame::embed_toplevel() && GetWindow(hwnd, GW_OWNER) ? 1 : 2;
+    const int window = child ? 0 : 2;
     int mode = exclusive ? 3 : 2;
     if (window != 2) {
       RECT r{}; GetClientRect(hwnd, &r);

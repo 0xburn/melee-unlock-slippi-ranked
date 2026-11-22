@@ -3,12 +3,6 @@
 #include "../runtime/host/gc_adapter.cpp"
 #include <cstdio>
 
-namespace yougame {
-bool g_test_stdio_bridge = false;
-bool stdio_bridge() { return g_test_stdio_bridge; }
-uintptr_t pad_mirror_handle() { return 0; }
-}
-
 namespace host {
 Options options;
 TickTiming& tick_timing() { static TickTiming timing; return timing; }
@@ -24,11 +18,10 @@ int main() {
     if (!ok) { std::printf("FAIL %s\n", what); ++failures; }
   };
   // The hook counts attempted starts/opens without accessing hardware, even on a regression.
-  for (bool bridge : {true, false}) {
-    yougame::g_test_stdio_bridge = bridge;
-    options.no_gc_adapter = !bridge;
+  {
+    options.no_gc_adapter = true;
     ensure_scanner_started();
-    check(gcadapter_problem() == (bridge ? "No GameCube adapter from the YouGame app" : ""),
+    check(gcadapter_problem().empty(),
           "disabled status query does not start scanner");
     check(!gcadapter_request_reset(), "disabled reset is a no-op");
     check(!open_adapter() && !open_libusb() && !open_hid(), "all open routes refuse disabled mode");
@@ -48,7 +41,7 @@ int main() {
     check(!g_resetting && !g_ctx && !g_dev && g_hid == INVALID_HANDLE_VALUE,
           "disabled entry points leave transport and reset idle");
     g_poll_rate_hz = 999.0;
-    check(gcadapter_poll_rate_hz() == 0.0, "missing mirror or disabled adapter has zero rate");
+    check(gcadapter_poll_rate_hz() == 0.0, "disabled adapter has zero rate");
     int transferred = 99;
     uint8_t report[37]{};
     check(adapter_read(report, sizeof report, &transferred, 0) == LIBUSB_ERROR_NO_DEVICE && !transferred,
@@ -57,7 +50,6 @@ int main() {
     check(adapter_write(report, sizeof report, &transferred, 0) == LIBUSB_ERROR_NO_DEVICE && !transferred,
           "disabled transport cannot write rumble");
   }
-  yougame::g_test_stdio_bridge = false;
   options.no_gc_adapter = false;
   ensure_scanner_started();
   check(g_test_scanner_starts == 1 && g_scanner_run, "standalone lazy startup is still enabled");

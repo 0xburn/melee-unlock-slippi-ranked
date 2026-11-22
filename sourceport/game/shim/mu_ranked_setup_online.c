@@ -15,7 +15,7 @@ void mu_ranked_update_result_shown(void) {
     if (update_result_pending) mu_ranked_update_reset();
 }
 static MuRankedSetupModel model;
-#if defined(YOUGAME_AGENT_TEST_HOOK) || (defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+#if defined(MU_RANKED_TEST_CPU)
 static MuRankedSetupModel cpu_model;
 static MuRankedSet cpu_set;
 #endif
@@ -28,7 +28,7 @@ static unsigned result_end;
 const MuRankedSetupModel* mu_ranked_setup_model(void) { return &model; }
 int mu_ranked_setup_cpu(void)
 {
-#if defined(YOUGAME_AGENT_TEST_HOOK) || (defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+#if defined(MU_RANKED_TEST_CPU)
     return strcmp(mu_slippi_match_state()->match_id, "agent-ranked-cpu") == 0;
 #else
     return 0;
@@ -36,7 +36,7 @@ int mu_ranked_setup_cpu(void)
 }
 static void abort_setup(const char* why)
 {
-    MuYgU8 mode = 1;
+    MuRankU8 mode = 1;
     char line[96];
     if (ended) return;
     ended = 1;
@@ -53,13 +53,13 @@ static void abort_setup(const char* why)
 }
 static void publish_result(void)
 {
-    MuYgU8 payload[14] = {0};
+    MuRankU8 payload[14] = {0};
     MuSlippiSelections selection;
     unsigned i;
     if (sent_result || model.status != MU_SETUP_COMPLETE) return;
     /* CompleteGamePrep :985-1059. Tiebreak :22-33 retains the prior BF override. */
     if (!model.set->tiebreak_num) {
-        mu_yg_put16(payload, model.result.stage);
+        mu_rank_put16(payload, model.result.stage);
         for (i = 0; i < 2; ++i) {
             payload[2+3*i] = 1;
             payload[3+3*i] = model.result.fighters[i].character;
@@ -86,7 +86,7 @@ void mu_ranked_setup_begin(void)
     MuRankedPolicy policy;
     MuRankedSetupResult previous;
     const MuMatchState* ms;
-    MuYgU8 status;
+    MuRankU8 status;
     unsigned i;
     update_set_active = 1; /* conservative: include game-one setup/striking */
     update_result_pending = 0;
@@ -98,7 +98,7 @@ void mu_ranked_setup_begin(void)
     if (!mu_ranked_read_policy(&policy)) { abort_setup("no ranked rules from the host"); return; }
     ms = mu_slippi_match_state();
     if (ms->connection_state != MU_SLP_MM_CONNECTION_SUCCESS) { abort_setup("not connected"); return; }
-    previous.stage = mu_yg_get16(ms->game_info + 0xE);
+    previous.stage = mu_rank_get16(ms->game_info + 0xE);
     for (i = 0; i < 2; ++i) {
         previous.fighters[i].character = ms->game_info[0x60+0x24*i];
         previous.fighters[i].color = ms->game_info[0x63+0x24*i];
@@ -113,10 +113,10 @@ void mu_ranked_setup_begin(void)
     }
     if (!model.set->tiebreak_num) {
         /* minor_load :44-50, game_setup_N. */
-        status = (MuYgU8)(9 + model.set->cur_game);
+        status = (MuRankU8)(9 + model.set->cur_game);
         mu_slippi_cmd(0xC4, &status, 1, NULL, 0, NULL);
     }
-#if defined(YOUGAME_AGENT_TEST_HOOK) || (defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+#if defined(MU_RANKED_TEST_CPU)
     if (mu_ranked_setup_cpu()) {
         cpu_set = *mu_ranked_set();
         mu_ranked_setup_model_init(&cpu_model, &policy, &cpu_set, !ms->local_index, &previous);
@@ -132,15 +132,15 @@ void mu_ranked_setup_set_draft(const MuRankedSetupChoice* choice)
 }
 int mu_ranked_setup_submit(const MuRankedSetupChoice* choice, int automatic)
 {
-    MuYgU8 packet[5];
+    MuRankU8 packet[5];
     const MuRankedSetupStep* s = mu_ranked_setup_current(&model);
     if (!s || s->player != model.local_player || ended ||
         !mu_ranked_setup_packet(&model, choice, automatic, packet)) return 0;
     /* :949-958: only the controlling seat sends C0. Apply only after send succeeds. */
     if (mu_slippi_cmd(0xC0, packet, sizeof packet, NULL, 0, NULL)) { abort_setup("step send refused"); return 0; }
-#if defined(YOUGAME_AGENT_TEST_HOOK) || (defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+#if defined(MU_RANKED_TEST_CPU)
     if (mu_ranked_setup_cpu()) {
-        MuYgU8 response[6] = {1,0,0,0,0,0};
+        MuRankU8 response[6] = {1,0,0,0,0,0};
         memcpy(response+2, packet+1, 4);
         if (!mu_ranked_setup_remote(&cpu_model, response)) { abort_setup("cpu step refused"); return 0; }
     }
@@ -152,7 +152,7 @@ int mu_ranked_setup_submit(const MuRankedSetupChoice* choice, int automatic)
 void mu_ranked_setup_frame(void)
 {
     const MuRankedSetupStep* s;
-    MuYgU8 response[6] = {0}, index;
+    MuRankU8 response[6] = {0}, index;
     unsigned got = 0;
     int timeout;
     if (ended) return;
@@ -177,9 +177,9 @@ void mu_ranked_setup_frame(void)
         /* HandleOpponentStep :844-892. CPU test feeds precisely this response/apply path. */
         index = model.step;
         if (mu_slippi_cmd(0xC1, &index, 1, response, sizeof response, &got) || got != 6) { abort_setup("step fetch failed"); return; }
-#if defined(YOUGAME_AGENT_TEST_HOOK) || (defined(YOUGAME_RANKED_BRANCH) && YOUGAME_RANKED_BRANCH)
+#if defined(MU_RANKED_TEST_CPU)
         if (mu_ranked_setup_cpu() && model.frames >= 30) {
-            MuYgU8 packet[5];
+            MuRankU8 packet[5];
             /* A second seat, same model APIs as a remote client; 0.5 s think time. */
             if (!mu_ranked_setup_packet(&cpu_model, NULL, 1, packet) ||
                 !mu_ranked_setup_apply(&cpu_model, cpu_model.local_player, packet)) { abort_setup("cpu step invalid"); return; }
@@ -197,7 +197,7 @@ void mu_ranked_setup_game_result(int winner, unsigned end_mode, int disconnected
 {
     result_winner = winner; result_end = end_mode; result_disconnect = disconnected;
 }
-int mu_ranked_setup_finish_game(int connected, MuYgU16 stage)
+int mu_ranked_setup_finish_game(int connected, MuRankU16 stage)
 {
     MuRankedSet* set = mu_ranked_set_mut();
     unsigned game = set->cur_game;

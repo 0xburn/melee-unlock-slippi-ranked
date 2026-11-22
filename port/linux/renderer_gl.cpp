@@ -4,10 +4,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "test_env.h"
 #include "renderer_gl.h"
-#include "../runtime/hle/yougame_parity.h"
-#ifdef YOUGAME_AGENT_TEST_HOOK
-#include "../runtime/hle/yougame_agent_present.h"
-#endif
 #ifdef MELEE_LINUX
 #include "../runtime/host/window.h"
 #endif
@@ -338,9 +334,6 @@ void main() {
     return {"opengl", recipes_.size(), programs_loaded_.load(), programs_linked_.load()};
   }
   ~Renderer() override {
-#ifdef YOUGAME_AGENT_TEST_HOOK
-    yougame::agent_present::recorder().stop(); // Drain evidence before the host's exit path.
-#endif
 #ifdef __APPLE__
     translations_.stop(); // Finish the active helper before any captured renderer state is destroyed.
     report_skips(true);
@@ -1484,42 +1477,8 @@ void main() {
     }
     if (test_fill < 0) { ++presented_; captures(capture_sequence_); --presented_; }   // the finished window, menus included
     test_shot(w, h);
-#ifdef YOUGAME_AGENT_TEST_HOOK
-    auto& evidence = yougame::agent_present::recorder();
-    yougame::agent_present::Image strip;
-    int window_w = 0, window_h = 0;
-    if (evidence.enabled()) SDL_GetWindowSize(window_, &window_w, &window_h);
-    if (evidence.wants_frame(uint64_t(presented_) + 1)) {
-      // Read the actual window back buffer, including letterbox and UI, before swapping.
-      // As in f7bef74/19ae8c7; restore pack state because before_swap can leave a PBO bound.
-      GLint read_fbo = 0, pack_buffer = 0, alignment = 0, row_length = 0, skip_rows = 0, skip_pixels = 0;
-      glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-      glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pack_buffer);
-      glGetIntegerv(GL_PACK_ALIGNMENT, &alignment); glGetIntegerv(GL_PACK_ROW_LENGTH, &row_length);
-      glGetIntegerv(GL_PACK_SKIP_ROWS, &skip_rows); glGetIntegerv(GL_PACK_SKIP_PIXELS, &skip_pixels);
-      glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-      GLint read_buffer = 0; glGetIntegerv(GL_READ_BUFFER, &read_buffer);
-      glReadBuffer(GL_BACK); glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-      glPixelStorei(GL_PACK_ALIGNMENT, 1); glPixelStorei(GL_PACK_ROW_LENGTH, 0);
-      glPixelStorei(GL_PACK_SKIP_ROWS, 0); glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
-      std::vector<uint8_t> pixels(size_t(w) * h * 3);
-      glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-      glReadBuffer(read_buffer); glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fbo);
-      glBindBuffer(GL_PIXEL_PACK_BUFFER, pack_buffer);
-      glPixelStorei(GL_PACK_ALIGNMENT, alignment); glPixelStorei(GL_PACK_ROW_LENGTH, row_length);
-      glPixelStorei(GL_PACK_SKIP_ROWS, skip_rows); glPixelStorei(GL_PACK_SKIP_PIXELS, skip_pixels);
-      strip = yougame::agent_present::downscale(pixels.data(), w, h);
-    }
-    const auto record_present = [&] {
-      evidence.after_swap(presented_, frame.source_retrace, frame.scene_major, frame.scene_minor,
-                          w, h, window_w, window_h, std::move(strip));
-    };
-#endif
 #ifdef __APPLE__
     { GlProbeScope cost(probe_.slot(probe_.swap)); SDL_GL_SwapWindow(window_); } ++presented_;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-    record_present();
-#endif
     // Notify both the regular-window and embedded-panel first-frame policies.
     if (hooks_.after_swap) hooks_.after_swap(presented_);
     if (!pending_.empty()) {
@@ -1530,9 +1489,6 @@ void main() {
     glBindFramebuffer(GL_FRAMEBUFFER, draw_fbo());
 #else
     SDL_GL_SwapWindow(window_); ++presented_;
-#ifdef YOUGAME_AGENT_TEST_HOOK
-    record_present();
-#endif
     if (hooks_.after_swap) hooks_.after_swap(presented_);
     glBindFramebuffer(GL_FRAMEBUFFER, draw_fbo());
 #endif
@@ -1540,7 +1496,6 @@ void main() {
     if (error != GL_NO_ERROR) throw std::runtime_error("OpenGL GX frame failed with error " + std::to_string(error));
     // Ready = the game drew its first real frame, visible or not: the page hides the embed under its loading cover
     // until ready, so waiting for visibility deadlocked until the page's 20 s safety (10-25).
-    yougame::parity::signals.presented(test_fill < 0);
     invalidate_state();
   }
   // The picture on the window: the EFB's frame region averaged over each output pixel when it is

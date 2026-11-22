@@ -56,16 +56,6 @@ std::filesystem::path shader_root() {
   }();
   return writable;
 #else
-  // Under the YouGame app the program folder is read-only (the sandbox writes only YOUGAME_DATA), so
-  // the unpacked presets and the player's own live in the game's data folder; the pack stays beside
-  // the program and is read from there.
-#ifdef _WIN32
-  const wchar_t* data = _wgetenv(L"YOUGAME_DATA");
-  if (data && *data) return std::filesystem::path(data) / "Shaders";
-#else
-  const char* data = std::getenv("YOUGAME_DATA");
-  if (data && *data) return std::filesystem::u8path(data) / "Shaders";
-#endif
   return program_shaders();
 #endif
 }
