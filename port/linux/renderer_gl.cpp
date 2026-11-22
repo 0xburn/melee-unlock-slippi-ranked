@@ -386,10 +386,6 @@ void main() {
   void set_hooks(Hooks hooks) { hooks_ = std::move(hooks); }
   const gx::RenderOptions* presentation_options() const override { return hooks_.options; }
   void submit_frame(const gx::Frame& frame, const gx::DrawMatrices* overrides) override {
-#ifdef MELEE_LINUX_X11_EMBED
-    int drawable_w = 0, drawable_h = 0;
-    if (hooks_.drawable_size && !hooks_.drawable_size(&drawable_w, &drawable_h)) return;
-#endif
     source_retrace_ = frame.source_retrace; // Includes shader work before drawing and after the swap.
 #ifdef __APPLE__
     Clock::time_point probe_start;
@@ -1410,11 +1406,6 @@ void main() {
     resolve_msaa();
     invalidate_state();
     int w = 0, h = 0;
-#ifdef MELEE_LINUX_X11_EMBED
-    if (hooks_.drawable_size) {
-      if (!hooks_.drawable_size(&w, &h)) return;
-    } else
-#endif
     SDL_GL_GetDrawableSize(window_, &w, &h);
     if (w <= 0 || h <= 0) return;
 #ifdef __APPLE__

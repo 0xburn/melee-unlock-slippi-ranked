@@ -85,12 +85,8 @@ void window_note_picture_aspect(float aspect);
 float window_picture_aspect();
 void* window_of_process(uint32_t pid);
 #ifndef _WIN32
-// Linux video/render thread: uses page visibility after X11 adoption, SDL otherwise.
+// SDL window visibility on the video/render thread.
 bool window_visible();
-#endif
-#ifdef MELEE_LINUX_X11_EMBED
-// Successful X11 adoption (false after graceful standalone fallback).
-bool window_embedded();
 #endif
 #ifdef __APPLE__
 void window_prefer_simple_fullscreen();   // macOS: non-Spaces full screen; before window_create
