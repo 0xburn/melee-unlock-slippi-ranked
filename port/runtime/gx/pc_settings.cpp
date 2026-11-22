@@ -10010,8 +10010,14 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImGui::SameLine();
         settings_hint("(applies from the next match)");
       }
-      // Whether Start pauses Direct and Friends matches (Ranked and Unranked never pause).
-      if (settings_toggle("Pause in Direct and Friends", &slippi::online::config().direct_pause)) changed = true;
+      bool direct_pause = slippi::online::config().direct_pause.load();
+      if (settings_toggle("Pause in Direct Connect", &direct_pause)) {
+        slippi::online::config().direct_pause.store(direct_pause);
+        changed = true;
+      }
+      if (ImGui::IsItemHovered() || ImGui::IsItemFocused())
+        ImGui::SetTooltip("Applies the next time you connect. Either player can turn off pausing for both.\n"
+                          "Matches with Slippi Dolphin or older clients keep pausing enabled.");
       {
         // Online port colour: first and second choice; "Any" leaves the port's own colour.
         static const char* const colours[] = {"Any", "Red", "Blue", "Yellow", "Green"};
@@ -10028,11 +10034,6 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                               "choice. Both players need Melee Unlocked 1.0.2 or newer. Applies from your next connection.");
         }
       }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Off: Start does not pause Direct matches. Pausing goes off\n"
-                          "for everyone in the match when any player turns it off, as long as every player has\n"
-                          "Melee Unlocked 1.0.1 or newer. Against older builds or Slippi Dolphin, Start still pauses.\n"
-                          "Applies from your next connection.");
       // Up to three connect codes to skip in Unranked (a match with one is turned down and the
       // search goes on). Ranked, Direct, Teams and Party are not affected.
       {

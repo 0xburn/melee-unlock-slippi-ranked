@@ -2,6 +2,7 @@
 // rollback savestates, chat, match state. Port of the online half of Dolphin's CEXISlippi.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <array>
 #include <string>
@@ -22,9 +23,8 @@ struct Config {
   int delay = 2;                 // Slippi Online input delay (frames)
   bool auto_delay = false;       // pick the delay from the measured ping each match (delay is the fallback)
   int chat = 0;                  // 0 enabled, 1 direct only, 2 disabled
-  // Start pauses Direct and Friends matches (Slippi's rule). Off: no pause when every player's build
-  // reads this rule (MU_BUILD_CAPS3_PAUSE_RULE); against any other build pausing stays as it was.
-  bool direct_pause = true;
+  // The network thread advertises this preference at connection time.
+  std::atomic<bool> direct_pause{true};
   // Online port colour, first and second choice (0 red, 1 blue, 2 yellow, 3 green; -1 none). In a 1v1 each
   // player shows in their first choice; when both pick the same, the match's random seed gives it to one
   // and the other gets their second choice. Only between players who both have it (MU_BUILD port colours).

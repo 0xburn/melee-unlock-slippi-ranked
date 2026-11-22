@@ -1046,9 +1046,9 @@ void NetplayClient::SendBuild() {
   if (setup_hash_on) caps |= MU_SETUP_HASH_CAP;
   caps |= MU_PICK_PREVIEW_CAP;   // takes live pick previews (NP_MSG_MU_PICK_PREVIEW)
   // caps3 0x10: this side sends and takes warm-up messages (NP_MSG_MU_WARMUP, 0xE9).
-  // caps3 0x20/0x40: the Direct pause rule and this player's "Pause in Direct and Friends" (sent once a
+  // caps3 0x20/0x40: the Direct pause rule and this player's preference (sent once a
   // connection; a change applies from the next one, so both sides always decide from the same bytes).
-  const bool no_pause = !online::config().direct_pause;
+  const bool no_pause = !online::config().direct_pause.load();
   sent_no_pause_.store(no_pause);
   const uint8_t caps3 = (uint8_t)(0x04 | (setup_hash_on ? 0x08 : 0) |
                                   MU_BUILD_CAPS3_WARMUP | MU_BUILD_CAPS3_PAUSE_RULE | (no_pause ? MU_BUILD_CAPS3_NO_PAUSE : 0));
