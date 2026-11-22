@@ -310,6 +310,24 @@ Start opens the replay's practice settings.
 character. D-pad Up searches again, D-pad Down keeps training. Turn it off in PC settings > Game >
 Online.
 
+## Replays from the command line
+
+`melee_source.exe` plays a Slippi replay (.slp or .slpz) and closes when it ends:
+
+```powershell
+melee_source.exe --iso "C:/path/to/melee.iso" --replay "C:/path/to/Game.slp"
+```
+
+The Dolphin form that slp2mp4 and other Slippi tools use works too: `-e <iso>` for the disc, `-i <file>` for a
+[communication file](https://github.com/project-slippi/slippi-wiki/blob/master/COMM_SPEC.md) (its `replay`, or the
+first `path` in its `queue`), and `-b` (the game always exits when the replay ends):
+
+```powershell
+melee_source.exe -i comm.json -b -e "C:/path/to/melee.iso"
+```
+
+Add `--hidden` to play it without a window, and `--volume 0` for no sound.
+
 ## Slippi online
 
 Everything Slippi Dolphin does for netplay is built in: matchmaking, rollback netcode, the
