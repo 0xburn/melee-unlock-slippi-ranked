@@ -12,9 +12,6 @@ namespace host { struct PadState; }
 
 namespace slippi::native_practice {
 
-// Values intentionally match Slippi's OnlinePlayMode (Melee Unlocked has no Ranked).
-enum class MatchMode : uint8_t { None = 0xFF, Unranked = 1, Direct = 2, Teams = 3 };
-
 struct Snapshot {
   Phase phase = Phase::Idle;
   MatchMode mode = MatchMode::None;
@@ -26,7 +23,7 @@ struct Snapshot {
   int controller_port = 0;
   int matchmaking_state = 0;
   uint32_t generation = 0;
-  uint32_t search_ticks = 0;
+  uint32_t search_elapsed_ms = 0;
   std::string connect_code;
   std::string status;
   std::string detail;
@@ -69,8 +66,6 @@ struct Snapshot {
   struct Kept {
     int stage = 0;              // 0 none, 1 searching while away, 2 opponent found, 3 on the way back
     std::string service;
-    std::string mode;
-    uint32_t elapsed_ms = 0;    // the search's own time
     uint32_t shown_ms = 0;      // since it was kept
     uint32_t found_ms = 0;      // since the opponent was found
     int countdown_ms = -1;      // found: until the way back (0 going, -1 waiting for a safe moment)
@@ -85,6 +80,7 @@ struct Snapshot {
 };
 
 Snapshot snapshot();
+void submit_start_ranked();
 void submit_start_unranked();
 void submit_start_direct(const std::string& connect_code);
 // Teams: four players who all enter the same connect code.

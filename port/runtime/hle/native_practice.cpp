@@ -48,9 +48,8 @@ constexpr uint32_t kEventBackup = 0x8045A6C0 + 0x532;
 constexpr uint32_t kPlayerSlots = 0x80453080;
 constexpr uint32_t kPlayerStride = 0xE90;
 constexpr uint32_t kMatchStage = 0x8046B6A0 + 0x24C8 + 0x0E;
-constexpr uint32_t kSearchTimeoutTicks = 60 * 90;
 
-enum class CommandKind { StartUnranked, StartDirect, StartTeams, Cancel, AcknowledgeFailure, TrainAgainst, Warmup, WarmupReturn,
+enum class CommandKind { StartRanked, StartUnranked, StartDirect, StartTeams, Cancel, AcknowledgeFailure, TrainAgainst, Warmup, WarmupReturn,
                          TestTraining };
 struct Command { CommandKind kind; std::string text; };
 
@@ -83,7 +82,6 @@ std::string g_connect_code;
 std::string g_opponent;
 MatchMode g_match_mode = MatchMode::None;
 int g_matchmaking_state = 0;
-uint32_t g_search_ticks = 0;
 uint32_t g_generation = 0;
 uint32_t g_return_ticks = 0;
 constexpr uint32_t kReturnTimeoutTicks = 600;   // ten seconds of frames
@@ -466,11 +464,12 @@ void clear_search_metadata() {
   g_connect_code.clear();
   g_opponent.clear();
   g_matchmaking_state = 0;
-  g_search_ticks = 0;
 }
 
+bool kept_active();
+
 void start_search(MatchMode mode, const std::string& connect_code) {
-  if (g_lifecycle.phase() != Phase::Idle) return;
+  if (g_lifecycle.phase() != Phase::Idle || kept_active()) return;
   if (slippi::playback::enabled()) { fail("Matchmaking is unavailable during replay playback", false); return; }
   if (is_online_scene()) { fail("Matchmaking is already using the online scene", false); return; }
   if (slippi::online::session_mode() >= 0) { fail("An online session is already active", false); return; }
@@ -493,7 +492,6 @@ void start_search(MatchMode mode, const std::string& connect_code) {
   g_connect_code = connect_code;
   g_opponent.clear();
   g_matchmaking_state = 0;
-  g_search_ticks = 0;
   if (!g_lifecycle.begin_search()) return;
 
   const int online_mode = (int)mode;
@@ -521,7 +519,6 @@ void wait_practice_go(int port, MatchMode mode, const std::string& code);
 bool kept_possible();
 void kept_go_training(int port, const char* why);
 void kept_end(const std::string& why, bool cleanup);
-bool kept_active();
 int keep_ask_look();
 void publish_kept(Snapshot& out);
 
@@ -557,6 +554,9 @@ void process_command(Command command) {
       host::log("native practice: test: into Training as character %d", character);
       break;
     }
+    case CommandKind::StartRanked:
+      start_search(MatchMode::Ranked, {});
+      break;
     case CommandKind::StartUnranked:
       start_search(MatchMode::Unranked, {});
       break;
@@ -644,7 +644,7 @@ void publish_snapshot() {
   out.controller_port = g_practice.valid ? g_practice.controller_port : 0;
   out.matchmaking_state = g_matchmaking_state;
   out.generation = g_generation;
-  out.search_ticks = g_search_ticks;
+  if (out.phase == Phase::Searching) out.search_elapsed_ms = slippi::online::search_elapsed_ms();
   out.connect_code = g_connect_code;
   out.opponent = g_opponent;
   if (g_offer_shown && g_offer_mode != MatchMode::None)
@@ -1387,7 +1387,6 @@ enum class KeepStage : uint8_t { Off, Away, Found, Going };
 struct Kept {
   KeepStage stage = KeepStage::Off;
   uint8_t mode = 0xFF;          // the online mode byte to give back on the way home
-  std::string label;
   PracticeConfig css;           // the pick on the select (the coin on the way back) and its controller
   uint64_t since_ms = 0;        // kept since (the banner's slide in, the short form)
   uint64_t found_ms = 0, going_ms = 0;
@@ -1414,16 +1413,6 @@ int keep_ask_look() {
   return look;
 }
 
-std::string kept_label(int mode) {
-  switch (mode) {
-    case 0: return "Ranked";
-    case 1: return "Unranked";
-    case 2: return "Direct";
-    case 3: return "Teams";
-    default: return "Search";
-  }
-}
-
 // A search that may be kept: going out (or being retried), nobody found yet, from a select the player
 // locked in on, and not a friend's room or lobby (their select is the place to be). Party is left out.
 bool kept_searching(const slippi::online::KeptSearch& s) {
@@ -1447,14 +1436,13 @@ void kept_begin(const char* why, const PracticeConfig& pick) {
   g_kept = Kept{};
   g_kept.stage = KeepStage::Away;
   g_kept.mode = (uint8_t)s.mode;
-  g_kept.label = kept_label(s.mode);
   g_kept.css = pick;
   g_kept.since_ms = steady_ms();
   g_keep_pending = false;
   g_keep_ask = false;
   slippi::online::search_away(true);
   ++g_generation;
-  host::log("native practice: kept search: %s (%s, mode %d, character %d)", why, g_kept.label.c_str(), s.mode,
+  host::log("native practice: kept search: %s (%s, mode %d, character %d)", why, match_mode_name((MatchMode)g_kept.mode), s.mode,
             pick.valid && pick.players[0].active ? (int)pick.players[0].character : -1);
 }
 
@@ -1495,7 +1483,7 @@ void kept_go_training(int port, const char* why) {
 // Back to the select the search came from: the coin, the mode, then the scene (through the main menu
 // from another mode's match on the Source Port, as the warm-up goes back).
 void kept_go_back(const char* why) {
-  host::log("native practice: kept search: back to the %s select (%s)", g_kept.label.c_str(), why);
+  host::log("native practice: kept search: back to the %s select (%s)", match_mode_name((MatchMode)g_kept.mode), why);
   slippi::online::search_away(false);
   g_kept.stage = KeepStage::Going;
   g_kept.going_ms = steady_ms();
@@ -1589,7 +1577,7 @@ void kept_tick() {
     if (major != kOnlineMajor) g_kept.left_online = true;
     if (major == kOnlineMajor && g_kept.left_online) {
       if (online_mode() == g_kept.mode) {
-        host::log("native practice: kept search: the player is back on the %s select by themselves", g_kept.label.c_str());
+        host::log("native practice: kept search: the player is back on the %s select by themselves", match_mode_name((MatchMode)g_kept.mode));
         g_kept = Kept{};
         slippi::online::search_away(false);
         ++g_generation;
@@ -1628,7 +1616,7 @@ void kept_tick() {
     }
     if (major != kOnlineMajor && online_mode() != g_kept.mode) set_online_mode(g_kept.mode);
     if (major == kOnlineMajor && minor == 0 && slippi::online::in_online_menus()) {
-      host::log("native practice: kept search: on the %s select again (retrace %u)", g_kept.label.c_str(), host::retrace_count());
+      host::log("native practice: kept search: on the %s select again (retrace %u)", match_mode_name((MatchMode)g_kept.mode), host::retrace_count());
       g_kept = Kept{};
       ++g_generation;
       return;
@@ -1676,8 +1664,10 @@ void publish_kept(Snapshot& out) {
   const slippi::online::KeptSearch s = slippi::online::kept_search();
   k.stage = g_kept.stage == KeepStage::Away ? 1 : g_kept.stage == KeepStage::Found ? 2 : 3;
   k.service = "Slippi";
-  k.mode = g_kept.label;
-  k.elapsed_ms = s.started_ms && s.now_ms > s.started_ms ? (uint32_t)std::min<uint64_t>(s.now_ms - s.started_ms, 0xFFFFFFFFu) : 0;
+  out.mode = (MatchMode)g_kept.mode;
+  out.matchmaking_state = s.state;
+  out.search_elapsed_ms = slippi::online::search_elapsed_ms();
+  if (!is_online_scene() && g_kept.stage != KeepStage::Going) out.tab_available = true;
   k.shown_ms = (uint32_t)std::min<uint64_t>(now - g_kept.since_ms, 0xFFFFFFFFu);
   if (g_kept.found_ms) {
     k.found_ms = (uint32_t)std::min<uint64_t>(now - g_kept.found_ms, 0xFFFFFFFFu);
@@ -1761,6 +1751,11 @@ void submit_start_teams(const std::string& connect_code) {
   g_commands.push_back({CommandKind::StartTeams, connect_code});
 }
 
+void submit_start_ranked() {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_commands.push_back({CommandKind::StartRanked, {}});
+}
+
 void submit_start_unranked() {
   std::lock_guard<std::mutex> lock(g_mutex);
   g_commands.push_back({CommandKind::StartUnranked, {}});
@@ -1841,7 +1836,6 @@ void tick() {
       g_practice.players[0].character = (uint32_t)lobby.lobby_character;
       g_match_mode = MatchMode::Direct;
       g_connect_code = lobby.lobby_code;
-      g_search_ticks = 0;
       if (g_lifecycle.begin_search()) {
         host::wr8(kOnlineMode, 2);
         std::string error;
@@ -1851,7 +1845,7 @@ void tick() {
       }
     }
   }
-  // Test only (MELEE_PRACTICE_AUTOSTART=unranked, teams or direct:CODE): start one search after two
+  // Test only (MELEE_PRACTICE_AUTOSTART=ranked, unranked, teams or direct:CODE): start one search after two
   // seconds of offline gameplay, as pressing Tab and choosing would. Hidden test runs have no Tab.
   {
     static const char* autostart = std::getenv("MELEE_PRACTICE_AUTOSTART");
@@ -1865,6 +1859,7 @@ void tick() {
         if (spec.rfind("direct:", 0) == 0) submit_start_direct(spec.substr(7));
         else if (spec == "teams") start_search(MatchMode::Teams, {});
         else if (spec.rfind("teams:", 0) == 0) submit_start_teams(spec.substr(6));
+        else if (spec == "ranked") submit_start_ranked();
         else submit_start_unranked();
       }
     }
@@ -2114,14 +2109,12 @@ void tick() {
   }
 
   if (g_lifecycle.phase() == Phase::Searching) {
-    ++g_search_ticks;
-    // Teams waits for three other players: ten minutes, where Unranked and Direct give up after 90 s.
-    if (g_search_ticks > (g_match_mode == MatchMode::Teams ? 60u * 600u : kSearchTimeoutTicks)) {
+    if (search_timed_out(g_match_mode, slippi::online::search_elapsed_ms())) {
       fail(std::string("The ") + match_mode_name(g_match_mode) + " search timed out", true);
     } else {
       const slippi::online::NativeMatchPoll poll = slippi::online::native_poll_match();
       g_matchmaking_state = poll.process_state;
-      if (!poll.opponent.empty()) g_opponent = poll.opponent;
+      g_opponent = poll.opponent;
       if (poll.error.empty() && slippi::online::session_mode() < 0)
         fail("The connection ended before the match started", true);
       else
@@ -2351,6 +2344,7 @@ void set_content_bridge(ContentBridge bridge) { g_content_bridge = bridge; }
 
 const char* match_mode_name(MatchMode mode) {
   switch (mode) {
+    case MatchMode::Ranked: return "Ranked";
     case MatchMode::Unranked: return "Unranked";
     case MatchMode::Direct: return "Direct";
     case MatchMode::Teams: return "Teams";

@@ -1916,6 +1916,12 @@ int session_mode() {
 int session_mode_or_parked() { return g_warmup_parked || g_search_away ? (int)g_last_search.mode : session_mode(); }
 
 // ---------------------------------------------------------------- kept search
+uint32_t search_elapsed_ms() {
+  const uint64_t now = time_ms();
+  return g_search_started_ms && now >= g_search_started_ms
+      ? (uint32_t)std::min<uint64_t>(now - g_search_started_ms, UINT32_MAX) : 0;
+}
+
 KeptSearch kept_search() {
   KeptSearch out;
   out.away = g_search_away;
@@ -1923,8 +1929,6 @@ KeptSearch kept_search() {
   out.state = !g_forced_error.empty() ? (int)Matchmaking::ERROR_ENCOUNTERED : (int)g_matchmaking->GetMatchmakeState();
   out.mode = (int)g_last_search.mode;
   out.locked = g_local_selections.is_character_selected;
-  out.started_ms = g_search_started_ms;
-  out.now_ms = time_ms();
   if (out.state == (int)Matchmaking::ERROR_ENCOUNTERED)
     out.error = !g_forced_error.empty() ? g_forced_error : g_matchmaking->GetErrorMessage();
   return out;
@@ -2076,9 +2080,10 @@ NativeMatchPoll native_poll_match() {
   if (!g_forced_error.empty()) out.error = g_forced_error;
   else if (out.process_state == (int)Matchmaking::ERROR_ENCOUNTERED && g_matchmaking)
     out.error = g_matchmaking->GetErrorMessage();
-  if (g_matchmaking) {
-    for (int i = 0; i < 4 && out.opponent.empty(); ++i)
-      if (i != (int)g_local_player_index) out.opponent = g_matchmaking->GetPlayerName((uint8_t)i);
+  if (g_matchmaking && (out.process_state == Matchmaking::OPPONENT_CONNECTING || out.connection_success)) {
+    const int local = g_matchmaking->LocalPlayerIndex();
+    for (int i = 0; i < PLAYER_COUNT_MAX && out.opponent.empty(); ++i)
+      if (i != local) out.opponent = g_matchmaking->GetPlayerName((uint8_t)i);
   }
   return out;
 }

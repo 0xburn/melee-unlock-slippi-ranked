@@ -284,7 +284,7 @@ and none of it runs online.
   and hammers come out the same every time. Frame advance (L + R + Z freezes the game, Z steps one frame). On the Source Port also
   save states on the D-pad (right saves, left loads), recording the CPU (down records, up plays it
   back), hitboxes and an input display.
-- **Search**: start an Unranked, Direct or Teams search and keep training; the match starts by itself
+- **Search**: start a Ranked, Unranked, Direct or Teams search and keep training; the match starts by itself
   when one is found. Skip in Unranked turns down up to three connect codes.
 - **Four looks**: PC settings (F1) > Overlays > Practice menu look.
 

@@ -4504,8 +4504,8 @@ static void draw_search_keep(RenderOptions& options, const slippi::native_practi
     practice_menu::SearchBanner b;
     b.stage = k.stage;
     b.service = k.service;
-    b.mode = k.mode;
-    b.elapsed_ms = k.elapsed_ms;
+    b.mode = slippi::native_practice::match_mode_name(practice.mode);
+    b.elapsed_ms = practice.search_elapsed_ms;
     b.shown_ms = k.shown_ms;
     b.found_ms = k.found_ms;
     b.countdown_ms = k.countdown_ms;
@@ -4541,6 +4541,8 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
   using slippi::native_practice::Phase;
   const ImVec2 screen = ImGui::GetIO().DisplaySize;
   draw_search_keep(options, practice);
+  const bool kept_search = practice.kept.stage == 1 || practice.kept.stage == 2;
+  const bool searching = practice.phase == Phase::Searching || kept_search;
 
   if (practice.phase == Phase::Handoff) {
     practice_card_begin("##native_match_found", ImVec2(screen.x * 0.5f, screen.y * 0.5f), ImVec2(0.5f, 0.5f), false);
@@ -4623,9 +4625,9 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     if (test_hint && practice.in_practice) f.hint = show_hint;
     f.search.available = practice.tab_available;
     f.search.can_start = practice.can_start;
-    f.search.searching = practice.phase == Phase::Searching;
+    f.search.searching = practice.phase == Phase::Searching || (kept_search && state.practice_open);
     f.search.mode = slippi::native_practice::match_mode_name(practice.mode);
-    f.search.elapsed = slippi::native_practice::format_search_duration(practice.search_ticks);
+    f.search.elapsed = slippi::native_practice::format_search_duration(practice.search_elapsed_ms);
     f.search.state = matchmaking_state_text(practice.matchmaking_state);
     f.search.opponent = practice.opponent;
     f.search.code = practice.connect_code;
@@ -4675,7 +4677,11 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     if (r.changed) { state.dirty = true; apply_practice_tools(options); }
     if (r.stronger_changed) { options.pro_ai_stronger = phillip_ai::stronger_choice(); state.dirty = true; }
     const auto close_menu = [&state]() { state.practice_open = false; state.practice_release_capture = true; };
-    if (r.start_unranked && practice.can_start) { slippi::native_practice::submit_start_unranked(); close_menu(); }
+    if (practice.can_start && (r.start_ranked || r.start_unranked)) {
+      if (r.start_ranked) slippi::native_practice::submit_start_ranked();
+      else slippi::native_practice::submit_start_unranked();
+      close_menu();
+    }
     if (r.start_direct || r.start_teams) {
       std::string code, error;
       if (!practice.can_start) practice_menu::show_error("Search from Training or an event match.");
@@ -4696,7 +4702,7 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     practice_card_begin("##native_search_status", ImVec2(screen.x - 12, screen.y - 12), ImVec2(1, 1), false);
     char title[96];
     std::snprintf(title, sizeof title, "%s  %s", slippi::native_practice::match_mode_name(practice.mode),
-                  slippi::native_practice::format_search_duration(practice.search_ticks).c_str());
+                  slippi::native_practice::format_search_duration(practice.search_elapsed_ms).c_str());
     practice_card_title(title, true);
     ImGui::TextDisabled("%s", matchmaking_state_text(practice.matchmaking_state));
     if (!practice.opponent.empty()) ImGui::TextDisabled("vs %s", practice.opponent.c_str());
@@ -4802,26 +4808,28 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
 
   ImGui::BeginDisabled(!practice.can_start);
   const bool start_unranked = settings_widgets::Button("Unranked", ImVec2(126, 32));
+  ImGui::SameLine();
+  const bool start_ranked = settings_widgets::Button("Ranked", ImVec2(126, 32));
   ImGui::EndDisabled();
   ImGui::SameLine();
   if (settings_widgets::Button("Direct", ImVec2(126, 32))) state.practice_focus_code = true;
-  ImGui::TextDisabled("Unranked starts immediately; Direct uses a code.");
   ImGui::Separator();
 
-  if (start_unranked && practice.can_start) {
+  if (practice.can_start && (start_ranked || start_unranked)) {
     state.practice_error[0] = 0;
-    slippi::native_practice::submit_start_unranked();
+    if (start_ranked) slippi::native_practice::submit_start_ranked();
+    else slippi::native_practice::submit_start_unranked();
     state.practice_open = false;
     state.practice_release_capture = true;
     ImGui::End();
     return;
   }
 
-  if (practice.phase == Phase::Searching) {
+  if (searching) {
     ImGui::Text("Mode: %s", slippi::native_practice::match_mode_name(practice.mode));
     if (!practice.connect_code.empty()) ImGui::Text("Code: %s", practice.connect_code.c_str());
     ImGui::TextUnformatted(matchmaking_state_text(practice.matchmaking_state));
-    const std::string elapsed = slippi::native_practice::format_search_duration(practice.search_ticks);
+    const std::string elapsed = slippi::native_practice::format_search_duration(practice.search_elapsed_ms);
     ImGui::Text("Search time: %s", elapsed.c_str());
     if (!practice.opponent.empty()) ImGui::Text("Opponent: %s", practice.opponent.c_str());
     ImGui::TextWrapped("Close this popup with Tab to keep practicing while the search continues.");

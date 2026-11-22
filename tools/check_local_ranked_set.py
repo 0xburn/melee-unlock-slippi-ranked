@@ -20,9 +20,11 @@ def two_ports():
         return first.getsockname()[1], second.getsockname()[1]
 
 
-def controller(player):
-    lines = ["300 A", "310", "840 sx=61 sy=127", "857", "880 A", "890", "940 START", "950",
-             "@scene 8:5"]
+def controller(player, from_training=False):
+    lines = []
+    if not from_training:
+        lines.extend(["300 A", "310", "840 sx=61 sy=127", "857", "880 A", "890", "940 START", "950"])
+    lines.append("@scene 8:5")
     for base in range(0, 20000, 130):
         for offset, pad in [(0, "A"), (10, "A"), (20, "DR"), (30, "A"), (40, "A"), (50, "DR"),
                             (60, "A"), (70, "A"), (80, "DL"), (90, "A"), (100, "A"), (110, "DR")]:
@@ -40,12 +42,15 @@ def start_client(player, work, ports, args, log):
         "latestVersion": "3.7.0",
     }))
     script = work / "script.txt"
-    script.write_text(controller(player))
+    training = args.from_training and player == 0
+    script.write_text(controller(player, from_training=training))
     env = {k: os.environ[k] for k in ("PATH", "SystemRoot", "WINDIR", "TMP", "TEMP") if k in os.environ}
     env.update(HOME=str(work / "home"), APPDATA=str(work / "appdata"), LOCALAPPDATA=str(work / "localappdata"),
                XDG_DATA_HOME=str(work / "data"), XDG_CACHE_HOME=str(work / "cache"),
                XDG_CONFIG_HOME=str(work / "config"), SDL_AUDIODRIVER="dummy", MELEE_NO_GC_ADAPTER="1",
                ROSETTA_ADVERTISE_AVX="1", MELEE_TEST_MM_HOST="127.0.0.1:1", MELEE_TEST_SCRIPT_PAD_FRAMES="1")
+    if training:
+        env.update(MELEE_TEST_AFTER_SESSION="300", MELEE_PRACTICE_AUTOSTART="ranked")
     command = [args.exe, "--iso", args.iso, "--headless", "--volume", "0", "--slippi-menus", "on",
                "--local-peer", f"{player}:{ports[player]}:127.0.0.1:{ports[1 - player]}",
                "--sys-dir", args.sys_dir, "--user-dir", str(work / "user"), "--card-dir", str(work / "cards"),
@@ -73,6 +78,7 @@ def main():
     parser.add_argument("--iso", required=True, type=Path)
     parser.add_argument("--sys-dir", required=True, type=Path)
     parser.add_argument("--fast", action="store_true", help="Run unpaced. Use paced mode when either peer stalls.")
+    parser.add_argument("--from-training", action="store_true", help="Start player 1's search from an offline Training match.")
     parser.add_argument("--output", type=Path, help="Create a fresh directory here for logs and both profiles.")
     args = parser.parse_args()
     args.exe, args.iso, args.sys_dir = (path.resolve(strict=True) for path in (args.exe, args.iso, args.sys_dir))
@@ -98,6 +104,8 @@ def main():
                 result = check(text, player)
                 if result is None and (proc.poll() is not None or "ranked set: abandoned" in text):
                     raise RuntimeError(f"Peer {player} failed to finish its set. See {log}")
+                if result and args.from_training and player == 0 and "Ranked search started (offline scene 1C" not in text:
+                    raise RuntimeError("Player 1 did not queue from Training")
                 results.append(result)
             if all(results):
                 if results[0] != results[1]:

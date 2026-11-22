@@ -8,6 +8,9 @@
 
 namespace slippi::native_practice {
 
+// Values match Slippi's OnlinePlayMode on the wire.
+enum class MatchMode : uint8_t { Ranked = 0, Unranked = 1, Direct = 2, Teams = 3, None = 0xFF };
+
 enum class Phase : uint8_t {
   Idle,
   Searching,
@@ -56,8 +59,9 @@ class Lifecycle {
 // player name is upper-cased. Returns false with a user-facing reason when the input is invalid.
 bool normalize_direct_code(const std::string& input, std::string* normalized, std::string* error);
 bool normalize_teams_code(const std::string& input, std::string* normalized, std::string* error);
-// Formats a 60 Hz search-tick count for the render snapshot without using wall-clock time.
-std::string format_search_duration(uint32_t ticks);
+// Ranked stays queued until cancellation, a match, or an error from matchmaking.
+bool search_timed_out(MatchMode mode, uint32_t elapsed_ms);
+std::string format_search_duration(uint32_t elapsed_ms);
 // Only transition/failure phases that must suppress guest input force global capture. Returning to
 // Training lands on its character-select scene, where the player must be able to continue.
 bool phase_forces_input_capture(Phase phase);

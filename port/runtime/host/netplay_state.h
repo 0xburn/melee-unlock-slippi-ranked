@@ -296,7 +296,7 @@ inline bool online_status_visible() { return in_online_menus() && !is_online_mat
 // here: the snapshot is always idle with the panel unavailable, so that code never shows.
 namespace native_practice {
 enum class Phase : uint8_t { Idle, Searching, Handoff, OnlineFlow, InMatch, Failure, ReturningToPractice };
-enum class MatchMode : uint8_t { None = 0xFF, Unranked = 1, Direct = 2 };
+enum class MatchMode : uint8_t { None = 0xFF, Ranked = 0, Unranked = 1, Direct = 2, Teams = 3 };
 struct Snapshot {
   Phase phase = Phase::Idle;
   MatchMode mode = MatchMode::None;
@@ -307,13 +307,14 @@ struct Snapshot {
   int controller_port = 0;
   int matchmaking_state = 0;
   uint32_t generation = 0;
-  uint32_t search_ticks = 0;
+  uint32_t search_elapsed_ms = 0;
   std::string connect_code;
   std::string status;
   std::string detail;
   std::string opponent;
 };
 inline Snapshot snapshot() { return {}; }
+inline void submit_start_ranked() {}
 inline void submit_start_unranked() {}
 inline void submit_start_direct(const std::string&) {}
 inline void submit_start_teams(const std::string&) {}

@@ -153,10 +153,10 @@ struct KeptSearch {
   int mode = -1;             // Matchmaking::OnlinePlayMode
   bool squad = false, friend_room = false, lobby = false;
   bool locked = false;       // this player is locked in (every search from the select is)
-  uint64_t started_ms = 0, now_ms = 0;   // when the search went out, and now, on one clock
   std::string error;
 };
 KeptSearch kept_search();
+uint32_t search_elapsed_ms();
 void search_away(bool away);
 
 // Native practice uses the same Slippi matchmaking implementation as the game's online menus.

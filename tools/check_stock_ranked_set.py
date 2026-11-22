@@ -226,7 +226,11 @@ async def run(args, work, stock_app):
     native = work / "fork"
     (native / "user").mkdir(parents=True)
     (native / "user/user.json").write_text(json.dumps(local_user(0)))
-    (native / "pad.txt").write_text(controller(0))
+    (native / "pad.txt").write_text(controller(0, from_training=args.from_training))
+    fork_env = {"MELEE_NO_GC_ADAPTER": "1", "SDL_AUDIODRIVER": "dummy",
+                "MELEE_TEST_SCRIPT_PAD_FRAMES": "1", "ROSETTA_ADVERTISE_AVX": "1"}
+    if args.from_training:
+        fork_env.update(MELEE_TEST_AFTER_SESSION="300", MELEE_PRACTICE_AUTOSTART="ranked")
     stock = work / "stock"
     peer_port, spectator_port = two_ports()
     fifo = prepare_stock(stock_app, stock, spectator_port, peer_port)
@@ -245,8 +249,7 @@ async def run(args, work, stock_app):
                                      "--card-dir", native / "cards", "--replay-dir", native / "games",
                                      "--settings-path", native / "settings.ini", "--script", native / "pad.txt",
                                      "--frames", "24000", "--log-file", native / "host.log"], native, url,
-                             {"MELEE_NO_GC_ADAPTER": "1", "SDL_AUDIODRIVER": "dummy",
-                              "MELEE_TEST_SCRIPT_PAD_FRAMES": "1", "ROSETTA_ADVERTISE_AVX": "1"})
+                             fork_env)
             await asyncio.sleep(7)
             spectator = melee.Console(is_remote=True, slippi_port=spectator_port, polling_mode=True, setup_gecko_codes=False)
             if not await asyncio.to_thread(spectator.connect):
@@ -283,6 +286,9 @@ async def run(args, work, stock_app):
             stock_reports = re.findall(r"Frames: (\d+), GameIdx: (\d+), TiebreakIdx: 0, WinnerIdx: (\d+), StageId: (\d+), GameEndMethod: 2, LRASInitiator: -1", stock_log)
             if len(fork_reports) < 2 or fork_reports != stock_reports or len(queue.joins) != 2:
                 raise ValueError(f"Conflicting game reports: fork={fork_reports}, stock={stock_reports}")
+            if args.from_training and ("Ranked search started (offline scene 1C" not in host or
+                                       "Ranked match found; handing off to normal online flow" not in host):
+                raise ValueError("The fork did not reach Ranked through Training")
             print(f"Both clients completed the Ranked set: {fork_reports}", flush=True)
             native_games = sorted((native / "games").glob("*.slp"))
             stock_games = sorted((stock / "games").glob("*.slp"))
@@ -299,6 +305,7 @@ def main():
     parser.add_argument("--dolphin", required=True, type=Path, help="Signed Slippi 3.7.0 netplay .app")
     parser.add_argument("--fork", required=True, type=Path, help="Packaged MeleeUnlocked.app")
     parser.add_argument("--iso", required=True, type=Path)
+    parser.add_argument("--from-training", action="store_true", help="Queue the fork from an offline Training match.")
     parser.add_argument("--output", type=Path, help="New directory for isolated profiles, logs and recordings")
     args = parser.parse_args()
     if sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file():

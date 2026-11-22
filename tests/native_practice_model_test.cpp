@@ -8,7 +8,7 @@ using slippi::native_practice::Lifecycle;
 using slippi::native_practice::MatchMode;
 using slippi::native_practice::Phase;
 
-// Ranked (Slippi value 0) is not offered; the value must stay unused.
+static_assert((int)MatchMode::Ranked == 0, "Ranked must match Slippi's online-mode value");
 static_assert((int)MatchMode::Unranked == 1, "Unranked must match Slippi's online-mode value");
 static_assert((int)MatchMode::Direct == 2, "Direct must match Slippi's online-mode value");
 
@@ -40,11 +40,18 @@ int main() {
   CHECK(!slippi::native_practice::normalize_direct_code("ABCD", &code, &error));
   CHECK(!slippi::native_practice::normalize_direct_code("AB#12X", &code, &error));
   CHECK(!slippi::native_practice::normalize_direct_code("AB##12", &code, &error));
+  using slippi::native_practice::search_timed_out;
+  CHECK(!search_timed_out(MatchMode::Ranked, 600001));
+  CHECK(!search_timed_out(MatchMode::Unranked, 90000));
+  CHECK(search_timed_out(MatchMode::Unranked, 90001));
+  CHECK(search_timed_out(MatchMode::Direct, 90001));
+  CHECK(!search_timed_out(MatchMode::Teams, 90001));
+  CHECK(search_timed_out(MatchMode::Teams, 600001));
   CHECK(slippi::native_practice::format_search_duration(0) == "0:00");
-  CHECK(slippi::native_practice::format_search_duration(59) == "0:00");
-  CHECK(slippi::native_practice::format_search_duration(60) == "0:01");
-  CHECK(slippi::native_practice::format_search_duration(3660) == "1:01");
-  CHECK(slippi::native_practice::format_search_duration(5400) == "1:30");
+  CHECK(slippi::native_practice::format_search_duration(999) == "0:00");
+  CHECK(slippi::native_practice::format_search_duration(1000) == "0:01");
+  CHECK(slippi::native_practice::format_search_duration(61000) == "1:01");
+  CHECK(slippi::native_practice::format_search_duration(90000) == "1:30");
   CHECK(!slippi::native_practice::phase_forces_input_capture(Phase::Idle));
   CHECK(!slippi::native_practice::phase_forces_input_capture(Phase::Searching));
   CHECK(slippi::native_practice::phase_forces_input_capture(Phase::Handoff));

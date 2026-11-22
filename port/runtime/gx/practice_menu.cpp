@@ -364,7 +364,7 @@ bool cpu_page(Page p) {
 
 enum class Kind { Page, Toggle, Percent, Number, Choice, Odds, Flag, Action, Info };
 enum Action : int {
-  kActNone, kActUnranked, kActCancel, kActWindow, kActDefaults, kActPreset = 100, kActLoad = 200, kActSave = 300, kActGhost = 400,
+  kActNone, kActUnranked, kActRanked, kActCancel, kActWindow, kActDefaults, kActPreset = 100, kActLoad = 200, kActSave = 300, kActGhost = 400,
   kActTeams = 500, kActBlocked = 600, kActWarmupBack = 650, kActWarmupAdjust = 651, kActGhostOff = 652,
   // "Stronger Pro AI (Requires additional download)": the question after picking a pro, and the
   // Fight a pro page's own download row.
@@ -612,6 +612,7 @@ std::vector<Row> rows_for(Page p) {
       } else {
         rows.push_back(action_row("Unranked", kActUnranked, "", s.can_start ? "Search now. Keep training; the match starts by itself."
                                                                            : "Search from Training or an event match.", s.can_start));
+        rows.push_back(action_row("Ranked", kActRanked, "", "Search for a Ranked set.", s.can_start));
         rows.push_back(page_row("Direct", Page::Code, g_last_direct, "Play someone by their connect code."));
         rows.push_back(action_row("Teams", kActTeams, g_last_teams, "Two against two: all four enter the same connect code."));
         int n = 0;
@@ -1006,6 +1007,7 @@ void press(Page p, Row& r, Result& out) {
   }
   if (r.action == kActWarmupBack) { slippi::native_practice::submit_warmup_return(); out.close = true; return; }
   if (r.action == kActWarmupAdjust) { adjust_begin(); return; }
+  if (r.action == kActRanked) { out.start_ranked = true; return; }
   if (r.action == kActUnranked) { out.start_unranked = true; return; }
   if (r.action == kActCancel) { out.cancel_search = true; return; }
   if (r.action == kActWindow) { out.open_window = true; return; }
@@ -1971,7 +1973,7 @@ void draw_intro(ImDrawList* dl, const Frame& f) {
     const float kw = hints(dl, 0, 0, u, keys, fa, false);
     hints(dl, cx - kw * 0.5f, top + h + 8 * u, u, keys, fa);
     // Kept between the Training logo and its damage display.
-    const char* about = "Search Unranked or Direct and keep practicing: the match starts by itself when one is found. "
+    const char* about = "Keep practicing while you search. The match starts when an opponent is found. "
                         "The same menu sets up the CPU and the training tools.";
     float y = top + h + 28 * u;
     for (const std::string& line : wrap(about, 16 * u, 430 * u)) {
@@ -2100,7 +2102,7 @@ void rail_status(ImDrawList* dl, float x, float y, float w, float u, const Frame
     y += rail_card(dl, x, y, w, u, f.search.mode.c_str(), f.search.elapsed, true, true, a, 34.0f,
                    f.search.opponent.empty() ? "searching" : "found", IM_COL32(69, 216, 112, 255), true) + 9 * u;
   } else {
-    y += rail_card(dl, x, y, w, u, "Unranked", f.search.available ? "Off" : "Training only", false, true, a) + 9 * u;
+    y += rail_card(dl, x, y, w, u, "Queue", f.search.available ? "Off" : "Training only", false, true, a) + 9 * u;
   }
   int n = 0;
   for (const std::string& code : slippi::online::config().blocked_codes) n += code.empty() ? 0 : 1;
@@ -2647,13 +2649,6 @@ namespace {
 float clamp01(float t) { return std::clamp(t, 0.0f, 1.0f); }
 float smooth01(float t) { t = clamp01(t); return t * t * (3.0f - 2.0f * t); }
 float ease_in3(float t) { t = clamp01(t); return t * t * t; }
-std::string clock_text(uint32_t ms) {
-  const uint32_t s = ms / 1000;
-  char out[24];
-  std::snprintf(out, sizeof out, "%u:%02u", s / 60, s % 60);
-  return out;
-}
-
 constexpr ImU32 kWhite = IM_COL32(255, 255, 255, 255);
 
 ImU32 mix(ImU32 a, ImU32 b, float t) {
@@ -2697,7 +2692,7 @@ Side side_of(const Geo& g, float want) {
 // The banner's words: SEARCHING SLIPPI RANKED 0:42, or OPPONENT FOUND.
 std::string banner_mode(const SearchBanner& b) {
   std::string s = b.service.empty() ? std::string() : b.service + " ";
-  return caps(s + (b.mode.empty() ? std::string("Unranked") : b.mode));
+  return caps(s + b.mode);
 }
 
 // The top of the banner as a fraction of the picture's height, by screen: up at the top edge, clear of
@@ -2725,7 +2720,7 @@ float run_with_timer(ImDrawList* dl, float cx, float cy, float px, ImU32 col, co
 void look_letters(ImDrawList* dl, const Geo& g, const SearchBanner& b) {
   const bool found = b.stage == 2;
   const std::string before = found ? std::string("OPPONENT FOUND") : "SEARCHING " + banner_mode(b) + "  ";
-  const std::string timer = found ? std::string() : clock_text(b.elapsed_ms);
+  const std::string timer = found ? std::string() : slippi::native_practice::format_search_duration(b.elapsed_ms);
   const float room = std::min(g.w, g.dw) - 24.0f * g.u;
   float px = g.h * 0.033f;
   const float w0 = run_with_timer(dl, 0, 0, px, 0, before, timer, "", false, false);
@@ -2785,7 +2780,7 @@ void look_pill(ImDrawList* dl, const Geo& g, const SearchBanner& b) {
   const std::string words = found ? std::string("OPPONENT FOUND") : banner_mode(b) + "  SEARCHING";
   const std::string search_words = banner_mode(b) + "  SEARCHING";
   const std::string slot_text = found ? (b.countdown_ms > 0 ? std::to_string((b.countdown_ms + 999) / 1000) : std::string())
-                                      : clock_text(b.elapsed_ms);
+                                      : slippi::native_practice::format_search_duration(b.elapsed_ms);
   float h = g.h * 0.042f, px = h * 0.55f;
   // Laid out in units of h: pad | dot | gap | words | gap | slot | pad.
   const auto layout_w = [&](float hh, float pp) {
@@ -2842,7 +2837,7 @@ void look_ticker(ImDrawList* dl, const Geo& g, const SearchBanner& b) {
   const bool found = b.stage == 2;
   float h = std::floor(g.h * 0.034f), px = h * 0.62f;
   const std::string before = found ? std::string("OPPONENT FOUND") : banner_mode(b) + "  |  SEARCHING  ";
-  const std::string timer = found ? std::string() : clock_text(b.elapsed_ms);
+  const std::string timer = found ? std::string() : slippi::native_practice::format_search_duration(b.elapsed_ms);
   const std::string after = found ? (b.countdown_ms > 0 ? "  |  MATCH IN " + std::to_string((b.countdown_ms + 999) / 1000) : std::string()) : std::string();
   const float room = std::min(g.w, g.dw) - 20.0f * g.u;
   const float w = run_with_timer(dl, 0, 0, px, 0, before, timer, after, false, false);
@@ -2866,7 +2861,7 @@ void look_ribbon(ImDrawList* dl, const Geo& g, const SearchBanner& b) {
   const bool found = b.stage == 2;
   float h = std::floor(g.h * 0.042f), px = h * 0.6f;   // as low as the pill: clear of the select's header and the match timer
   const std::string before = found ? std::string("OPPONENT FOUND!") : "SEARCHING " + banner_mode(b) + "  ";
-  const std::string timer = found ? std::string() : clock_text(b.elapsed_ms);
+  const std::string timer = found ? std::string() : slippi::native_practice::format_search_duration(b.elapsed_ms);
   const float room = std::min(g.w, g.dw) - 16.0f * g.u;
   float tw = run_with_timer(dl, 0, 0, px, 0, before, timer, "", false, false);
   float w = tw + h * 2.2f;

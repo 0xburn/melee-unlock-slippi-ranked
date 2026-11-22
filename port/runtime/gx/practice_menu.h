@@ -20,7 +20,7 @@ struct Search {
   bool available = false;   // the search can be used here (Training, event matches)
   bool can_start = false;
   bool searching = false;
-  std::string mode;         // "Unranked", "Direct"
+  std::string mode;         // active queue name
   std::string elapsed;      // "0:42"
   std::string state;        // what the matchmaking server is doing
   std::string opponent;
@@ -73,6 +73,7 @@ struct Frame {
 struct Result {
   bool close = false;            // leave the menu
   bool changed = false;          // a saved setting changed (practice CPU, blocked codes)
+  bool start_ranked = false;
   bool start_unranked = false;
   bool start_direct = false;
   bool start_teams = false;       // Teams with direct_code (everyone enters the same code)
