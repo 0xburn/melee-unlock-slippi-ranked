@@ -584,8 +584,14 @@ int wide_to_sjis_pair(wchar_t c) {
 }
 
 iconv_t open_sjis(bool to_wide) {
+#ifdef __APPLE__
+  // Darwin uses native little-endian UTF-32 for wchar_t on both supported CPUs.
+  constexpr auto wide_encoding = "UTF-32LE";
+#else
+  constexpr auto wide_encoding = "WCHAR_T";
+#endif
   for (const char* name : {"CP932", "SHIFT_JIS", "SJIS"}) {
-    iconv_t cd = to_wide ? iconv_open("WCHAR_T", name) : iconv_open(name, "WCHAR_T");
+    iconv_t cd = to_wide ? iconv_open(wide_encoding, name) : iconv_open(name, wide_encoding);
     if (cd != (iconv_t)-1) return cd;
   }
   return (iconv_t)-1;
