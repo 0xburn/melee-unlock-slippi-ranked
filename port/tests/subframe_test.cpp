@@ -15,6 +15,25 @@ static void rot_z(float deg, float tx, float out[12]) {
   std::memcpy(out, m, sizeof m);
 }
 int main() {
+  // Predict samples an animation that advanced at a new speed (a run, a dash, air drift: the game sets the
+  // rate from the velocity each frame); a restart, a pause or a swap is still no continuation (player video 11-21).
+  {
+    gx::AuthoredJoint p, c;
+    p.frame = 10; p.rate = 1.0f; p.end = 60; c = p;
+    c.frame = 11.5f; c.rate = 1.5f;   // advanced by the new rate
+    if (!gx::authored_retimed_clock(p, c)) { std::printf("retimed clock (new rate) not accepted\n"); return 1; }
+    c.frame = 11.0f;                  // advanced by the old rate, the new one set after
+    if (!gx::authored_retimed_clock(p, c)) { std::printf("retimed clock (old rate) not accepted\n"); return 1; }
+    c.frame = 0.0f;                   // restarted
+    if (gx::authored_retimed_clock(p, c)) { std::printf("restart taken as a retime\n"); return 1; }
+    c.frame = 10.0f;                  // paused
+    if (gx::authored_retimed_clock(p, c)) { std::printf("pause taken as a retime\n"); return 1; }
+    c.frame = 11.5f; c.end = 40;      // another animation (its length differs)
+    if (gx::authored_retimed_clock(p, c)) { std::printf("swap taken as a retime\n"); return 1; }
+    c = p; c.frame = 11.0f;           // same rate: the ordinary clock, not a retime
+    if (gx::authored_retimed_clock(p, c)) { std::printf("same rate taken as a retime\n"); return 1; }
+    std::printf("retimed clock: speed changes sampled, restarts, pauses and swaps held\n");
+  }
   // A render-to-texture camera keeps its authored projection: its consumers use
   // an authored projective texture matrix, even while the main view is widened.
   {
