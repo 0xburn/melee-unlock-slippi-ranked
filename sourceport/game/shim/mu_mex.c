@@ -170,12 +170,13 @@ static int mex_costume_safe(int kind)
     return kind < Ft_Kind_MasterH;
 }
 
-/* A disc pointer the loaded m-ex data holds: inside the game's memory (MEM1 and the game image). A
- * disc whose table holds something else there (a file name's bytes: "PlNn" for Nana, 1.0.3 report)
- * is read no further: dereferenced, it stopped the game at boot. */
+/* A pointer the loaded m-ex tables hold: relocated into MxDt.dat as it lies in mex_file. A disc whose
+ * table holds something else there (a file name's bytes: "PlNn" for Nana, 1.0.3 report) is read no
+ * further: dereferenced, it stopped the game at boot. */
 static int mex_ptr_ok(u32 raw)
 {
-    return raw >= 0x80000000u && raw < 0x82800000u;
+    const mu_uptr base = (mu_uptr) mex_file;
+    return raw >= base && raw < base + sizeof mex_file;
 }
 
 /* How many of the first `count` m-ex costumes of `kind` are usable (their files are on the disc);
