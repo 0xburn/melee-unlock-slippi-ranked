@@ -2424,9 +2424,10 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "audio_early_keyon") gx::RenderOptions::live_audio_early_keyon() = kShowFasterSoundEffects && value == "1";
       else if (key == "mute_voices") gx::RenderOptions::live_mute_voices() = value == "1";
       else if (key == "quickchat") slippi::online::config().chat = std::clamp(std::atoi(value.c_str()), 0, 2);
-      else if (key == "directpause") slippi::online::config().direct_pause = value != "0";
-      else if (key == "portcolour1" || key == "portcolour2")
-        slippi::online::config().port_colour[key.back() - '1'] = std::clamp(std::atoi(value.c_str()), -1, 3);
+      else if (key == "directpause" || key == "portcolour1" || key == "portcolour2") {
+        if (key == "directpause") slippi::online::config().direct_pause = value != "0";
+        else slippi::online::config().port_colour[key.back() - '1'] = std::clamp(std::atoi(value.c_str()), -1, 3);
+      }
       else if (key == "blockcode1" || key == "blockcode2" || key == "blockcode3")
         slippi::online::config().blocked_codes[key.back() - '1'] = value.substr(0, 16);
       else if (key == "practicecpu") {
@@ -2444,8 +2445,8 @@ void load_pc_settings(RenderOptions& options, int& volume) {
         options.offline_delay_frames = std::clamp(std::stoi(value), 1, 9);
         offline_delay_frames_seen = true;
       }
-      else if (key == "early_inputs2") options.early_inputs = value == "1";
-      else if (key == "early_inputs") {}   // the old key, saved on by default: not read (render_options.h)
+      // early_inputs, the old key saved on by default, is not read (render_options.h).
+      else if (key == "early_inputs2" || key == "early_inputs") { if (key == "early_inputs2") options.early_inputs = value == "1"; }
       else if (key == "performance") options.performance_overlay = value == "1";
       else if (key == "showfps") { options.show_fps = value == "1"; showfps_seen = true; }
       // showfps_yougame2: builds before 10-31 saved showfps_yougame 1 on every save (the old default),
