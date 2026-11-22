@@ -1006,7 +1006,14 @@ void handle_input(const Frame& f, const View& v) {
     for (ImWchar ch : ImGui::GetIO().InputQueueCharacters)
       if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '#') type_key((char)ch);
     if (ImGui::IsKeyPressed(ImGuiKey_Backspace) && !g.code.empty()) g.code.pop_back();
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter)) submit_code();
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter)) { submit_code(); return; }
+    if (f.keyboard_pad) {
+      step = 0;
+      if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) step = 1;
+      if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) step = 2;
+      if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) step = 3;
+      if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) step = 4;
+    }
     if (step == 1) {
       if (g.recent_pick < 0 && g.key_row == 0 && !g.recent.empty()) g.recent_pick = (int)g.recent.size() - 1;
       else if (g.recent_pick > 0) --g.recent_pick;
@@ -1024,7 +1031,7 @@ void handle_input(const Frame& f, const View& v) {
       else if (g.key_row == 4) { if (g.key_col == 0) { if (!g.code.empty()) g.code.pop_back(); } else submit_code(); }
       else type_key(kKeys[g.key_row][g.key_col]);
     }
-    if (pressed & kStart) submit_code();
+    if (f.keyboard_pad ? ImGui::IsKeyPressed(ImGuiKey_Space) : (pressed & kStart)) submit_code();
     if (!f.keyboard_pad && (pressed & kB)) {
       if (!g.code.empty()) g.code.pop_back();
       else g.page = Page::None;

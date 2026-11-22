@@ -106,6 +106,7 @@ bool window_take_escape();              // true once per game Esc press
 // Host-specific menu shortcut hint. Plain Esc also opens/backs the embedded game menu;
 // Shift+Esc belongs to the app.
 const char* window_menu_key();
+bool input_port_uses_keyboard(int port);
 bool window_take_settings_toggle();     // true once per F1 press (auto-repeat ignored), however late it is read
 bool window_take_legacy_settings_toggle(); // true once per F11 press (auto-repeat ignored)
 int window_take_trace_mark();             // once per mark key press, its kind: 1 plain (F8), 2 looked wrong (F6), 3 input wrong (F7), 4 sounded wrong (F9); else 0

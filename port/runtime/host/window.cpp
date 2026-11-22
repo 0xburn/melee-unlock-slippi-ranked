@@ -1761,9 +1761,13 @@ bool short_key_name(int vk, char* out, size_t n) {
 }
 }  // namespace
 
+bool input_port_uses_keyboard(int port) {
+  return port >= 0 && port < 4 && (g_keyboard_port_mask.load(std::memory_order_relaxed) & (1u << port));
+}
+
 bool input_keyboard_button_label(int port, uint16_t pad_button, char* out, size_t n) {
   if (!out || n < 2 || port < 0 || port > 3 || !pad_button) return false;
-  if (!(g_keyboard_port_mask.load(std::memory_order_relaxed) & (1u << port))) return false;
+  if (!input_port_uses_keyboard(port)) return false;
   int vk = 0;
   for (size_t i = 0; i < (size_t)BindAction::Count; ++i)
     if (kActionPadBit[i] == pad_button) { vk = g_key_bindings.vk[i]; break; }
