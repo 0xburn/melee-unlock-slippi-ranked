@@ -1017,13 +1017,15 @@ void handle_input(const Frame& f, const View& v) {
     } else if (step == 3) g.key_col = std::max(0, g.key_col - 1);
     else if (step == 4) g.key_col++;
     g.key_col = std::min(g.key_col, (int)std::string(kKeys[g.key_row]).size() - 1);
-    if (pressed & kA) {
+    // Printable keys already arrive via SDL/ImGui text input. Their mapped pad
+    // buttons must not also select or delete a character on the virtual keyboard.
+    if (!f.keyboard_pad && (pressed & kA)) {
       if (g.recent_pick >= 0) { g.code = g.recent[g.recent_pick]; submit_code(); }
       else if (g.key_row == 4) { if (g.key_col == 0) { if (!g.code.empty()) g.code.pop_back(); } else submit_code(); }
       else type_key(kKeys[g.key_row][g.key_col]);
     }
     if (pressed & kStart) submit_code();
-    if (pressed & kB) {
+    if (!f.keyboard_pad && (pressed & kB)) {
       if (!g.code.empty()) g.code.pop_back();
       else g.page = Page::None;
     }

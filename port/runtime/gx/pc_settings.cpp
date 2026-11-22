@@ -4971,6 +4971,8 @@ static void draw_arena_panel(RenderOptions& options, const host::PadState* pads,
   f.game_x1 = f.game_x0 + gw;
   f.game_y1 = f.game_y0 + gh;
   if (have_pad) { f.buttons = pad.button; f.stick_x = pad.stick_x; f.stick_y = pad.stick_y; f.sub_x = pad.sub_x; f.sub_y = pad.sub_y; }
+  char key_label[32];
+  f.keyboard_pad = use_kept && host::input_keyboard_button_label(arena_port, 0x0100, key_label, sizeof key_label);
   f.time = ImGui::GetTime();
   // Rooms ride on the Source Port's character select, whose game library reports the hand (cmd
   // 0xEF). The Static Recomp's select never does: it drew an ARENA tab there that nothing opens.
@@ -5744,7 +5746,14 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     if (ui_scale != 1.0f)
       io.DisplaySize = ImVec2(std::ceil(io.DisplaySize.x / ui_scale - 0.001f),
                               std::ceil(io.DisplaySize.y / ui_scale - 0.001f));
+#ifdef __APPLE__
+    // SDL reports window points and the Retina drawable scale. Preserve both axes
+    // so the overlay fills the same framebuffer as the game.
+    io.DisplayFramebufferScale.x *= ui_scale;
+    io.DisplayFramebufferScale.y *= ui_scale;
+#else
     io.DisplayFramebufferScale = ImVec2(ui_scale, ui_scale);
+#endif
     g_frame_ui_scale.store(ui_scale, std::memory_order_relaxed);
   }
   // UI navigation is armed only after the selected pad has returned to neutral. A held A that

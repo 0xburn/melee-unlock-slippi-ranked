@@ -195,6 +195,7 @@ bool local_css_selection(uint8_t* character, uint8_t* color);
 // The Direct code to keep searching for while practicing: the running Direct search's, else the
 // most recent one used. Empty when there is none.
 std::string direct_code_for_practice();
+void remember_direct_code(const std::string& code);
 
 // Arena rooms (slippi_arena.h). The online session as the room sees it: whether a Direct search or
 // connection is up, the connect code it is for (UTF-8), Matchmaking's ProcessState, and whether a

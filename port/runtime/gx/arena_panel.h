@@ -26,6 +26,7 @@ struct Frame {
   uint16_t buttons = 0;          // GameCube buttons of the player's controller
   int8_t stick_x = 0, stick_y = 0, sub_x = 0, sub_y = 0;
   double time = 0;               // seconds
+  bool keyboard_pad = false;
   bool on_online_menus = false;  // the online character select (or waiting there)
 };
 

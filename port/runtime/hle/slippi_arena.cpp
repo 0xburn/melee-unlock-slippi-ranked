@@ -1000,6 +1000,7 @@ void do_act(const Pending& p) {
     Link l;
     l.code = p.text;
     g_links.push_back(std::move(l));
+    online::remember_direct_code(p.text);
     event("adding %s", p.text.c_str());
     return;
   }

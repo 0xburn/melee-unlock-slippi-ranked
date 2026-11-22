@@ -2191,6 +2191,10 @@ bool local_css_selection(uint8_t* character, uint8_t* color) {
   return true;
 }
 
+void remember_direct_code(const std::string& code) {
+  if (g_direct_codes && !code.empty()) g_direct_codes->AddOrUpdateCode(code);
+}
+
 std::string direct_code_for_practice() {
   if (g_last_search.mode == Matchmaking::DIRECT && !g_last_search.connect_code.empty())
     return shiftjis_to_utf8(g_last_search.connect_code);
