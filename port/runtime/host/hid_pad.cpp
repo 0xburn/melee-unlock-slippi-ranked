@@ -418,6 +418,15 @@ bool hidpad_raw_input(void* device_handle, const uint8_t* report, uint32_t size,
   if (read_axis(used[1], value)) pad.stick_y = stick(used[1], true);
   if (read_axis(used[2], value)) pad.sub_x = stick(used[2], false);
   if (read_axis(used[3], value)) pad.sub_y = stick(used[3], true);
+  // Controls > Box layouts: a direction the pad reports reversed, turned round by the player.
+  if (index >= 0 && index < 4 && g_hid_stick_invert[index]) {
+    const uint8_t inv = g_hid_stick_invert[index];
+    auto flip = [](int8_t v) { return (int8_t)std::clamp(-(int)v, -128, 127); };
+    if (inv & HID_INVERT_STICK_X) pad.stick_x = flip(pad.stick_x);
+    if (inv & HID_INVERT_STICK_Y) pad.stick_y = flip(pad.stick_y);
+    if (inv & HID_INVERT_CSTICK_X) pad.sub_x = flip(pad.sub_x);
+    if (inv & HID_INVERT_CSTICK_Y) pad.sub_y = flip(pad.sub_y);
+  }
   // Triggers, when the device has spare analog axes for them. A box reports these as buttons
   // instead, which the binding table picks up.
   auto trigger = [&](int i, LONG raw) {

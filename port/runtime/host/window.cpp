@@ -1313,6 +1313,7 @@ std::array<PadBindings, 4> g_ds4_bindings = {};
 // over by the defaults a moment later.
 std::array<PadBindings, 4> g_swpro_bindings = default_swpro_bindings();
 std::array<HidBindings, 4> g_hid_bindings = default_hid_bindings();
+std::array<uint8_t, 4> g_hid_stick_invert{};
 std::array<Deadzone, (size_t)PadFamily::Count> g_deadzones{};
 std::array<PortSource, 4> g_port_sources = default_port_sources();
 std::array<std::string, 4> g_port_device_names;

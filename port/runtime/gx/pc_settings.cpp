@@ -2684,7 +2684,8 @@ void load_pc_settings(RenderOptions& options, int& volume) {
         if (us != std::string::npos) {
           int idx = std::stoi(key.substr(3, us - 3));
           std::string action = key.substr(us + 1);
-          if (idx >= 0 && idx < 4)
+          if (idx >= 0 && idx < 4 && action == "invert") host::g_hid_stick_invert[idx] = (uint8_t)(std::stoi(value) & 15);
+          else if (idx >= 0 && idx < 4)
             for (int i = 0; i < (int)host::BindAction::Count; ++i)
               if (action == kActionNames[i]) host::g_pad_bindings[idx].mask[i] = (unsigned short)std::stoi(value);
         }
@@ -5340,6 +5341,8 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
   for (int idx = 0; idx < 4; ++idx)
     for (int i = 0; i < (int)host::BindAction::Count; ++i)
       file << "\nhid" << idx << "_" << kActionNames[i] << " " << host::g_hid_bindings[idx].mask[i];
+  for (int idx = 0; idx < 4; ++idx)
+    if (host::g_hid_stick_invert[idx]) file << "\nhid" << idx << "_invert " << (int)host::g_hid_stick_invert[idx];
   file << binding_levels_text();
   for (int n = 0; n < 4; ++n)
     file << "\nport" << n << " " << port_source_to_combo(host::g_port_sources[n]);
@@ -11774,6 +11777,20 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           ImGui::SameLine();
           if (settings_widgets::Button("Generic")) { host::g_hid_bindings[tab_index] = host::default_hid_bindings()[0]; changed = true; }
           settings_hint("vJoy and HayBox boxes in DInput mode get their layout automatically.");
+          // Sticks have no binding (they read the pad's own axes): a direction the pad reports reversed
+          // is turned round here. Watch "Axes" below while pressing the direction.
+          {
+            static const char* const names[4] = {"Invert stick left/right", "Invert stick up/down",
+                                                 "Invert C-stick left/right", "Invert C-stick up/down"};
+            for (int k = 0; k < 4; ++k) {
+              bool on = (host::g_hid_stick_invert[tab_index] >> k) & 1;
+              if (k % 2) ImGui::SameLine();
+              if (settings_toggle(names[k], &on)) {
+                host::g_hid_stick_invert[tab_index] = (uint8_t)((host::g_hid_stick_invert[tab_index] & ~(1u << k)) | (on ? 1u << k : 0u));
+                changed = true;
+              }
+            }
+          }
           const host::HidPadAxes axes = host::hidpad_axes(tab_index);
           if (axes.count) {
             std::string line = "Axes:";
