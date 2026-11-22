@@ -25,7 +25,7 @@ jobs:
             New-Item -Force -ItemType Directory "$deps/$dest" | Out-Null
           }
           Copy-Item "$src/sl.*.dll","$src/nvngx_dlss.dll","$src/nvngx_dlssg.dll" "$deps/streamline/bin/x64"
-          Copy-Item "$src/libxess.dll" "$deps/xess/bin"
+          if (Test-Path "$src/libxess.dll") { Copy-Item "$src/libxess.dll" "$deps/xess/bin" }
           Copy-Item "$src/librashader.dll" "$deps/librashader/bin"
           Copy-Item "$src/dxcompiler.dll","$src/dxil.dll" "$deps/dxc/bin"
       - name: Build Windows native host

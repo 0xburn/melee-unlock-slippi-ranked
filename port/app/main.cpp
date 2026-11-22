@@ -1887,6 +1887,7 @@ static int melee_main(int argc, char** argv) {
   } else host::log("timing: sandbox appcontainer unknown (%lu)", (unsigned long)GetLastError());
 #endif
 
+  gfx.pc_settings = !automated;
   g_crash_dialog = !automated;
   o.no_gc_adapter = automated;   // a hidden test run must not take the adapter from a game the player is running
   if (std::getenv("MELEE_NO_GC_ADAPTER")) o.no_gc_adapter = true;   // same, for a visible test window
