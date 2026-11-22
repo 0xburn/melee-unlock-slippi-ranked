@@ -440,18 +440,17 @@ enet_socket_receive (ENetSocket socket,
        return -1;
     }
 
-#ifdef HAS_MSGHDR_FLAGS
-    if (msgHdr.msg_flags & MSG_TRUNC)
-      return -1;
-#endif
-
     if (address != NULL)
     {
         address -> host = (enet_uint32) sin.sin_addr.s_addr;
         address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
     }
 
-    return recvLength;
+#ifdef HAS_MSGHDR_FLAGS
+    if (msgHdr.msg_flags & MSG_TRUNC)
+      return ENET_SOCKET_RECEIVE_TRUNCATED;
+#endif
+    return recvLength == 0 ? ENET_SOCKET_RECEIVE_EMPTY : recvLength;
 }
 
 int
@@ -459,6 +458,7 @@ enet_socketset_select (ENetSocket maxSocket, ENetSocketSet * readSet, ENetSocket
 {
     struct timeval timeVal;
 
+    if (maxSocket < 0 || maxSocket >= FD_SETSIZE) return -1;
     timeVal.tv_sec = timeout / 1000;
     timeVal.tv_usec = (timeout % 1000) * 1000;
 
@@ -512,6 +512,7 @@ enet_socket_wait (ENetSocket socket, enet_uint32 * condition, enet_uint32 timeou
     struct timeval timeVal;
     int selectCount;
 
+    if (socket < 0 || socket >= FD_SETSIZE) return -1;
     timeVal.tv_sec = timeout / 1000;
     timeVal.tv_usec = (timeout % 1000) * 1000;
 
