@@ -1,0 +1,38 @@
+name: Windows tester
+on:
+  push:
+    branches: [build/windows-ranked-551ed9c2]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned native sources
+        run: |
+          git submodule update --init --depth 1 sourceport/extern/melee
+          python tools/prepare_native_sources.py
+      - name: Build Windows native host
+        shell: pwsh
+        run: |
+          $gen = (Resolve-Path windows-build/headers).Path
+          foreach ($file in @('guest_sources.cmake','function_names.cpp','gecko_data.cpp')) { New-Item -Type File "$gen/$file" }
+          $dxc = (Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/bin/*/x64/dxc.exe' | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          cmake -S . -B wh -A x64 -DMELEE_BUILD_EXPERIMENTAL_PORT=ON -DMELEE_SQUAD_STRIKE=OFF "-DPORT_GEN=$gen" "-DMELEE_DXC_EXECUTABLE=$dxc"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build wh --config Release --target melee_source --parallel 4
+      - name: Build x64 game library
+        shell: pwsh
+        run: |
+          $env:PATH = "C:/msys64/ucrt64/bin;$env:PATH"
+          cmake -S sourceport/game -B wg -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DMELEE_SQUAD_STRIKE=OFF
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build wg --target melee_game --parallel 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-fork-binaries
+          path: |
+            wh/port/Release/*
+            wg/**/melee_game.dll
+            wg/**/melee_game.snapexcl
