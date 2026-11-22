@@ -676,8 +676,8 @@ static void check_stick_encodings() {
   CHECK(hid_stick_encoding(-127, 127, 8, 0x80) == kStickOffset);
   CHECK(hid_stick_value(-127, 127, 8, 0x80, kStickOffset) == 0);
   CHECK(hid_stick_value(-127, 127, 8, 0xFF, kStickOffset) == 127);   // full right
-  CHECK(hid_stick_value(-127, 127, 8, 0x00, kStickOffset) == -128);  // full left
-  CHECK(hid_stick_value(-127, 127, 8, 0xFF, kStickOffset, true) == -128);   // Y flipped: up is up
+  CHECK(hid_stick_value(-127, 127, 8, 0x00, kStickOffset) == -127);  // full left, as any 0-255 pad reads it
+  CHECK(hid_stick_value(-127, 127, 8, 0xFF, kStickOffset, true) == -127);   // Y flipped: up is up
   // Unsigned range declared, two's-complement data (0 at rest).
   CHECK(hid_stick_encoding(0, 255, 8, 0x00) == kStickTwos);
   CHECK(hid_stick_value(0, 255, 8, 0x00, kStickTwos) == 0);
