@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
@@ -512,10 +513,37 @@ bool crash_newer_than_launch() {
   const auto sys = std::chrono::time_point_cast<std::chrono::system_clock::duration>(t - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
   return sys > g_launch_time;
 }
+// What the Windows launcher tells the relay in headers (launcher_crash.inl post): without them every Linux
+// report read "Engine: unknown" and carried no crash line or note (1.0.2 reports).
+std::string header_safe(const std::string& text, size_t max) {
+  std::string out;
+  for (unsigned char c : text.substr(0, max)) out += (c >= 0x20 && c < 0x7F) ? (char)c : ' ';
+  return out;
+}
+std::string url_encoded(const std::string& text) {
+  static const char* hex = "0123456789ABCDEF";
+  std::string out;
+  for (unsigned char c : text) {
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') out += (char)c;
+    else { out += '%'; out += hex[c >> 4]; out += hex[c & 15]; }
+  }
+  return out;
+}
 void send_report(const std::string& note) {
   if (g_sending.exchange(true)) return;
   std::thread([note] {
     auto files = launcher::crash::collect(g_dir, g_dir);
+    // A crash file from another version is an old crash, not this one: it went out with every later report
+    // (a 0.9.12 crash sent as 1.0.2's). Its first line names the version it came from.
+    std::string where;
+    for (auto it = files.begin(); it != files.end(); ++it) {
+      if (it->first != "melee_port_crash.txt") continue;
+      const std::string text(it->second.begin(), it->second.end());
+      const std::string first = text.substr(0, text.find('\n'));
+      if (first.find(std::string("version ") + MELEE_PORT_VERSION) == std::string::npos) { files.erase(it); break; }
+      where = first;
+      break;
+    }
     if (!note.empty()) files.emplace_back("note.txt", std::vector<uint8_t>(note.begin(), note.end()));
     const auto zip = launcher::crash::capped_zip(files);
     std::string body;
@@ -524,6 +552,8 @@ void send_report(const std::string& note) {
     launcher::crash::save_report(tmp, (const char*)zip.data(), zip.size());
     const std::string answer = run_capture({"curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST",
         "-H", "Content-Type: application/zip", "-H", std::string("X-MU-Version: ") + MELEE_PORT_VERSION, "-H", "X-MU-Platform: linux",
+        "-H", "X-MU-Engine: Source Port (Linux)", "-H", std::string("X-MU-Kind: ") + (where.empty() ? "logs" : "crash"),
+        "-H", "X-MU-Crash: " + header_safe(where, 300), "-H", "X-MU-Note: " + url_encoded(note.substr(0, 2000)),
         "--data-binary", "@" + tmp, kCrashRelayUrl});
     if (answer == "200") status("Report sent. Thank you.");
     else if (answer == "429") status("A report was sent from this PC a moment ago; try again in two minutes.");
