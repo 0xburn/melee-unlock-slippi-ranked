@@ -72,6 +72,7 @@ inline std::vector<std::string> full_launch_arguments(int argc, char** argv,
     }
     args.emplace_back("--iso");
     args.push_back(disc.string());
+    args.emplace_back("--pc-settings");
   }
   auto default_path = [&](const std::string& flag, const fs::path& path) {
     if (value(flag).empty()) { args.push_back(flag); args.push_back(path.string()); }

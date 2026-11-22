@@ -26,4 +26,6 @@ python3 port/mac/build_full.py --host-only
 
 To package the full app, install `glslangValidator` and `spirv-cross` under `../deps/tools/bin` and run `python3 port/mac/package_full.py`. The bundle includes the host, guest library and runtime assets. The player supplies the ISO separately.
 
+When you open the app in Finder, press **F1** (or **Fn + F1** on a Mac keyboard) to open the in-game settings. In a Training match, press **Tab** to open the Practice menu.
+
 The offline graphics diagnostic has a separate build script, `port/mac/build-app.sh`. It exercises the renderer without loading the full online host.
