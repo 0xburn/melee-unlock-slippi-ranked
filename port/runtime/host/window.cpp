@@ -315,7 +315,7 @@ LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
 void window_prefer_background(bool) {}
 void window_prefer_vulkan(bool) {}   // a Win32 window takes any renderer
 
-void* window_create(int w, int h, const wchar_t* title, bool visible) {
+void* window_create(int w, int h, const wchar_t* title, bool visible, bool /*flip*/) {
   HINSTANCE inst = GetModuleHandleW(nullptr);
   WNDCLASSEXW wc{};
   wc.cbSize = sizeof wc;
