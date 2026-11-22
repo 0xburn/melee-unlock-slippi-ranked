@@ -1681,6 +1681,7 @@ uint32_t h_display_options() {
   if (yougame::console::console_active()) return 0;
   return (gx::low_poly_fighters_active() ? MU_DISPLAY_OPTION_LOW_POLY : 0u) |
          (training_hud_hidden() ? MU_DISPLAY_OPTION_NO_TRAINING_HUD : 0u) |
+         (slippi::online::port_colour_bits() & MU_DISPLAY_OPTION_PORT_COLOURS) |   // online 1v1 port colours
          (gx::player_tags_always_active() ? MU_DISPLAY_OPTION_PLAYER_TAGS : 0u) |
          (gx::fod_reflections_active() ? MU_DISPLAY_OPTION_FOD_REFLECTIONS : 0u) |
          (gx::css_background_free_active() ? MU_DISPLAY_OPTION_CSS_BACKGROUND_FREE : 0u) |

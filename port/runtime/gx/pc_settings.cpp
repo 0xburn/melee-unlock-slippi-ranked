@@ -2292,7 +2292,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   // off, so every later launch booted to an FFA character select that rumbled and turned the picture
   // black and white on X and A. That old key is read as off.
   options.lossless_lag_test = false;
-  options.early_inputs = true;   // a file without the key: on
+  options.early_inputs = false;   // a file without the key: off (1.0.2 on)
 #ifndef MELEE_NO_SLIPPI   // the spectator server is part of the Slippi layer
   options.slippi_spectator = true;   // a file without the key: on, as in Slippi Dolphin
   options.slippi_spectator_port = 51441;
@@ -2425,6 +2425,8 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "mute_voices") gx::RenderOptions::live_mute_voices() = value == "1";
       else if (key == "quickchat") slippi::online::config().chat = std::clamp(std::atoi(value.c_str()), 0, 2);
       else if (key == "directpause") slippi::online::config().direct_pause = value != "0";
+      else if (key == "portcolour1" || key == "portcolour2")
+        slippi::online::config().port_colour[key.back() - '1'] = std::clamp(std::atoi(value.c_str()), -1, 3);
       else if (key == "blockcode1" || key == "blockcode2" || key == "blockcode3")
         slippi::online::config().blocked_codes[key.back() - '1'] = value.substr(0, 16);
       else if (key == "practicecpu") {
@@ -2442,7 +2444,8 @@ void load_pc_settings(RenderOptions& options, int& volume) {
         options.offline_delay_frames = std::clamp(std::stoi(value), 1, 9);
         offline_delay_frames_seen = true;
       }
-      else if (key == "early_inputs") options.early_inputs = value == "1";
+      else if (key == "early_inputs2") options.early_inputs = value == "1";
+      else if (key == "early_inputs") {}   // the old key, saved on by default: not read (render_options.h)
       else if (key == "performance") options.performance_overlay = value == "1";
       else if (key == "showfps") { options.show_fps = value == "1"; showfps_seen = true; }
       // showfps_yougame2: builds before 10-31 saved showfps_yougame 1 on every save (the old default),
@@ -5149,9 +5152,11 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nonlinedelayauto " << (slippi::online::config().auto_delay ? 1 : 0)
        << "\noffline_delay " << (options.offline_delay ? 1 : 0)
        << "\noffline_delay_frames " << options.offline_delay_frames
-       << "\nearly_inputs " << (options.early_inputs ? 1 : 0)
+       << "\nearly_inputs2 " << (options.early_inputs ? 1 : 0)
        << "\nquickchat " << slippi::online::config().chat
        << "\ndirectpause " << (slippi::online::config().direct_pause ? 1 : 0)
+       << "\nportcolour1 " << slippi::online::config().port_colour[0]
+       << "\nportcolour2 " << slippi::online::config().port_colour[1]
        << "\nblockcode1 " << slippi::online::config().blocked_codes[0]
        << "\nblockcode2 " << slippi::online::config().blocked_codes[1]
        << "\nblockcode3 " << slippi::online::config().blocked_codes[2]
@@ -10585,6 +10590,22 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       }
       // Whether Start pauses Direct and Friends matches (Ranked and Unranked never pause).
       if (settings_toggle("Pause in Direct and Friends", &slippi::online::config().direct_pause)) changed = true;
+      {
+        // Online port colour: first and second choice; "Any" leaves the port's own colour.
+        static const char* const colours[] = {"Any", "Red", "Blue", "Yellow", "Green"};
+        for (int k = 0; k < 2; ++k) {
+          int pick = std::clamp(slippi::online::config().port_colour[k], -1, 3) + 1;
+          ImGui::SetNextItemWidth(220.0f);
+          if (settings_combo(k == 0 ? "Port colour, first choice" : "Port colour, second choice", &pick, colours, 5)) {
+            slippi::online::config().port_colour[k] = pick - 1;
+            changed = true;
+          }
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Online 1v1: you show in your first choice (your tag and damage display). If the other player\n"
+                              "picked the same colour, a coin flip gives it to one of you and the other gets their second\n"
+                              "choice. Both players need Melee Unlocked 1.0.2 or newer. Applies from your next connection.");
+        }
+      }
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Off: Start does not pause Direct (Slippi) or Friends (YouGame) matches. Pausing goes off\n"
                           "for everyone in the match when any player turns it off, as long as every player has\n"

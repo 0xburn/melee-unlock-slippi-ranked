@@ -387,21 +387,30 @@ bool hidpad_raw_input(void* device_handle, const uint8_t* report, uint32_t size,
   // reading only when every stick axis the pad has is off-centre as declared and centred in that same reading,
   // as a box whose descriptor and data disagree reads at rest. One stick held at plug-in keeps the declared reading.
   if (s.stick_enc[0] < 0) {
-    int8_t agreed = -1; int seen = 0; bool same = true;
+    int8_t agreed = -1; int seen = 0; bool same = true, all_zero = true;
     for (const int i : used) {
       LONG rest = 0;
       if (!read_axis(i, rest)) continue;
+      if (rest != 0) all_zero = false;
       const int8_t e = hid_stick_encoding(s.axes[i].logical_min, s.axes[i].logical_max, s.axes[i].bits, (unsigned long)rest);
       if (seen++ == 0) agreed = e; else if (e != agreed) same = false;
     }
     const int8_t chosen = seen >= 2 && same && agreed > kStickDeclared ? agreed : kStickDeclared;
-    for (int i = 0; i < 8; ++i) s.stick_enc[i] = chosen;
-    if (chosen != kStickDeclared)
-      host::log("hid pad %d: its sticks read as %s (their declared range puts them off-centre at rest)", index + 1,
-                chosen == kStickTwos ? "two's complement" : "offset binary");
+    // Every stick axis at exactly 0 is a vJoy device whose feeder (b0xx-ahk) has not written its axes yet,
+    // not a stick at rest: deciding there read it as two's complement for good, and its C-stick stuck up or
+    // down (1.0.0 report). Read as declared and decide again on a later report.
+    if (!(all_zero && chosen == kStickTwos)) {
+      for (int i = 0; i < 8; ++i) s.stick_enc[i] = chosen;
+      if (chosen != kStickDeclared)
+        host::log("hid pad %d: its sticks read as %s (their declared range puts them off-centre at rest)", index + 1,
+                  chosen == kStickTwos ? "two's complement" : "offset binary");
+    }
   }
   auto stick = [&](int i, bool flip) -> int8_t {
     const Axis& ax = s.axes[i];
+    // Two's-complement data in a field declared unsigned (a B0XX r2 on firmware v3) is the GameCube's own
+    // signed reading, up positive (its raw values: up +20688, down -20432): not flipped as HID's Y is.
+    if (s.stick_enc[i] == kStickTwos && ax.logical_min >= 0) flip = false;
     return s.stick_enc[i] == kStickDeclared ? to_signed(ax, value, flip)
                                             : hid_stick_value(ax.logical_min, ax.logical_max, ax.bits, (unsigned long)value, s.stick_enc[i], flip);
   };

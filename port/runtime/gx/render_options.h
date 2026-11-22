@@ -287,10 +287,12 @@ struct RenderOptions {
   static bool& live_mute_voices() { static bool value = false; return value; }
   bool offline_delay = false;
   int offline_delay_frames = 2;  // independent of the online delay; enabled separately for old settings
-  // Early inputs (Online, ini key early_inputs, on unless the file says 0): controller changes go
+  // Early inputs (Online, ini key early_inputs2, off unless the file says 1): controller changes go
   // to the other player the moment they happen (host/early_input.h). Applied with
-  // host::early_input::set_enabled when the file is read and when the toggle changes.
-  bool early_inputs = true;
+  // host::early_input::set_enabled when the file is read and when the toggle changes. Off by default
+  // from 1.0.2: players felt eaten or late inputs with it on and none with it off (1.0.0 reports), so
+  // the old key (saved on by default) is not read.
+  bool early_inputs = false;
   // Slippi Dolphin's spectator server (Game tab, Online; ini keys slippi_spectator, on unless the
   // file says 0, and slippi_spectator_port, 51441): the game's recording events on a local ENet
   // port for the Slippi Launcher's Broadcast tab and stream overlays (hle/slippi_spectate.cpp).

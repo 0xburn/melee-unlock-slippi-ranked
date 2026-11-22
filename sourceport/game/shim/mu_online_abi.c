@@ -44,6 +44,17 @@ void mu_hud_pro_tag_abi(int slot, float dx, float width)
     }
 }
 
+/* Online port colours (Game > Online, "Port colour"): the colour each of a 1v1's two players shows on its
+ * tag and damage display, from the host's display options (MU_DISPLAY_OPTION_PORT_COLOURS: 2 bits for
+ * player 1, 2 for player 2; 0 none). Display only: gameplay and the match state keep the real ports. */
+unsigned int mu_display_options(void);
+int mu_port_colour(int slot, int pad_port)
+{
+    const unsigned int w = mu_display_options() >> 28;
+    if (w == 0 || slot < 0 || slot > 1) return pad_port;
+    return slot == 0 ? (int) (w & 3u) : (int) ((w >> 2) & 3u);
+}
+
 void mu_hud_combo_abi(int slot, int link, float percent, int stunned)
 {
     if (mu_host->version >= 21 && mu_host->hud_combo != NULL) {
