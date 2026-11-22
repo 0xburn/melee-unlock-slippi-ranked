@@ -114,6 +114,19 @@ std::string shiftjis_to_utf8(const std::string& s) {
   MultiByteToWideChar(932, 0, s.data(), (int)s.size(), &w[0], n);
   return wide_to_cp(w, CP_UTF8);
 }
+// The game's name-entry field stores two Shift-JIS bytes per character.
+std::string normalize_history_code(const std::string& code) {
+  auto wide = utf8_to_wide(code);
+  for (auto& ch : wide)
+    if (ch >= 0xFF01 && ch <= 0xFF5E) ch -= 0xFEE0;
+  return wide_to_cp(wide, CP_UTF8);
+}
+std::string history_code_for_name_entry(const std::string& code) {
+  auto wide = utf8_to_wide(code);
+  for (auto& ch : wide)
+    if (ch >= 0x21 && ch <= 0x7E) ch += 0xFEE0;
+  return wide_to_cp(wide, 932);
+}
 std::string truncate_length_char(const std::string& input, int length) {
   // Count code points, not bytes (UTF8ToUTF32 / resize / UTF32toUTF8 in Dolphin).
   std::string out;
@@ -445,7 +458,8 @@ void DirectCodes::Load() {
     if (j.is_array()) for (auto& e : j) {
       std::string c = e.is_object() ? str_or(e, "connectCode", "") : e.is_string() ? e.get<std::string>() : "";
       if (c.find("\xEF\xBF\xBD") != std::string::npos) { ++dropped; continue; }
-      if (!c.empty()) codes_.push_back(c);
+      c = normalize_history_code(c);
+      if (!c.empty() && std::find(codes_.begin(), codes_.end(), c) == codes_.end()) codes_.push_back(c);
     }
     if (dropped) host::log("slippi: %d saved connect codes in %s were unreadable (saved by an older Linux build) and were dropped",
                            dropped, std::filesystem::u8path(path_).filename().u8string().c_str());
@@ -458,7 +472,9 @@ void DirectCodes::Save() {
   if (f) f << j.dump(2);
 }
 std::string DirectCodes::get(int index) const { return index >= 0 && index < (int)codes_.size() ? codes_[index] : "1"; }
-void DirectCodes::AddOrUpdateCode(const std::string& code) {
+void DirectCodes::AddOrUpdateCode(const std::string& input) {
+  const std::string code = normalize_history_code(input);
+  if (code.empty()) return;
   codes_.erase(std::remove(codes_.begin(), codes_.end(), code), codes_.end());
   codes_.insert(codes_.begin(), code);
   Save();

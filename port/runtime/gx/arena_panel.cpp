@@ -14,6 +14,7 @@
 #include "test_env.h"
 #include "slippi_arena.h"
 #include "slippi_online.h"
+#include "slippi_net.h"
 #include "native_practice.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -157,7 +158,7 @@ void load_recent() {
   if (!j.is_array()) return;
   for (const auto& e : j)
     if (e.is_object() && e.find("connectCode") != e.end() && e["connectCode"].is_string() && g.recent.size() < 6) {
-      const std::string c = e["connectCode"];
+      const std::string c = slippi::normalize_history_code(e["connectCode"].get<std::string>());
       if (c.find('#') != std::string::npos) g.recent.push_back(c);
     }
 }
@@ -1006,7 +1007,11 @@ void handle_input(const Frame& f, const View& v) {
     for (ImWchar ch : ImGui::GetIO().InputQueueCharacters)
       if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '#') type_key((char)ch);
     if (ImGui::IsKeyPressed(ImGuiKey_Backspace) && !g.code.empty()) g.code.pop_back();
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter)) { submit_code(); return; }
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+      if (g.recent_pick >= 0) g.code = g.recent[g.recent_pick];
+      submit_code();
+      return;
+    }
     if (f.keyboard_pad) {
       step = 0;
       if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) step = 1;

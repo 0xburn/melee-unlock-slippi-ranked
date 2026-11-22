@@ -610,6 +610,8 @@ class Matchmaking {
 // Helpers shared with the EXI device.
 uint64_t time_us();
 uint64_t time_ms();
+std::string normalize_history_code(const std::string& code);
+std::string history_code_for_name_entry(const std::string& code);
 std::string utf8_to_shiftjis(const std::string& s);
 std::string shiftjis_to_utf8(const std::string& s);
 std::string convert_string_for_game(const std::string& input, int length);

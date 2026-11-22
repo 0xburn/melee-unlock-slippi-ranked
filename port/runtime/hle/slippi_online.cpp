@@ -962,7 +962,7 @@ void start_find_match(const uint8_t* payload) {
 }
 
 bool tag_matches_input(const uint8_t* input, uint8_t len, const std::string& tag) {
-  std::string jis = utf8_to_shiftjis(tag);
+  std::string jis = history_code_for_name_entry(tag);
   for (int i = 0; i < len; ++i) {
     uint8_t a = i * 2 < (int)jis.size() ? (uint8_t)jis[i * 2] : 0, b = i * 2 + 1 < (int)jis.size() ? (uint8_t)jis[i * 2 + 1] : 0;
     if (input[i * 3] != a || input[i * 3 + 1] != b) return false;
@@ -1009,7 +1009,7 @@ void handle_name_entry_load(const uint8_t* payload, std::vector<uint8_t>& q) {
     return;
   }
   q.push_back(1);
-  std::string jis = utf8_to_shiftjis(tag);
+  std::string jis = history_code_for_name_entry(tag);
   for (int i = 0; i < 8; ++i) {
     for (int j = i * 2; j < i * 2 + 2; ++j) q.push_back(j < (int)jis.size() ? (uint8_t)jis[j] : 0);
     q.push_back(0);
