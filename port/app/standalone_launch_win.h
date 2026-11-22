@@ -1,4 +1,5 @@
 // Standalone Windows startup and local disc selection.
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
 #if defined(_WIN32) && defined(MELEE_SOURCE_PORT)
@@ -28,7 +29,7 @@ inline fs::path data_dir() {
   wchar_t local[MAX_PATH] = {};
   const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
   if (n == 0 || n >= MAX_PATH) return {};
-  return fs::path(local) / L"MeleeUnlocked";
+  return disc_memory::standalone_dir(fs::path(local));
 }
 
 // Melee NTSC 1.02: game ID GALE01 at the start of the disc, disc revision 2 at offset 7.
@@ -43,7 +44,6 @@ inline bool is_melee_102(const fs::path& iso) {
   return got == sizeof head && std::memcmp(head, "GALE01", 6) == 0 && head[7] == 2;
 }
 
-// The disc an earlier run used: this double-click's own pick first, then any run with --iso, the
 // Each disc needs the 1.02 header. A disc from
 // another run's launcher.ini (possibly a mod run) must also be the unmodified disc, by the same
 // whole-disc check the game itself makes for --vanilla-only (mod_scan identify_vanilla).

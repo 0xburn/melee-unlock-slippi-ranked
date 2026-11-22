@@ -1,5 +1,4 @@
-"""A double-click finds the disc the YouGame app (or any earlier run) already used: disc_memory.h,
-compiled with the host's own compiler, so it runs on any machine."""
+"""Test the standalone profile and disc selection using temporary user data."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -22,6 +21,7 @@ class DiscMemoryTest(unittest.TestCase):
     def test_bare_launch_uses_it(self):
         launch = (ROOT / "port/app/standalone_launch_win.h").read_text(encoding="utf-8")
         self.assertIn('#include "disc_memory.h"', launch)
+        self.assertIn("return disc_memory::standalone_dir(fs::path(local));", launch)
         self.assertIn("fs::path iso = earlier_disc(data.parent_path());", launch)
         self.assertIn("return is_melee_102(disc);", launch)   # a remembered disc is checked like a picked one
         self.assertIn("ofn.hwndOwner = owner.hwnd;", launch)   # the picker is centered, not at 0,0

@@ -1,5 +1,4 @@
-// disc_memory.h: a double-click finds the disc an earlier run used, the YouGame app's AppContainer
-// runs included, best place first, and skips a remembered file that no longer verifies.
+// A direct launch finds its existing profile and a verified, previously selected disc.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "../app/disc_memory.h"
 #include <chrono>
@@ -55,6 +54,17 @@ int main(int argc, char** argv) {
   const auto chosen = local / "MeleeUnlocked" / "standalone.ini";
   const auto launcher = local / "MeleeUnlocked" / "launcher.ini";
   const auto prior = local / "MeleeUnlocked-YouGame" / "standalone.ini";
+  // A launcher.ini alone must not hide an earlier standalone player's saves. A fork profile wins
+  // when the player has already used both. Empty card folders on first launch are not saved data.
+  CHECK(disc_memory::standalone_dir({}).empty());
+  CHECK(disc_memory::standalone_dir(local) == chosen.parent_path());
+  write(launcher, "language=en\n");
+  fs::create_directories(chosen.parent_path() / "User/GC/CardA/VanillaOnly");
+  write(prior.parent_path() / "User/GC/CardA/VanillaOnly/GALE01.gci", "old save");
+  CHECK(disc_memory::standalone_dir(local) == prior.parent_path());
+  CHECK(disc_memory::places(local).front().ini == prior);
+  write(chosen.parent_path() / "port-settings.ini", "volume 58\n");
+  CHECK(disc_memory::standalone_dir(local) == chosen.parent_path());
   write(prior, "iso=" + good.u8string() + "\n");
   CHECK(disc_memory::first_verified(disc_memory::places(local), decode, verify, unmodified) == good);
   write(launcher, "iso=" + modded.u8string() + "\n");

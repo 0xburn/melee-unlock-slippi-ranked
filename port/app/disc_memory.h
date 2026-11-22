@@ -40,12 +40,41 @@ enum class Encoding { Utf8, Ansi };
 // full_check: the disc may be from a mod run, so the header is not enough (see above).
 struct Place { fs::path ini; Encoding encoding; bool full_check = true; };
 
+inline fs::path prior_standalone_dir(const fs::path& local_app_data) {
+  return local_app_data / "MeleeUnlocked-YouGame";
+}
+
+// The Windows game executable used this older folder even when started on its own. Keep a
+// returning player's complete profile together, including controller settings, saves and replays.
+// Merely opening the launcher creates launcher.ini, so that file does not identify a game profile.
+inline fs::path standalone_dir(const fs::path& local_app_data) {
+  if (local_app_data.empty()) return {};
+  const auto current = local_app_data / "MeleeUnlocked";
+  const auto prior = prior_standalone_dir(local_app_data);
+  auto has_profile = [](const fs::path& dir) {
+    std::error_code ec;
+    for (const auto* marker : {"standalone.ini", "port-settings.ini", "User/Slippi/user.json"})
+      if (fs::is_regular_file(dir / marker, ec)) return true;
+    const auto card = dir / "User" / "GC" / "CardA";
+    for (const auto& folder : {card, card / "VanillaOnly"}) {
+      for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code kind;
+        if (it->path().extension() == ".gci" && it->is_regular_file(kind)) return true;
+      }
+    }
+    return false;
+  };
+  return !has_profile(current) && has_profile(prior) ? prior : current;
+}
+
 inline std::vector<Place> places(const fs::path& local_app_data) {
   if (local_app_data.empty()) return {};
   const auto current = local_app_data / "MeleeUnlocked";
-  return {{current / "standalone.ini", Encoding::Utf8, false},
+  const auto prior = prior_standalone_dir(local_app_data);
+  const auto profile = standalone_dir(local_app_data);
+  return {{profile / "standalone.ini", Encoding::Utf8, false},
           {current / "launcher.ini", Encoding::Ansi, true},
-          {local_app_data / "MeleeUnlocked-YouGame" / "standalone.ini", Encoding::Utf8, false}};
+          {(profile == prior ? current : prior) / "standalone.ini", Encoding::Utf8, false}};
 }
 
 // Records the disc a double-click used in standalone.ini (UTF-8), through a temporary file.
