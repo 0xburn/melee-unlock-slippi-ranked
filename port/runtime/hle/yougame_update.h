@@ -91,7 +91,12 @@ inline std::string current(const nlohmann::json& reply) {
 // system yet: the app has nothing to update to, and offering Update only answered "not out yet"
 // (Linux on 1.0.0, player report 11-22). Said plainly, and no Update is offered.
 inline bool listed_newer(const nlohmann::json& refused, const std::string& ours) {
-  return newer(current(refused), ours);
+  // Only a release number (x.y.z or longer) names a version of this game: YouGame's own build
+  // numbers ("103") are dotted too, and read as numbers they beat every release.
+  const std::string listed = current(refused);
+  size_t dots = 0;
+  for (char c : listed) dots += c == '.';
+  return dots >= 2 && newer(listed, ours);
 }
 inline std::string not_listed_text(const std::string& ours) {
 #if defined(__linux__)
