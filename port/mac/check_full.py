@@ -162,7 +162,7 @@ def seed_build():
             str(BUILD/'objects/port_runtime_gx_gx_shader.cpp.o'),str(BUILD/'objects/port_runtime_gx_gx_texture.cpp.o'),
             '-o',str(exe)],stdout=log,stderr=subprocess.STDOUT)
     if built.returncode: return built.returncode
-    return checked_run([str(exe),str(ROOT/'spike/shader-seed'),str(ROOT/'spike/shader-seed'),'2',
+    return checked_run([str(exe),str(ROOT/'port/mac/shader-recipes'),str(work/'seed'),'2',
                         str(EXE.parent.parent/'Resources/bin')],work,env,timeout=120)
 
 

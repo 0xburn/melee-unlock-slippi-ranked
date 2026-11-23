@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     uint64_t header[3]{};
     if (data.size() < sizeof header) throw std::runtime_error("missing seed recipes");
     std::memcpy(header, data.data(), sizeof header);
-    if (header[0] != 0x3150524C47505847ull || header[1] > 16384 ||
+    if (header[0] != 0x3150524C47505847ull || header[1] == 0 || header[1] > 16384 ||
         data.size() != sizeof header + header[1] * sizeof(ProgramRecipe) ||
         gx::hash_bytes(data.data() + sizeof header, data.size() - sizeof header) != header[2])
       throw std::runtime_error("invalid seed recipes/ABI/hash");

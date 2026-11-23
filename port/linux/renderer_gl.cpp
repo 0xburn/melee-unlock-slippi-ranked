@@ -691,7 +691,7 @@ void main() {
     shader_log("opengl: shader seed added %zu shaders and %zu program recipes", copied, added);
   }
   // Every recorded program is built again at start. macOS keeps no program binaries, so a big cache (or the shipped
-  // seed) would hold the first frame for seconds: there the start builds what fits in MELEE_PREWARM_BOOT_MS (500),
+  // seed) would hold the first frame for seconds: there the start builds what fits in MELEE_PREWARM_BOOT_MS (4000),
   // the player's own programs first, and the rest are built between frames, MELEE_PREWARM_FRAME_MS (4) per frame.
   // Missing translations are queued; ready GLSL shares the per-frame compile budget. Elsewhere all recipes are visited at start.
   void prewarm(bool prewarm_only) {
@@ -704,7 +704,7 @@ void main() {
       saved_recipes_ = recipes_.size();
     }
     pending_ = recipes_; pending_next_ = 0;
-    const double boot_ms = prewarm_only ? std::numeric_limits<double>::max() : env_ms("MELEE_PREWARM_BOOT_MS", 500);
+    const double boot_ms = prewarm_only ? std::numeric_limits<double>::max() : env_ms("MELEE_PREWARM_BOOT_MS", 4000);
     const size_t count = pending_.size();
     const double ms = prewarm_some(boot_ms);
     shader_log("opengl: prewarmed %zu programs from %zu recipes before guest startup in %.1f ms%s%s",

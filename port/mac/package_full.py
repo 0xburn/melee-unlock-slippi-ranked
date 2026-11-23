@@ -1,6 +1,7 @@
 """Unsigned M3 app; package existing inputs only, never fetch/build game or dependencies."""
 from pathlib import Path
 from build_full import BUILD, GAME_LIBRARY, squad_enabled
+import concurrent.futures
 import argparse, hashlib, json, os, plistlib, runpy, shutil, subprocess, sys
 ROOT = Path(__file__).resolve().parents[2]
 APP = BUILD/'MeleeUnlocked.app'
@@ -15,6 +16,22 @@ def copy(src, dst):
         shutil.copytree(src, dst, symlinks=False, ignore=shutil.ignore_patterns('.git*', 'README.md'))
     else:
         shutil.copy2(src, dst, follow_symlinks=True)
+
+def build_shader_seed(destination, tools):
+    # Recipes are scale independent. Generated GLSL uses the target EFB height.
+    builder = BUILD/'seed-build'
+    subprocess.run(['/usr/bin/clang++', '-arch', 'x86_64', '-mmacosx-version-min=15.0',
+                    '-std=c++17', '-O2', '-pthread', '-I'+str(ROOT/'port/runtime/gx'),
+                    ROOT/'port/mac/seed_build.cpp', BUILD/'objects/port_runtime_gx_gx_shader.cpp.o',
+                    BUILD/'objects/port_runtime_gx_gx_texture.cpp.o', '-o', builder], check=True)
+
+    def generate(scale):
+        subprocess.run([builder, ROOT/'port/mac/shader-recipes', destination,
+                        str(scale), tools], check=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(generate, range(1, 7)))
+
 
 def main():
     global BUILD, APP
@@ -48,12 +65,11 @@ def main():
     copy(BUILD/'libusb-1.0.dylib', contents/'Frameworks/libusb-1.0.dylib')
     copy(ROOT/'port/third_party/libusb/COPYING', res/'licenses/libusb.txt')
     copy(GAME_LIBRARY,res/'melee_game.so')
-    if (ROOT/'spike/shader-seed').is_dir():
-        copy(ROOT/'spike/shader-seed',res/'shader-seed')
     copy(GAME_LIBRARY.with_suffix('.snapexcl'),res/'melee_game.snapexcl')
     for tool in ['glslangValidator','spirv-cross']:
         # copy2 follows the glslang symlink (equivalent to cp -L).
         copy(ROOT.parent/'deps/tools/bin'/tool,res/'bin'/tool)
+    build_shader_seed(res/'shader-seed', res/'bin')
     # Linux release's runtime asset list, mapped to Resources. All mutable state lives in --user-dir.
     shutil.copytree(GAME_ASSETS/'Sys',res/'Sys',dirs_exist_ok=True,symlinks=False)
     for src, dst in [('port/slippi_sys','Sys'), ('port/slippi_sys_playback','SysPlayback'),
