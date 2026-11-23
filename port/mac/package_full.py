@@ -1,9 +1,8 @@
 """Unsigned M3 app; package existing inputs only, never fetch/build game or dependencies."""
 from pathlib import Path
-from build_full import GAME_LIBRARY
+from build_full import BUILD, GAME_LIBRARY, squad_enabled
 import argparse, hashlib, json, os, plistlib, runpy, shutil, subprocess, sys
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT/'build-mac-full'
 APP = BUILD/'MeleeUnlocked.app'
 # The ELF, exclusions, and Sys assets must come from the same native build.
 GAME_ASSETS = GAME_LIBRARY.parent
@@ -35,6 +34,8 @@ def main():
         raise SystemExit('Packaging requires build_full.py with port/app/main.cpp; dev spike hosts cannot ship')
     if built.get('version') != version or built.get('host_sha256') != hashlib.sha256((BUILD/'MeleeUnlocked').read_bytes()).hexdigest():
         raise SystemExit('Full host does not match the current version/build manifest; rebuild first')
+    if bool(built.get('squad_strike', False)) != squad_enabled():
+        raise SystemExit('Squad Strike settings differ between the selected build and its manifest')
     for needed in [GAME_LIBRARY, GAME_LIBRARY.with_suffix('.snapexcl'), GAME_ASSETS/'Sys/GC/dsp_coef.bin']:
         if not needed.is_file():
             raise SystemExit(f'Missing native build input: {needed}')

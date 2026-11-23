@@ -2,7 +2,13 @@
 from pathlib import Path
 import argparse, concurrent.futures, hashlib, json, os, shlex, shutil, subprocess, sys, time
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / 'build-mac-full'
+def squad_enabled():
+    return os.environ.get('MELEE_SQUAD_STRIKE', 'ON').upper() in ('ON', '1', 'TRUE')
+
+def build_dir(squad):
+    return ROOT / ('build-mac-full-squad' if squad else 'build-mac-full')
+
+BUILD = build_dir(squad_enabled())
 DEFAULT_GAME_LIBRARY = ROOT / 'build-mac-input' / 'melee_game.so'
 GAME_LIBRARY = Path(os.environ.get('MELEE_GAME_LIBRARY', str(DEFAULT_GAME_LIBRARY))).resolve()
 SDL = ROOT.parent / 'deps/sdl2'
@@ -30,10 +36,14 @@ def main():
     global BUILD
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host-only', action='store_true', help='Compile and link the host without game assets or packaging')
+    parser.add_argument('--squad-strike', action=argparse.BooleanOptionalAction, default=squad_enabled(),
+                        help='Build offline Squad Strike; match the guest library setting')
     args = parser.parse_args()
+    BUILD = build_dir(args.squad_strike)
+    os.environ['MELEE_SQUAD_STRIKE'] = 'ON' if args.squad_strike else 'OFF'
     os.chdir(ROOT)
     BUILD.mkdir(exist_ok=True)
-    gen = BUILD / 'gen/port-generated'
+    gen = ROOT / 'build-mac-full/gen/port-generated'
     needed_inputs = [SDL/'include/SDL2/SDL.h', SDL/'lib/libSDL2-2.0.0.dylib', gen/'hle_decls.h', gen/'guest_symbols.h']
     if not args.host_only:
         needed_inputs += [GAME_LIBRARY, GAME_LIBRARY.with_suffix('.snapexcl'), GAME_LIBRARY.parent/'Sys/GC/dsp_coef.bin']
@@ -72,6 +82,8 @@ def main():
            '-DMELEE_PLAYBACK_GCT_BASE=0u','-DMELEE_PLAYBACK_GCT_SIZE=0u','-DGX_SHADER_CACHE_VERSION="mac-gl-1"',
            # The Vulkan renderer (gx_vulkan.cpp, MoltenVK on the Mac) opens the loader at run time: headers only.
            '-DIMGUI_IMPL_VULKAN_NO_PROTOTYPES']
+    if args.squad_strike:
+        cpp.append('-DMU_SQUAD=1')
     for p in ['port/linux/compat','port/linux','port/app','port/runtime/ppc','port/runtime/hle','port/runtime/host',
               'port/runtime/gx','port/runtime/mu_net','port/runtime/abi','port/third_party','native',str(BUILD/'gen'),
               str(gen),'port/third_party/enet/include','port/third_party/monocypher','port/third_party/imgui','port/third_party/onnxruntime/include',
@@ -86,6 +98,8 @@ def main():
         obj = objects/(str(source).replace('/','_')+'.o')
         dep, stamp = obj.with_suffix('.d'), obj.with_suffix('.flags')
         opts = [*flags, *(['-std=c++17'] if source.suffix == '.mm' else cflags if source.suffix == '.c' else cpp)]
+        if source.suffix == '.mm' and args.squad_strike:
+            opts.append('-DMU_SQUAD=1')
         if source.as_posix() != 'port/app/main.cpp':
             opts += ['-mavx2', '-mfma']
         if source.as_posix().startswith('port/third_party/zstd/') or source.as_posix() == 'port/app/replay_slpz.cpp':
@@ -122,7 +136,7 @@ def main():
                     '-o',str(BUILD/'MeleeUnlocked')],check=True)
     (BUILD/'build-manifest.json').write_text(json.dumps({'version':version,
         'build_script':'port/mac/build_full.py',
-        'host_entry':'port/app/main.cpp',
+        'host_entry':'port/app/main.cpp', 'squad_strike':args.squad_strike,
         'host_sha256':hashlib.sha256((BUILD/'MeleeUnlocked').read_bytes()).hexdigest()},indent=2)+'\n')
     print('Full host:',BUILD/'MeleeUnlocked',flush=True)
     if args.host_only:

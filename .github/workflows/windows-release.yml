@@ -1,12 +1,33 @@
 name: Build Windows release
-on: workflow_dispatch
+run-name: Windows ${{ inputs.guest_release }}
+on:
+  workflow_dispatch:
+    inputs:
+      guest_sha256:
+        description: SHA-256 of guest.lib built with windows-build/build_static_guest.py
+        type: string
+        required: true
+      guest_release:
+        description: Draft input release containing the compiled guest.lib
+        type: string
+        default: build-input-1.0.5-windows
+        required: true
 permissions:
   contents: read
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        baseline: [AVX2, SSE2]
+    # GitHub draft releases are visible only to repository writers.
+    permissions:
+      contents: write
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Prepare pinned native sources
         run: |
           git submodule update --init --depth 1 sourceport/extern/melee
@@ -18,6 +39,8 @@ jobs:
         run: |
           gh release download v1.0.5 --repo Hero88go/melee-unlocked -p '*win64.zip'
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $sha = (Get-FileHash MeleeUnlocked-1.0.5-win64.zip -Algorithm SHA256).Hash
+          if ($sha -ne '95454dc94077053d19c1d796b8a55b6f9429f8fa151f040695a6944fa6856276') { throw 'Upstream Windows archive checksum mismatch' }
           Expand-Archive MeleeUnlocked-1.0.5-win64.zip -DestinationPath upstream
           $src = 'upstream/MeleeUnlocked-1.0.5'
           $deps = 'port/third_party'
@@ -28,22 +51,54 @@ jobs:
           if (Test-Path "$src/libxess.dll") { Copy-Item "$src/libxess.dll" "$deps/xess/bin" }
           Copy-Item "$src/librashader.dll" "$deps/librashader/bin"
           Copy-Item "$src/dxcompiler.dll","$src/dxil.dll" "$deps/dxc/bin"
-      - name: Build Windows native host
+      - name: Prepare NVIDIA NGX SDK
+        shell: pwsh
+        run: |
+          git init ngx-sdk
+          git -C ngx-sdk remote add origin https://github.com/NVIDIA/DLSS.git
+          git -C ngx-sdk sparse-checkout set include lib/Windows_x86_64/x64
+          git -C ngx-sdk fetch --depth=1 --filter=blob:none origin 9981c6350dc58c0ce21f024fd65e31e851c31689
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C ngx-sdk checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item ngx-sdk/include -Destination port/third_party/ngx/ -Recurse -Force
+          New-Item -Force -ItemType Directory port/third_party/ngx/lib
+          Copy-Item ngx-sdk/lib/Windows_x86_64/x64/nvsdk_ngx_d.lib port/third_party/ngx/lib
+      - name: Fetch the locally compiled Static Recomp guest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GUEST_RELEASE: ${{ inputs.guest_release }}
+          GUEST_SHA256: ${{ inputs.guest_sha256 }}
+        run: |
+          if ($env:GUEST_SHA256 -notmatch '^[a-fA-F0-9]{64}$' -or $env:GUEST_RELEASE -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw 'Invalid guest artifact identifier or SHA-256' }
+          $release = gh release view $env:GUEST_RELEASE --repo $env:GITHUB_REPOSITORY --json isDraft | ConvertFrom-Json
+          if (!$release.isDraft) { throw 'Compiled guest input must come from a draft release' }
+          gh release download $env:GUEST_RELEASE --repo $env:GITHUB_REPOSITORY --pattern guest.lib --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ((Get-FileHash "$env:RUNNER_TEMP/guest.lib").Hash -ne $env:GUEST_SHA256) { throw 'Compiled guest SHA-256 mismatch' }
+      - name: Build Windows hosts
         shell: pwsh
         run: |
           $gen = (Resolve-Path windows-build/headers).Path
-          foreach ($file in @('guest_sources.cmake','function_names.cpp','gecko_data.cpp')) { New-Item -Type File "$gen/$file" }
+          New-Item -Type File "$gen/guest_sources.cmake"
           $dxc = (Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/bin/*/x64/dxc.exe' | Sort-Object FullName -Descending | Select-Object -First 1).FullName
-          cmake -S . -B wh -A x64 -DMELEE_BUILD_EXPERIMENTAL_PORT=ON -DMELEE_REQUIRE_STREAMLINE=ON -DMELEE_SQUAD_STRIKE=OFF "-DPORT_GEN=$gen" "-DMELEE_DXC_EXECUTABLE=$dxc"
+          cmake -S . -B wh -A x64 -DMELEE_BUILD_EXPERIMENTAL_PORT=ON -DMELEE_REQUIRE_STREAMLINE=ON -DMELEE_SQUAD_STRIKE=ON -DMELEE_ENABLE_DLSS5=ON -DMELEE_CPU_BASELINE=${{ matrix.baseline }} "-DMELEE_PREBUILT_GUEST=$env:RUNNER_TEMP/guest.lib" "-DPORT_GEN=$gen" "-DMELEE_DXC_EXECUTABLE=$dxc"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build wh --config Release --target melee_unlocked melee_source --parallel 4
+          cmake --build wh --config Release --target melee_unlocked melee_source melee_port --parallel 4
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-fork-binaries
+          name: windows-fork-binaries-${{ matrix.baseline }}
           path: |
-            wh/port/Release/*
+            wh/port/Release/*.exe
+            wh/port/Release/*.dll
+            wh/port/Release/*.dxil
 
   game:
+    strategy:
+      fail-fast: false
+      matrix:
+        baseline: [AVX2, SSE2]
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -55,12 +110,12 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "C:/msys64/ucrt64/bin;$env:PATH"
-          cmake -S sourceport/game -B wg -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DMELEE_SQUAD_STRIKE=OFF
+          cmake -S sourceport/game -B wg -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DMELEE_SQUAD_STRIKE=ON -DMELEE_CPU_BASELINE=${{ matrix.baseline }}
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build wg --target melee_game --parallel 4
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-fork-game
+          name: windows-fork-game-${{ matrix.baseline }}
           path: |
             wg/melee_game.dll
             wg/melee_game.snapexcl
@@ -72,29 +127,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: windows-fork-game
-          path: game
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-fork-binaries
-          path: host
+          pattern: windows-fork-*
+          path: inputs
       - name: Package and run
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download v1.0.5 --repo Hero88go/melee-unlocked -p '*win64.zip'
-          $hostDir = (Get-ChildItem host -Recurse -Filter melee_source.exe).DirectoryName
-          $gameDir = (Get-ChildItem game -Recurse -Filter melee_game.dll).DirectoryName
-          python windows-build/package.py --host "$hostDir" --game "$gameDir" --assets MeleeUnlocked-1.0.5-win64.zip --out Melee-Unlocked-Windows-x64.zip
+          $version = (Get-Content VERSION -Raw).Trim()
+          $hostDir = (Get-ChildItem inputs/windows-fork-binaries-AVX2 -Recurse -Filter melee_source.exe).DirectoryName
+          $compat = (Get-ChildItem inputs/windows-fork-binaries-SSE2 -Recurse -Filter melee_source.exe).DirectoryName
+          $game = (Get-ChildItem inputs/windows-fork-game-AVX2 -Recurse -Filter melee_game.dll).FullName
+          $gameCompat = (Get-ChildItem inputs/windows-fork-game-SSE2 -Recurse -Filter melee_game.dll).FullName
+          python windows-build/package.py --exe "$hostDir/melee_port.exe" --compat-exe "$compat/melee_port.exe" --source-exe "$hostDir/melee_source.exe" --source-compat-exe "$compat/melee_source.exe" --source-dll "$game" --source-compat-dll "$gameCompat" --cache upstream-assets --out packaged
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Expand-Archive Melee-Unlocked-Windows-x64.zip -DestinationPath test
-          Set-Location test/Melee-Unlocked-Windows
+          Expand-Archive "packaged/MeleeUnlocked-$version-win64.zip" -DestinationPath test
+          Set-Location "test/MeleeUnlocked-$version"
           foreach ($name in @('sl.interposer.dll','sl.common.dll','sl.dlss.dll','nvngx_dlss.dll','sl.dlss_g.dll','nvngx_dlssg.dll','sl.reflex.dll')) {
             if (!(Test-Path $name)) { throw "Missing graphics runtime: $name" }
           }
-          $version = & .\melee_source.exe --version | Out-String
-          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne '1.0.5') { throw "Windows startup failed ($LASTEXITCODE, $version)" }
+          foreach ($exe in @('melee_source.exe','melee_port.exe')) {
+            $reported = & ".\$exe" --version | Out-String
+            if ($LASTEXITCODE -ne 0 -or $reported.Trim() -ne $version) { throw "$exe startup failed ($LASTEXITCODE, $reported)" }
+          }
           python -c "import ctypes, pathlib; ctypes.WinDLL(str(pathlib.Path('melee_game.dll').resolve()))"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $env:MELEE_LAUNCHER_TEST = '1'
@@ -113,4 +168,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Melee-Unlocked-Windows-x64
-          path: Melee-Unlocked-Windows-x64.zip
+          path: packaged/*-win64.zip

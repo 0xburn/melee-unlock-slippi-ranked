@@ -2,13 +2,13 @@
 
 The full host targets x86-64 on macOS 15 or later. Apple Silicon uses Rosetta. Supply a Melee NTSC 1.02 ISO, an x86-64 SDL2 development distribution under `../deps/sdl2`, and a matching x86-64 Linux game library built from the fork. Set `MELEE_GAME_LIBRARY` to the path of `melee_game.so`. Its `melee_game.snapexcl` and `Sys/GC/dsp_coef.bin` must be beside the library in the layout produced by the guest build.
 
-Build the native game library on x86-64 Linux with GCC and Ninja. The host checks the library's Squad Strike flag at startup. The macOS host uses the off setting. Its ELF loader requires the Linux stack canary calls to be disabled.
+Build the native game library on x86-64 Linux with GCC and Ninja. The host checks the library's Squad Strike flag at startup. The host and guest both enable offline Squad Strike by default. To build a smaller variant, configure the guest with `-DMELEE_SQUAD_STRIKE=OFF` and set `MELEE_SQUAD_STRIKE=OFF` for the Mac build and packaging steps. Its ELF loader requires the Linux stack canary calls to be disabled.
 
 ```sh
 git submodule update --init sourceport/extern/melee
 python3 tools/prepare_native_sources.py
 cmake -S sourceport/game -B build-mac-guest -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DMELEE_SQUAD_STRIKE=OFF \
+  -DCMAKE_BUILD_TYPE=Release -DMELEE_SQUAD_STRIKE=ON \
   -DCMAKE_C_FLAGS=-fno-stack-protector -DCMAKE_CXX_FLAGS=-fno-stack-protector
 cmake --build build-mac-guest --target melee_game
 ```
