@@ -4,7 +4,15 @@ import re
 from pathlib import Path
 
 
-def verify_generated_gct(exe: Path) -> None:
+def verify_generated_gct(exe: Path, ini: Path | None = None) -> None:
+    if ini is not None:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "port/recomp"))
+        from gecko import generate_gct, load_ini
+        table, *_ = generate_gct(load_ini(ini))
+        if not table or bytes(table) not in exe.read_bytes():
+            raise ValueError(f"{exe.name} does not embed the Gecko table from {ini}")
+        return
     exe = exe.resolve()
     # build-root/port/Release/melee_port.exe
     cache = exe.parents[2] / "CMakeCache.txt"

@@ -1424,7 +1424,7 @@ void rtx_pack_download(const std::string& game_dir_utf8) {
   std::string sha, file;
   if (!rtx_pack_record(game_dir_utf8, &sha, &file)) return;
   const std::string version = file.substr(14, file.find("-RTX-Pack") - 14);
-  const std::string url = "https://github.com/0xburn/melee-unlock-slippi-ranked/releases/download/parts-" + version + "/" + file;
+  const std::string url = "https://github.com/Hero88go/melee-unlocked/releases/download/parts-" + version + "/" + file;
   fetch_part(g_rtx_pack, "the RTX Pack", kRtxPackSize, url, sha, game_dir_utf8, "rtxpack-download",
              [sha](const std::filesystem::path& files, const std::filesystem::path& dir) -> std::string {
                namespace fs = std::filesystem;

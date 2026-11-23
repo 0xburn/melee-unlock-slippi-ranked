@@ -37,7 +37,7 @@ online play.
 You need your own Melee NTSC 1.02 ISO. Nothing from the game is included.
 
 Not affiliated with, endorsed by, or supported by the Slippi team, Nintendo or HAL Laboratory.
-Bugs and questions about this build go to https://github.com/0xburn/melee-unlocked/issues,
+Bugs and questions about this build go to https://github.com/0xburn/melee-unlock-slippi-ranked/issues,
 not to the Slippi team.
 
 Install: two ways, pick one
@@ -73,7 +73,7 @@ The launcher's Build tab picks the Game Build: the Source Port (the game built f
 Static Recomp (the original game code translated ahead of time; mod discs such as Akaneia run on
 it). The launcher downloads the matching compatibility build for older processors when needed.
 For manual installs, extract MeleeUnlocked-{version}-compat-win64.zip from
-https://github.com/0xburn/melee-unlocked/releases/tag/parts-{version} into this folder.
+https://github.com/0xburn/melee-unlock-slippi-ranked/releases/tag/parts-{version} into this folder.
 The Lab view's fighters download the first time the Lab view is used, and Fight a pro's matchup
 AIs the first time that matchup is played; each pro's own AI is included.
 Intel XeSS and AMD FSR are optional downloads from Settings > Video. Optional experimental DLSS 5 uses
@@ -104,7 +104,7 @@ installs the GameCube adapter driver). For offline play it is not required. Unra
 and Teams work against players on regular Slippi Dolphin.
 
 Crashes: after a crash the launcher offers to send the report (crash text, minidump and logs) with
-one click. Other bugs: https://github.com/0xburn/melee-unlocked/issues with melee_port.log,
+one click. Other bugs: https://github.com/0xburn/melee-unlock-slippi-ranked/issues with melee_port.log,
 port-settings.ini and the steps to reproduce.
 
 Watching replays: drop a .slp file onto WatchReplay.bat. That runs melee_port_playback.exe, a
@@ -146,7 +146,7 @@ License and source code
 -----------------------
 Melee Unlocked is free software under the GNU General Public License, version 3 or (at your
 option) any later version: licenses\\COPYING.txt, with the notices in licenses\\NOTICE.txt.
-Source code for this version: https://github.com/0xburn/melee-unlocked/tree/v{version}
+Source code for this version: https://github.com/0xburn/melee-unlock-slippi-ranked/tree/v{version}
 The NVIDIA (DLSS, Streamline, Reflex), Intel (XeSS) and AMD (FSR) runtime files and the Microsoft Visual C++
 runtime files in this folder are not covered by the GPL; their own terms are in licenses\\.
 ASIO is a registered trademark of Steinberg Media Technologies GmbH. The SDK and host-helper
@@ -159,7 +159,7 @@ licenses\\dsp-coefficients.txt. A player's own dump in User\\GC\\dsp_coef.bin ta
 def readme_text(version, playback_exe, local_candidate=False):
     text = README.format(version=version)
     if local_candidate:
-        public_source = f"Source code for this version: https://github.com/0xburn/melee-unlocked/tree/v{version}"
+        public_source = f"Source code for this version: https://github.com/0xburn/melee-unlock-slippi-ranked/tree/v{version}"
         text = text.replace(public_source, "Source code for this local candidate is not published yet.")
     if not playback_exe:
         start = text.find("\nWatching replays:")
@@ -299,6 +299,7 @@ def main():
     ap.add_argument("--rtx-pack", type=Path, default=None,
                     help="MeleeUnlocked-<version>-RTX-Pack.zip, built outside this repository: its SHA-256 goes in "
                          "rtxpack.sha256 so PC settings offers it (host/updater.cpp rtx_pack_download)")
+    ap.add_argument("--gct-ini", type=Path, help="Source of the embedded Gecko table for prebuilt Windows artifacts")
     args = ap.parse_args()
     if not args.compat_exe and not args.skip_compat_exe:
         raise SystemExit("missing --compat-exe (the SSE2 build for pre-Haswell/pre-Ryzen CPUs). "
@@ -317,7 +318,7 @@ def main():
     for executable in (args.exe, args.compat_exe):
         if executable is not None:
             try:
-                verify_generated_gct(executable)
+                verify_generated_gct(executable, args.gct_ini)
             except ValueError as error:
                 raise SystemExit(str(error)) from error
     name = f"MeleeUnlocked-{args.version}"
@@ -510,7 +511,8 @@ def main():
         "nvngx_dlssnr.dll. Updates never replace a file here.\n", encoding="utf-8")
     # App-local Visual C++ runtime (Microsoft permits redistributing these next to the exe): without it
     # a PC that never installed the VC++ 2015-2022 redistributable closes the game before it can log.
-    redist = sorted(Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Redist\MSVC").glob("*/x64/Microsoft.VC143.CRT"))
+    redist = sorted(Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022").glob("*/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT"))
+    redist += sorted(Path(r"C:\Program Files\Microsoft Visual Studio\2022").glob("*/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT"))
     if not redist:
         raise SystemExit("Visual C++ runtime redistributable not found (VC\\Redist\\MSVC\\*\\x64\\Microsoft.VC143.CRT)")
     for dll in redist[-1].glob("*.dll"):
@@ -549,7 +551,7 @@ def main():
     recipes = ROOT / "shadercache/recipes.bin"
     if recipes.is_file():
         (folder / "shadercache").mkdir()
-        shutil.copy2(recipes, folder / "shadercache/recipes.bin")
+        shutil.copy2(recipes, folder / "shadercache/recipes.shipped.bin")
         print(f"pipeline recipes: {recipes} ({recipes.stat().st_size} bytes)")
     # Vulkan: the warmed SPIR-V and its pipeline recipes, from a run on Vulkan with this build
     # (gx_vulkan.cpp prewarm_pipelines). SPIR-V is the same on every GPU and driver; pipelines.bin is
@@ -700,8 +702,8 @@ def main():
     # The RTX Pack (NVIDIA RTX and RTX Remix) is its own download, built outside this repository from
     # NVIDIA's SDKs: only its name and SHA-256 ship here (rtxpack.sha256), and only for this version.
     if args.rtx_pack:
-        expected = f"{name}-RTX-Pack.zip"
-        if args.rtx_pack.name != expected or not args.rtx_pack.is_file():
+        expected = args.rtx_pack.name
+        if not re.fullmatch(r"MeleeUnlocked-[0-9]+\.[0-9]+\.[0-9]+-RTX-Pack\.zip", expected) or not args.rtx_pack.is_file():
             raise SystemExit(f"--rtx-pack must be {expected} (got {args.rtx_pack})")
         pack_sha = hashlib.sha256(args.rtx_pack.read_bytes()).hexdigest()
         (folder / "rtxpack.sha256").write_text(f"{pack_sha} {args.rtx_pack.name}\n", encoding="ascii")
