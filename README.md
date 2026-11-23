@@ -13,7 +13,7 @@ For Ranked, sign in to Slippi Launcher with an account that has Ranked access. C
 
 ## Build
 
-- **Windows:** In your GitHub fork, open **Actions > Build Windows release > Run workflow**. Download the `Melee-Unlocked-Windows-x64` artifact from the completed run.
+- **Windows:** From a pushed checkout, run `python windows-build/release.py --iso "path/to/melee.iso"`. The command uses LLVM, Microsoft C++ headers, Python 3.11+ and GitHub CLI access to your fork. It builds the translated game code locally, runs the original Windows packager in Actions, and downloads both CPU builds to `release/`.
 - **Mac:** Follow the [Mac build instructions](port/mac/README.md) to build the game library and package the app.
 
 For controls, features, and other documentation, see the [original Melee Unlocked repository](https://github.com/Hero88go/melee-unlocked).
