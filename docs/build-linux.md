@@ -32,9 +32,8 @@ Passing `--port-gen` builds the full `melee_source` target and the launcher.
 
 ## Run
 
-Put the launcher, game library, and runtime data in one directory. The game
-uses the deltas to generate the required Slippi menu assets from your ISO
-on first launch.
+Put the launcher, game library, and runtime data in one directory. The
+deltas let the game generate any missing Slippi menu assets from your ISO.
 
 ```sh
 host_dir=build-linux/port/linux/full
