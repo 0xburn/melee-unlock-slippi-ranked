@@ -8,6 +8,7 @@ This fork of [Melee Unlocked](https://github.com/Hero88go/melee-unlocked) remove
 
 - **Windows x64:** Extract the zip, open `MeleeUnlockedLauncher.exe`, click **Browse** to select your ISO, then click **Play**. You can also drag the ISO onto `MeleeUnlocked.bat`.
 - **Mac:** Extract the zip, open Melee Unlocked, and select your ISO. Requires macOS 15 or later and Rosetta on Apple Silicon.
+- [Build and run the native Linux x86-64 Source Port](docs/build-linux.md).
 
 For Ranked, sign in to Slippi Launcher with an account that has Ranked access. Choose **Online > Ranked**, or press **Tab** during Training and choose **Search > Ranked**.
 
