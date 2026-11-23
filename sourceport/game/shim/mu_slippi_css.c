@@ -38,6 +38,7 @@
 #include <mu_native.h>
 #include <mu_test_env.h>
 #include <mu_ranked.h>
+#include <mu_rank_badge.h>
 
 extern char mnNameNew_CurrentNameText[];
 
@@ -161,18 +162,7 @@ void mu_slippi_css_enter(CSSData** css, u8* chosen, s8* port, u8* request, s8* n
         dt.team_idx = st->team_idx;
     }
 
-    /* SlippiCSS_gui.dat (Slippi 3.7.0's name for slpCSS.dat), symbol slpCSS. The host's
-     * system-file layer serves it; a host that still serves only the old name gets that file. Without
-     * either the mode title keeps the CSS's own texture instead of taking the game down. */
-    {
-        const char* name = DVDConvertPathToEntrynum("SlippiCSS_gui.dat") >= 0 ? "SlippiCSS_gui.dat"
-                           : DVDConvertPathToEntrynum("slpCSS.dat") >= 0    ? "slpCSS.dat"
-                                                                            : NULL;
-        if (name != NULL) {
-            HSD_Archive* ar = lbArchive_LoadArchive(name);
-            dt.slpcss = ar != NULL ? HSD_ArchiveGetPublicAddress(ar, "slpCSS") : NULL;
-        }
-    }
+    dt.slpcss = mu_rank_badge_load_css();
     mu_slippi_sss_set_slpcss(dt.slpcss);   /* name entry's connect help */
 }
 

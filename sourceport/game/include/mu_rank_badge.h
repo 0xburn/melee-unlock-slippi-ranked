@@ -4,6 +4,7 @@
 #include <mu_ranked.h>
 struct HSD_GObj;
 typedef struct MuRankBadge MuRankBadge;
+void* mu_rank_badge_load_css(void); /* Load the scene's Slippi CSS archive and return its public slpCSS symbol. */
 /* Coordinates/scale are in SIS world units. parent may be NULL. The text
  * fallback owns its text separately; callers free badges before scene teardown.
  */

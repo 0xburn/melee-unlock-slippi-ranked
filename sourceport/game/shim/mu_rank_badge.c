@@ -2,11 +2,15 @@
 #include <mu_rank_badge.h>
 #include "mu_rank_text.h"
 #include <sysdolphin/baselib/gobj.h>
-#include <sysdolphin/baselib/gobjproc.h>
+#include <dolphin/dvd.h>
+#include <melee/lb/lbarchive.h>
+#include <melee/sc/types.h>
+#include <sysdolphin/baselib/archive.h>
+#include <sysdolphin/baselib/mobj.h>
+#include <sysdolphin/baselib/tobj.h>
 #include <sysdolphin/baselib/memory.h>
 #include <sysdolphin/baselib/sislib.h>
 #include <dolphin/gx.h>
-#include <math.h>
 #include <string.h>
 
 
@@ -16,13 +20,42 @@ struct MuRankBadge {
     void (*text_destroy)(void*);
     MuPlayerRank rank;
     float x, y, size, offset, scale, alpha, glow;
-    unsigned age;
+    HSD_TexAnim* icons;
     int subtext, art_only;
 };
 static MuRankBadge* badges;
 
+/* Slippi 3.7 uses the texture animation frames in slpCSS.rankIcons for both scenes.
+ * Each scene owns its archive. Existing badge entities retain their own scene's image table. */
+static HSD_TexAnim* scene_icons;
+typedef struct {
+    DISC_PTR(void) chat_select, chat_message, mode, connect_help;
+    DISC_PTR(DynamicModelDesc) rank_icons;
+} DISC_STRUCT BadgeCssDesc;
+
+void* mu_rank_badge_load_css(void)
+{
+    const char* path = DVDConvertPathToEntrynum("SlippiCSS_gui.dat") >= 0 ? "SlippiCSS_gui.dat" :
+                       DVDConvertPathToEntrynum("slpCSS.dat") >= 0 ? "slpCSS.dat" : NULL;
+    HSD_Archive* archive = path ? lbArchive_LoadArchive(path) : NULL;
+    BadgeCssDesc* css = archive ? HSD_ArchiveGetPublicAddress(archive, "slpCSS") : NULL;
+    DynamicModelDesc* model = css ? DP(css->rank_icons) : NULL;
+    HSD_MatAnimJointSlot* sets = model ? DP(model->matanims) : NULL;
+    HSD_MatAnimJoint* joint = sets ? DP(sets[0]) : NULL;
+    scene_icons = NULL;
+    while (joint) {
+        HSD_MatAnim* material = DP(joint->matanim);
+        if (material && DP(material->texanim)) {
+            scene_icons = DP(material->texanim);
+            break;
+        }
+        joint = DP(joint->child);
+    }
+    return css;
+}
+
 /* Native v1 has no OS accessibility preference in its host ABI. This explicit
- * presentation-only override applies to the reveal AND all Challenger badges.
+ * presentation-only override applies to the Ranked reveal.
  * It reads this one named flag; never enumerate the process environment. */
 char* getenv(const char* name);
 int mu_rank_badge_reduced_motion(void)
@@ -58,19 +91,39 @@ static void badge_draw(void* object)
 {
     HSD_GObj* gobj = object;
     MuRankBadge* b = badge_for_text(gobj->user_data);
-    if (!b || !b->rank.placed || b->alpha <= 0) return;
-    unsigned rgb = mu_rank_text_rgb(b->rank.tier);
-    GXColor tint = { rgb >> 16, rgb >> 8, rgb, (u8)(255 * b->alpha) };
-    float radius = 8 * b->size * b->scale;
-    float x = b->x + 12 * b->size, y = -(b->y + b->offset + 12 * b->size);
-    GXSetTevColor(GX_TEVREG0, tint);
-    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
-    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A0);
+    GXTexObj tex;
+    GXTlutObj tlut;
+    HSD_ImageDesc* image;
+    HSD_TlutDesc* colors;
+    int frame;
+    GXColor white = {255, 255, 255, 255};
+    float x, y, radius;
+    if (!b || !b->rank.known || b->alpha <= 0 || !b->icons) return;
+    frame = b->rank.order; /* SlippiRank: Unranked 0, Bronze I through Master III 1-18, Grandmaster 19. */
+    if (frame < 0 || frame >= b->icons->n_imagetbl || frame >= b->icons->n_tluttbl ||
+        !DP(b->icons->imagetbl) || !DP(b->icons->tluttbl)) return;
+    image = DP(DP(b->icons->imagetbl)[frame]);
+    colors = DP(DP(b->icons->tluttbl)[frame]);
+    if (!image || !colors || !DP(image->image_ptr) || !DP(colors->lut)) return;
+    GXInitTlutObj(&tlut, DP(colors->lut), colors->fmt, colors->n_entries);
+    GXLoadTlut(&tlut, GX_TLUT0);
+    GXInitTexObjCI(&tex, DP(image->image_ptr), image->width, image->height, image->format,
+                   GX_CLAMP, GX_CLAMP, GX_FALSE, GX_TLUT0);
+    GXInitTexObjLOD(&tex, GX_LINEAR, GX_LINEAR, 0, 0, 0, GX_FALSE, GX_FALSE, GX_ANISO_1);
+    GXLoadTexObj(&tex, GX_TEXMAP0);
+    white.a = (u8)(255 * b->alpha);
+    GXSetTevColor(GX_TEVREG0, white);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_TEXC, GX_CC_C0, GX_CC_ZERO);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_TEXA, GX_CA_A0, GX_CA_ZERO);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, GX_TEVPREV);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, GX_TEVPREV);
+    radius = 12 * b->size * b->scale;
+    x = b->x + 12 * b->size; y = -(b->y + b->offset + 12 * b->size);
     GXBegin(GX_QUADS, GX_VTXFMT0, 4);
-    GXPosition3f32(x, y + radius, b->text->pos_z); GXTexCoord2f32(0,0);
-    GXPosition3f32(x + radius, y, b->text->pos_z); GXTexCoord2f32(1,0);
-    GXPosition3f32(x, y - radius, b->text->pos_z); GXTexCoord2f32(1,1);
-    GXPosition3f32(x - radius, y, b->text->pos_z); GXTexCoord2f32(0,1);
+    GXPosition3f32(x-radius, y+radius, b->text->pos_z); GXTexCoord2f32(0,0);
+    GXPosition3f32(x+radius, y+radius, b->text->pos_z); GXTexCoord2f32(1,0);
+    GXPosition3f32(x+radius, y-radius, b->text->pos_z); GXTexCoord2f32(1,1);
+    GXPosition3f32(x-radius, y-radius, b->text->pos_z); GXTexCoord2f32(0,1);
     GXEnd();
 }
 
@@ -84,6 +137,7 @@ MuRankBadge* mu_rank_badge_create(struct HSD_GObj* parent, float x, float y, flo
     b = HSD_MemAlloc(sizeof(*b));
     if (!b) return NULL;
     memset(b, 0, sizeof *b);
+    b->icons = scene_icons;
     b->text = mu_rank_text_create();
     if (!b->text) { HSD_Free(b); return NULL; }
     b->text->pos_x = x; b->text->pos_y = y;
