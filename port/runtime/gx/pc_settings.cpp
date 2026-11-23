@@ -5912,6 +5912,16 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     state.menu_quit_focus_pending = false;
     menu_main_focus_pending = true;
   };
+  if (practice.scene_major == 1 && !state.open && !state.menu_open && !state.practice_open &&
+      !state.fill_window && !g_guest_options_selection.load(std::memory_order_relaxed) && !replay_control::active()) {
+    const OverlayBounds bounds = overlay_bounds();
+    ImGui::SetNextWindowPos(ImVec2(bounds.right - 16, bounds.bottom - 16), ImGuiCond_Always, ImVec2(1, 1));
+    ImGui::Begin("##main_menu_shortcut", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav |
+                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground |
+                 ImGuiWindowFlags_NoFocusOnAppearing);
+    if (ImGui::Button("Menu (Esc)")) open_menu();
+    ImGui::End();
+  }
   {   // settings open at startup (Auto-open, --pc-settings-open) also come back where they were left
     static bool start_view = false;
     if (!start_view) {

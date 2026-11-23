@@ -98,6 +98,8 @@ def main():
         obj = objects/(str(source).replace('/','_')+'.o')
         dep, stamp = obj.with_suffix('.d'), obj.with_suffix('.flags')
         opts = [*flags, *(['-std=c++17'] if source.suffix == '.mm' else cflags if source.suffix == '.c' else cpp)]
+        if source.name == 'gc_adapter.cpp':
+            opts.append('-Iport/third_party/libusb/libusb')
         if source.suffix == '.mm' and args.squad_strike:
             opts.append('-DMU_SQUAD=1')
         if source.as_posix() != 'port/app/main.cpp':
@@ -124,15 +126,24 @@ def main():
         for i in range(0,len(sources),2):
             paths += list(pool.map(compile_one,sources[i:i+2]))
     memory_gate()
+    usb = ROOT/'port/third_party/libusb'
+    usb_src = usb/'libusb'
+    usb_library = BUILD/'libusb-1.0.dylib'
+    subprocess.run(['/usr/bin/clang', '-arch', 'x86_64', '-mmacosx-version-min=15.0', '-O2', '-dynamiclib',
+                    '-I'+str(usb/'Xcode'), '-I'+str(usb_src), '-I'+str(usb_src/'os'),
+                    *sorted(usb_src.glob('*.c')), *[usb_src/'os'/name for name in
+                    ('darwin_usb.c', 'events_posix.c', 'threads_posix.c')], '-framework', 'IOKit',
+                    '-framework', 'CoreFoundation', '-framework', 'Security',
+                    '-install_name', '@rpath/libusb-1.0.dylib', '-o', usb_library], check=True)
     app_objects = [p for p in paths if Path(p).name.startswith('port_app_')]
     library = BUILD/'libfull_host.a'
     if library.exists():
         library.unlink()  # ar must not retain objects removed from the source list
     subprocess.run(['/usr/bin/ar', 'rcs', str(library), *[p for p in paths if p not in app_objects]], check=True)
-    subprocess.run(['/usr/bin/clang++',*flags,*app_objects,str(library),'-L'+str(SDL/'lib'),'-lSDL2-2.0.0','-lcurl','-liconv',
+    subprocess.run(['/usr/bin/clang++',*flags,*app_objects,str(library),str(usb_library),'-L'+str(SDL/'lib'),'-lSDL2-2.0.0','-lcurl','-liconv',
                     '-framework','OpenGL','-framework','AppKit','-framework','CoreGraphics','-framework','Security',
                     '-framework','CoreServices','-framework','CoreFoundation','-Wl,-pagezero_size,0x10000',
-                    '-Wl,-rpath,@executable_path/../Frameworks','-Wl,-rpath,'+str(SDL/'lib'),
+                    '-Wl,-rpath,@executable_path/../Frameworks','-Wl,-rpath,@executable_path','-Wl,-rpath,'+str(SDL/'lib'),
                     '-o',str(BUILD/'MeleeUnlocked')],check=True)
     (BUILD/'build-manifest.json').write_text(json.dumps({'version':version,
         'build_script':'port/mac/build_full.py',

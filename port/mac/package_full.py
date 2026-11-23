@@ -45,6 +45,8 @@ def main():
     res = contents/'Resources'
     copy(BUILD/'MeleeUnlocked', contents/'MacOS/MeleeUnlocked')
     copy(ROOT.parent/'deps/sdl2/lib/libSDL2-2.0.0.dylib', contents/'Frameworks/libSDL2-2.0.0.dylib')
+    copy(BUILD/'libusb-1.0.dylib', contents/'Frameworks/libusb-1.0.dylib')
+    copy(ROOT/'port/third_party/libusb/COPYING', res/'licenses/libusb.txt')
     copy(GAME_LIBRARY,res/'melee_game.so')
     if (ROOT/'spike/shader-seed').is_dir():
         copy(ROOT/'spike/shader-seed',res/'shader-seed')

@@ -250,7 +250,7 @@ def compatibility():
     memory_gate()
     with (work/'build.log').open('w') as log:
         built = subprocess.run(['/usr/bin/clang++','-arch','x86_64','-mmacosx-version-min=15.0','-std=c++17',
-            '-I'+str(ROOT/'port/linux/compat'),str(ROOT/'port/mac/compat_test.cpp'),str(BUILD/'libfull_host.a'),
+            '-I'+str(ROOT/'port/linux/compat'),str(ROOT/'port/mac/compat_test.cpp'),str(BUILD/'libfull_host.a'), str(BUILD/'libusb-1.0.dylib'), '-Wl,-rpath,'+str(BUILD),
             '-L'+str(ROOT.parent/'deps/sdl2/lib'),'-lSDL2-2.0.0','-lcurl','-liconv','-framework','OpenGL','-framework','AppKit','-framework','Security',
             '-Wl,-rpath,'+str(ROOT.parent/'deps/sdl2/lib'),'-o',str(exe)],stdout=log,stderr=subprocess.STDOUT)
     if built.returncode: return built.returncode

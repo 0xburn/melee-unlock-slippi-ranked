@@ -273,11 +273,7 @@ void* window_create(int w, int h, const wchar_t* title, bool visible) {
   g_window_thread.store(std::this_thread::get_id(), std::memory_order_release);
   SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
   SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
-#ifdef __APPLE__
-  SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE, "1");
-#else
   SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE, "0");
-#endif
   if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0)
     die("cannot start SDL video: %s", SDL_GetError());
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);

@@ -1,35 +1,4 @@
 #include "test_env.h"
-#ifdef __APPLE__
-#include "host.h"
-#include <mutex>
-namespace host {
-// SDL owns controller input on macOS. The direct USB adapter driver is used on Windows and Linux.
-namespace { std::mutex g_phob_mutex; phob::Settings g_phob_settings[4]; }
-double gcadapter_poll_rate_hz() { return 0; }
-std::string gcadapter_problem() { return "Use an SDL controller on macOS"; }
-bool gcadapter_reset_pending() { return false; }
-bool gcadapter_request_reset() { return false; }
-uint32_t gcadapter_poll(PadState[4]) { return 0; }
-void gcadapter_recalibrate(int) {}
-void gcadapter_rumble(int, bool) {}
-void gcadapter_shutdown() {}
-bool steam_running() { return false; }
-void gcadapter_phob_set(int port, const phob::Settings& settings) {
-  if (port < 0 || port > 3) return;
-  std::lock_guard<std::mutex> lock(g_phob_mutex);
-  g_phob_settings[port] = settings;
-}
-phob::Settings gcadapter_phob_get(int port) {
-  if (port < 0 || port > 3) return {};
-  std::lock_guard<std::mutex> lock(g_phob_mutex);
-  return g_phob_settings[port];
-}
-bool gcadapter_phob_raw(int, phob::HardwareInput&) { return false; }
-int gcadapter_scope(int, GCScopeSample*, int) { return 0; }
-// MELEE_TEST_ADAPTER_SCRIPT plays through the libusb adapter's report path, which macOS doesn't have.
-void gcadapter_test_script_start() {}
-}  // namespace host
-#else
 // Official / Mayflash / Hand Held Legend "GameCube Controller Adapter for Wii U", through libusb as
 // Dolphin uses it. Same protocol as Dolphin's GCAdapter: one 0x13 byte starts the 37-byte report
 // stream on endpoint 0x81 (status + 9 bytes per port), 0x11 + 4 bytes sets rumble.
@@ -551,7 +520,7 @@ bool open_libusb() {
   }
   int rc = libusb_open(adapter, &g_dev);
   libusb_free_device_list(list, 1);
-#ifndef _WIN32
+#ifdef __linux__
   // Linux: no access to the device node means the udev rule that gives the logged-in player the
   // adapter is not installed (or the adapter was plugged in before it was).
   if (rc == LIBUSB_ERROR_ACCESS) {
@@ -571,6 +540,11 @@ bool open_libusb() {
 #endif
   if (rc != 0) {
     g_dev = nullptr;
+#ifdef __APPLE__
+    set_problem(std::string("Cannot open the GameCube adapter: ") + libusb_strerror(rc));
+    if (!g_logged_missing) log("gc adapter: open failed (%s)", libusb_error_name(rc));
+    g_logged_missing = true;
+#else
     // Access denied with a driver in place means another program has the adapter open: Windows gives
     // it to one program at a time. Steam takes GameCube adapters for its own controller support.
     if (rc == LIBUSB_ERROR_ACCESS)
@@ -597,9 +571,10 @@ bool open_libusb() {
 #endif
       g_logged_missing = true;
     }
+#endif
     return false;
   }
-#ifndef _WIN32
+#ifdef __linux__
   // The kernel's HID driver is let go first, as Dolphin does: the request below went to an adapter
   // the kernel still held (LIBUSB_ERROR_IO), and claiming detaches it only afterwards.
   if (libusb_kernel_driver_active(g_dev, g_iface) == 1) {
@@ -955,4 +930,3 @@ int gcadapter_scope(int port, GCScopeSample* out, int max) {
 }
 
 }  // namespace host
-#endif
