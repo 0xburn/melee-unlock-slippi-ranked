@@ -150,6 +150,13 @@ add_test(NAME port_akaneia_probe_wiring COMMAND "${Python3_EXECUTABLE}" "${CMAKE
 add_test(NAME port_shader_auto_fit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/port/tests/shader_auto_fit_test.py")
 
 if(NOT WIN32)
+  if(APPLE)
+    add_executable(port_static_mod_online_test port/tests/static_mod_online_test.cpp
+      port/runtime/host/mod_profile.cpp port/tests/identity_stubs/hash_apple.cpp)
+    target_include_directories(port_static_mod_online_test PRIVATE port/tests/identity_stubs port/runtime/hle port/runtime/host)
+    target_compile_features(port_static_mod_online_test PRIVATE cxx_std_17)
+    add_test(NAME port_static_mod_online COMMAND port_static_mod_online_test)
+  endif()
   add_executable(port_cosmetic_cli_test port/tests/cosmetic_cli_test.cpp)
   target_include_directories(port_cosmetic_cli_test PRIVATE port/runtime/host)
   target_compile_features(port_cosmetic_cli_test PRIVATE cxx_std_17)

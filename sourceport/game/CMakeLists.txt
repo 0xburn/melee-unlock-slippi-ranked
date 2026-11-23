@@ -66,6 +66,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(mu_linux_sdk_layout_test PRIVATE game_flags)
   set_target_properties(mu_linux_sdk_layout_test PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
   add_test(NAME native_linux_sdk_layout COMMAND mu_linux_sdk_layout_test)
+  add_test(NAME native_console_long_overlay COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_console_long_overlay.py")
   add_test(NAME native_game_image_bounds COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_check_game_image.py")
   add_test(NAME native_audio_map_ranges COMMAND "${Python3_EXECUTABLE}"
