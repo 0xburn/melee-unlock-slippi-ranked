@@ -79,6 +79,8 @@ endforeach()
 # Compiles game shim headers that need GCC/Clang (scalar_storage_order big-endian structs, __builtin_*):
 # MSVC cannot build them. The MinGW and Linux builds still run it.
 if(NOT MSVC)
+add_test(NAME port_ranked_setup_header COMMAND "${Python3_EXECUTABLE}" -B
+  "${CMAKE_CURRENT_SOURCE_DIR}/port/tests/ranked_setup_text_test.py")
 add_executable(port_ranked_setup_screen_test port/tests/ranked_setup_screen_test.cpp
   sourceport/game/shim/mu_ranked_widgets.c sourceport/game/shim/mu_ranked_setup_model.c
   sourceport/game/shim/mu_ranked_setup_online.c)

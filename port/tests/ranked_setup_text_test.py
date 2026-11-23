@@ -50,8 +50,7 @@ struct MuRankedSetupModel {unsigned local_player=0;MuRankedSet* set;};
 struct MuMatchState {char names[2][31];char codes[2][10];};
 struct MuRankedWidgets {unsigned canvas=0;HSD_Text *text=nullptr,*names[2]={};};
 static unsigned allocated,loads,clears;
-static int failure,practice;
-static int mu_ranked_practice() {return practice;}
+static int failure;
 static std::vector<std::string> logs;
 static void destroy(void*) {}
 static void OSReport(const char* message) {logs.emplace_back(message);}
@@ -86,6 +85,7 @@ static int HSD_SisLib_803A6B98(HSD_Text* t,float x,float y,const char*,const cha
     t->rows.push_back({float(short(x)),float(short(y)),t->x34.x,t->x34.y,value});
     return int(t->rows.size()-1);
 }
+static void HSD_SisLib_803A746C(HSD_Text* t,unsigned id,float x,float y) {t->rows.at(id).x=x;t->rows.at(id).y=y;}
 static void HSD_SisLib_803A7548(HSD_Text* t,unsigned id,float x,float y) {t->rows.at(id).sx=x;t->rows.at(id).sy=y;}
 static void HSD_SisLib_803A70A0(HSD_Text* t,unsigned id,const char*,const char* value) {t->rows.at(id).value=value;}
 '''
@@ -98,14 +98,17 @@ static Box bounds(HSD_Text* text,unsigned id) {
     float x=text->pos_x+row.x;
     if(text->default_alignment==1)x-=width/2;
     if(text->default_alignment==2)x-=width;
-    return {x,text->pos_y+row.y,x+width,text->pos_y+row.y+24*row.sy};
+    // The SIS font includes leading above the visible glyph.
+    float top=text->pos_y+row.y+35*row.sy;
+    return {x,top,x+width,top+24*row.sy};
 }
 static bool collision(Box a,Box b) {return a.l<b.r && b.l<a.r && a.t<b.b && b.t<a.b;}
 int main() {
     MuRankedSet set;MuRankedSetupModel model{0,&set};MuMatchState ms{};
     // Worst-case measured width, with distinct local/opponent data.
     std::memset(ms.names[0],'L',30);std::memset(ms.names[1],'R',30);
-    std::strcpy(ms.codes[0],"LEFT00000");std::strcpy(ms.codes[1],"RIGHT0000");
+    const std::string codes[2]={"LEFT00000","RIGHT00000"};
+    for(unsigned i:{0u,1u})std::memcpy(ms.codes[i],codes[i].data(),codes[i].size());
     for(unsigned local:{0u,1u}) {
         model.local_player=local;HSD_SisLib_804D1124[0]=nullptr;
         MuRankedWidgets w;header_text(&w,&model,&ms);header_score(&w,&model);
@@ -124,26 +127,19 @@ int main() {
         CHECK(w.text->pos_x==320 && w.text->pos_y==45 && w.text->rows[0].sx==.7f);
         CHECK(w.names[0]->rows[0].value==ms.names[local]);
         CHECK(w.names[1]->rows[0].value==ms.names[!local]);
-        CHECK(w.names[0]->rows[1].value==ms.codes[local]);
-        CHECK(w.names[1]->rows[1].value==ms.codes[!local]);
+        CHECK(w.names[0]->rows[1].value==codes[local]);
+        CHECK(w.names[1]->rows[1].value==codes[!local]);
         CHECK(w.text->rows[5].value==(local?"Game 2 - 0:1":"Game 2 - 1:0"));
         text_set(w.text,0,"0:30");
-        // Agent practice runs say so on the score row, which must still clear everything.
-        for(int p:{1,0}) {
-            practice=p;header_score(&w,&model);
-            if(p)CHECK(w.text->rows[5].value==(local?"Practice  Game 2 - 0:1":"Practice  Game 2 - 1:0"));
-            std::vector<Box> boxes={bounds(w.text,0),bounds(w.text,5)};
-            for(auto* name:w.names)for(unsigned row:{0u,1u})boxes.push_back(bounds(name,row));
-            for(unsigned i=0;i<boxes.size();++i) {
-                auto box=boxes[i];CHECK(box.l>=0 && box.r<=640 && box.t>=0 && box.b<=110);
-                for(unsigned j=0;j<i;++j)CHECK(!collision(box,boxes[j]));
-                // Reserve 24px for each arrow and 18px for the best-of-nine pips.
-                for(auto reserved:{Box{248,49,272,73},Box{368,49,392,73},Box{223,16.5f,417,34.5f}})
-                    CHECK(!collision(box,reserved));
-            }
+        std::vector<Box> boxes={bounds(w.text,0),bounds(w.text,5)};
+        for(auto* name:w.names)for(unsigned row:{0u,1u})boxes.push_back(bounds(name,row));
+        for(unsigned i=0;i<boxes.size();++i) {
+            auto box=boxes[i];CHECK(box.l>=24 && box.r<=616 && box.t>=16 && box.b<=88);
+            for(unsigned j=0;j<i;++j)CHECK(!collision(box,boxes[j]));
+            // Leave the timer arrows and the best-of-nine pips clear.
+            for(auto reserved:{Box{248,49,272,73},Box{368,49,392,73},Box{223,16.5f,417,34.5f}})
+                CHECK(!collision(box,reserved));
         }
-        CHECK(w.text->rows[5].value==(local?"Game 2 - 0:1":"Game 2 - 1:0"));
-        CHECK(bounds(w.text,5).t==92 && w.text->rows[5].sx==.45f);
         for(auto* t:{w.text,w.names[0],w.names[1]})HSD_SisLib_803A5CC4(t);
         CHECK(allocated==0 && logs.empty());
     }

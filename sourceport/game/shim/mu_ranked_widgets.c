@@ -441,13 +441,14 @@ static void header_text(MuRankedWidgets* w, const MuRankedSetupModel* m, const M
     w->text=text_create(w,320,45,.7f);
     if (w->text) {
         w->text->default_alignment=1;
+        HSD_SisLib_803A746C(w->text,0,0,-13);
         HSD_SisLib_803A6B98(w->text,0,130,"%s","");
         HSD_SisLib_803A6B98(w->text,0,190,"%s","");
         HSD_SisLib_803A6B98(w->text,0,240,"%s","");
         HSD_SisLib_803A6B98(w->text,0,295,"%s","");
         for (i=1; i<5; ++i) HSD_SisLib_803A7548(w->text,i,.5f,.5f);
-        /* Pips are at pixel y 25.5, turn arrows at y 61; score sits below. */
-        HSD_SisLib_803A6B98(w->text,0,92.0f-45.0f,"%s","");
+        /* The SIS glyphs start below their anchors. Keep both lines inside the top panel. */
+        HSD_SisLib_803A6B98(w->text,0,15,"%s","");
         HSD_SisLib_803A7548(w->text,5,.45f,.45f);
         /* 6-8: the winner's lines in DISCONNECTED's place when the opponent left (CTO 11-01).
          * Glyph tops at about y 165, 195 and 218, above "Press A" at about y 262 (build 31). */
@@ -458,15 +459,22 @@ static void header_text(MuRankedWidgets* w, const MuRankedSetupModel* m, const M
         for (i=7; i<9; ++i) HSD_SisLib_803A7548(w->text,i,.45f,.45f);
     }
     for (i=0; i<2; ++i) {
-        w->names[i]=text_create(w,i ? 575 : 65,39,.35f);
+        w->names[i]=text_create(w,i ? 575 : 65,25,.35f);
         if (w->names[i]) {
             unsigned player=i ? !m->local_player : m->local_player;
-            char name[31], code[10];
+            char name[31], code[sizeof(ms->codes[player])+1];
             memcpy(name,ms->names[player],30); name[30]=0;
-            memcpy(code,ms->codes[player],9); code[9]=0;
+            memcpy(code,ms->codes[player],sizeof(ms->codes[player])); code[sizeof(code)-1]=0;
             w->names[i]->default_alignment=i ? 2 : 0;
             text_set(w->names[i],0,name);
-            HSD_SisLib_803A6B98(w->names[i],0,40,"%s",code);
+            /* Reserve the center for the turn arrows and clock, including long display names. */
+            float width=(float)strlen(name)*20.5f;
+            if (width*.35f>156.0f) {
+                float scale=156.0f/width;
+                HSD_SisLib_803A7548(w->names[i],0,scale,scale);
+            }
+            HSD_SisLib_803A6B98(w->names[i],0,25,"%s",code);
+            HSD_SisLib_803A7548(w->names[i],1,.30f,.30f);
         }
     }
 }
@@ -488,7 +496,7 @@ static void header_ranks(MuRankedWidgets* w, const MuRankedSetupModel* m)
     r[m->local_player]=&ranks.self; r[!m->local_player]=&ranks.opponent;
     for (seat=0; seat<2; ++seat) {
         unsigned side=seat == m->local_player ? 0 : 1;
-        if (!w->badges[seat]) w->badges[seat]=mu_rank_badge_create(NULL,side ? 584 : 28,52,1.4f,r[seat]);
+        if (!w->badges[seat]) w->badges[seat]=mu_rank_badge_create(NULL,side ? 584 : 28,32,1.4f,r[seat]);
         else mu_rank_badge_set(w->badges[seat],r[seat]);
     }
 }
@@ -500,6 +508,7 @@ MuRankedWidgets* mu_ranked_widgets_create(const MuRankedSetupModel* m)
     const MuMatchState* ms=mu_slippi_match_state();
     if (!w) return NULL;
     memset(w,0,sizeof *w);
+    mu_rank_badge_load_css();
     strcpy(w->key_a,"A"); strcpy(w->key_b,"B"); strcpy(w->key_xy,"X/Y");
     if (DVDConvertPathToEntrynum("GameSetup_gui.dat") >= 0) {
         w->archive=lbArchive_LoadArchive("GameSetup_gui.dat");
