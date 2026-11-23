@@ -1141,7 +1141,7 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS* info) {
     // game closes: a player in an online match pressed OK mid-game expecting to play on.
     std::string text = std::string(head) + "\n\nMelee Unlocked crashed and closes when you press OK. The launcher can then send this "
                        "report. If you started the game without the launcher, please send melee_port.log, melee_port_crash.txt and "
-                       "melee_port_crash.dmp from the game folder with your bug report (https://github.com/0xburn/melee-unlocked/issues).";
+                       "melee_port_crash.dmp from the game folder with your bug report (https://github.com/0xburn/melee-unlocked-slippi-ranked/issues).";
     MessageBoxA(nullptr, text.c_str(), "Melee Unlocked", MB_ICONERROR | MB_OK);
   }
 
@@ -1243,7 +1243,7 @@ static void die_report(const char* message) {
     std::string text = std::string(head) + "\n\nMelee Unlocked stopped with an error and closes when you press OK. The launcher can then "
                        "send this report. If you started the game without the launcher, please send melee_port.log, "
                        "melee_port_crash.txt and melee_port_crash.dmp from the game folder with your bug report "
-                       "(https://github.com/0xburn/melee-unlocked/issues).";
+                       "(https://github.com/0xburn/melee-unlocked-slippi-ranked/issues).";
     MessageBoxA(nullptr, text.c_str(), "Melee Unlocked", MB_ICONERROR | MB_OK);
   }
 

@@ -4,7 +4,7 @@ This fork of [Melee Unlocked](https://github.com/Hero88go/melee-unlocked) remove
 
 ## Play
 
-[Download the Windows or Mac zip.](https://github.com/0xburn/melee-unlock-slippi-ranked/releases/latest) You need your own Melee NTSC 1.02 ISO.
+[Download the Windows or Mac zip.](https://github.com/0xburn/melee-unlocked-slippi-ranked/releases/latest) You need your own Melee NTSC 1.02 ISO.
 
 - **Windows x64:** Extract the zip, open `MeleeUnlockedLauncher.exe`, click **Browse** to select your ISO, then click **Play**. You can also drag the ISO onto `MeleeUnlocked.bat`.
 - **Mac:** Extract the zip, open Melee Unlocked, and select your ISO. Requires macOS 15 or later and Rosetta on Apple Silicon.

@@ -138,7 +138,7 @@ bool offer(HWND owner, const std::string& dir, const std::string& engine) {
                        (zip_saved ? " The companion ZIP contains the same sanitized diagnostic text." : "") :
        zip_saved ? "\n\nPlease attach melee_crash_report.zip from the folder that opened. The readable copy could not be saved." :
                    "\n\nThe report files could not be saved in the game folder. Please copy the error above into the issue.");
-  const std::string issue = "https://github.com/0xburn/melee-unlocked/issues/new?title=" + url_encode("Crash: " + where.substr(0, 80)) +
+  const std::string issue = "https://github.com/0xburn/melee-unlocked-slippi-ranked/issues/new?title=" + url_encode("Crash: " + where.substr(0, 80)) +
                             "&body=" + url_encode(body);
   ShellExecuteW(nullptr, L"open", widen(issue).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
   MessageBoxW(owner, markdown_saved ?

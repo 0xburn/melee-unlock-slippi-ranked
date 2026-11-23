@@ -791,7 +791,7 @@ void page_help() {
   ImGui::Separator();
   if (ImGui::Button("Open the game folder")) open_path(g_dir);
   ImGui::SameLine();
-  if (ImGui::Button("GitHub issues")) open_path("https://github.com/0xburn/melee-unlocked/issues");
+  if (ImGui::Button("GitHub issues")) open_path("https://github.com/0xburn/melee-unlocked-slippi-ranked/issues");
   ImGui::Spacing();
   ImGui::TextWrapped("GameCube adapter: install the udev rule that comes with the game once "
                      "(sudo install -m 644 51-melee-unlocked-gc-adapter.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules), "

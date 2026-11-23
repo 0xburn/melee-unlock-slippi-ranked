@@ -57,7 +57,7 @@ static void linux_crash_dialog(const char* head, bool stopped) {
       ? "\n\nMelee Unlocked stopped with an error. The launcher can send this report: it asks once you close this message. "
       : "\n\nMelee Unlocked crashed. The launcher can send this report: it asks once you close this message. ") +
       "If you started the game without the launcher, please send melee_port.log and melee_port_crash.txt from the game folder "
-      "with your bug report (https://github.com/0xburn/melee-unlocked/issues).";
+      "with your bug report (https://github.com/0xburn/melee-unlocked-slippi-ranked/issues).";
   MessageBoxA(nullptr, text.c_str(), "Melee Unlocked", MB_ICONERROR | MB_OK);
 }
 
