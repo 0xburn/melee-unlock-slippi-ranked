@@ -86,6 +86,7 @@ struct RenderOptions {
   bool pc_settings = false, settings_open = false, performance_overlay = false;
   bool show_vram = false;
   bool show_fps = false, show_ping = true;
+  bool live_ping = false;   // the ping line shows every reading, not one a second (owner 11-24)
   // The "Settings: F1" reminder in the corner. On for a new player, off for anyone who knows the
   // key and does not want it in a recording.
   bool settings_hint = false;   // the corner reminder is off by default; Overlays can turn it on
@@ -105,6 +106,7 @@ struct RenderOptions {
   bool show_player_nicknames = false; // screen-space names anchored to Melee's player tags
   // The Practice menu hint in Training (saved as matchmakinghint, its old name). The menu stays available.
   bool matchmaking_hint = true;
+  int practice_chord = 0x1018;   // the Practice menu's buttons (host::settings_shortcut::practice_chord)
   // The Practice menu's look in Training (practice_menu.h: 0 Main Menu bars, 1 side rails, 2 slots,
   // 3 strip, 4 the full window).
   int practice_style = 0;
@@ -255,12 +257,16 @@ struct RenderOptions {
   // "Hide emblems behind percents" (Video tab, ini key hide_hud_emblems, both engines): the character
   // emblem behind each damage percent is not drawn (host::g_hide_hud_emblems). Picture only.
   bool hide_hud_emblems = false;
+  // Damage percents: Hidden (owner 11-24, UnclePunch's Hide HUD code): no percents at all. Source Port.
+  bool hide_percents = false;
   // "Community codes" (HUD tab, ini key community_codes, Source Port): MU_DISPLAY_OPTION_CODES_ALL
   // bits, the native versions of players' Gecko codes (host::g_community_codes). Picture and sound.
   uint32_t community_codes = 0;
   // "Stronger Pro AI (Requires additional download)" (Practice menu > Fight a pro, ini key
   // proaistronger): 0 ask, 1 always, 2 never (phillip_ai::StrongerChoice).
   int pro_ai_stronger = 0;
+  int pro_ai_extra_delay = 0;
+  int vs_pro[4] = {-1, -1, -1, -1};   // VS Mode: the pro each port's CPU plays as, -1 the game's CPU (practice_cpu::vs_pro)   // frames added to the Pro AI's own reaction (phillip_ai::set_extra_delay)
   // "Unlock everything" (Game tab, ini key unlock_all, on unless the file says 0): Slippi's "Unlock
   // All Characters and Stages". Off, the save file decides what is unlocked, offline only: a network
   // session always has everything. Static Recomp: gecko::option_unlock_all (host.cpp); Source Port:
@@ -287,12 +293,11 @@ struct RenderOptions {
   static bool& live_mute_voices() { static bool value = false; return value; }
   bool offline_delay = false;
   int offline_delay_frames = 2;  // independent of the online delay; enabled separately for old settings
-  // Early inputs (Online, ini key early_inputs2, off unless the file says 1): controller changes go
+  // Early inputs (Online, ini key early_inputs3, on unless the file says 0): controller changes go
   // to the other player the moment they happen (host/early_input.h). Applied with
-  // host::early_input::set_enabled when the file is read and when the toggle changes. Off by default
-  // from 1.0.2: players felt eaten or late inputs with it on and none with it off (1.0.0 reports), so
-  // the old key (saved on by default) is not read.
-  bool early_inputs = false;
+  // host::early_input::set_enabled when the file is read and when the toggle changes. On by default
+  // (owner 11-22); 1.0.2 to 1.0.5 saved it off for everyone under early_inputs2, which is not read.
+  bool early_inputs = true;
   // Slippi Dolphin's spectator server (Game tab, Online; ini keys slippi_spectator, on unless the
   // file says 0, and slippi_spectator_port, 51441): the game's recording events on a local ENet
   // port for the Slippi Launcher's Broadcast tab and stream overlays (hle/slippi_spectate.cpp).

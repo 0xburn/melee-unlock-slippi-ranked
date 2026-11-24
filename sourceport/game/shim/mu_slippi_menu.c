@@ -382,11 +382,6 @@ int mu_slippi_on_online_results(void) { return mu_slippi_online_state() == MU_SL
 int mu_slippi_on_online_splash(void) { return mu_slippi_online_state() == MU_SLP_STATE_SPLASH; }
 int mu_slippi_zelda_is_sheik(void)
 {
-#if MU_SQUAD
-    /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026)
-     * Squads keep the picker's exact Zelda/Sheik kinds, also once a friend room turns them on. */
-    if (gmSquad_OnlineChosen()) return 0;
-#endif
     return mu_slippi_menus_enabled() && zelda_sheik;
 }
 unsigned mu_slippi_online_load_count(void) { return online_loads; }
@@ -675,11 +670,7 @@ static void online_on_load(void)
 {
     mu_ranked_set_reset();
     gmMainLib_804D3EE0->vs.unk_530.x6 = gm_801677F0();   /* the 1P port for the event CSS slot */
-    zelda_sheik = 1;                                       /* the Zelda icon picks Sheik */
-#if MU_SQUAD
-    /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
-    if (gmSquad_OnlineChosen()) zelda_sheik = 0; /* keep the picker's exact Zelda/Sheik kinds */
-#endif
+    zelda_sheik = 1;  /* The online Zelda icon starts on Sheik, including Squad Strike. */
     online_loads++;
 }
 

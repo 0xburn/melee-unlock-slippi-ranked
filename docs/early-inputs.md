@@ -2,7 +2,7 @@
 
 Online, each game sends the other player's game one pad per frame, and when a pad has not arrived in time the game guesses by repeating the last one it has. A press that happens right after a poll waits almost a whole frame before it is even sent, and the other side guesses wrong for every frame in between. Early inputs close most of that gap: the moment the controller changes in a way the game acts on, the new pad is sent at once, stamped with the frame it will first appear in. The other game predicts from it until the real pad arrives. The real pad always decides, so nothing about the match's result, replay or checksums changes; only how often the other side guesses right.
 
-Enable **Early inputs** under PC settings → Online. Fresh settings leave it off. The saved key is `early_inputs2`. Hidden tests can override the setting with `MELEE_EARLY_INPUTS=0|1`. Early correction of an existing prediction is separately opt-in through `MELEE_EARLY_ROLLBACK=1`.
+Enable **Early inputs** under PC settings → Online. Fresh settings enable it. The saved key is `early_inputs3`. Hidden tests can override the setting with `MELEE_EARLY_INPUTS=0|1`. Early correction of an existing prediction is enabled by default and can be disabled with `MELEE_EARLY_ROLLBACK=0`.
 
 ## Credit
 
@@ -66,7 +66,7 @@ Per remote player at most 8 entries, oldest target first. A second message for t
 
 At the end of an online match the Source Port's game logs `online: N predictions compared, M wrong; K frames predicted from early pads` and `online: early pad predictions right R, wrong W`; the host logs `slippi: early inputs on: C changes, P packets, G guarded, K resent after a skip, F follow-ups, T received, ...` (or `p2p: early inputs ...`). `changes` are the pads handed to the transport, `packets` the ones that went on the wire (a peer takes them). Rollback counts are on the line before them, as they always were.
 
-Early rollback (`MELEE_EARLY_ROLLBACK=1`, off by default): an early pad that contradicts a frame already run starts the rollback at once instead of when the confirmed pad comes. It adds rollbacks of its own, so it stays off unless measurement shows otherwise.
+Early rollback (on by default; `MELEE_EARLY_ROLLBACK=0` turns it off for tests): an early pad that contradicts, at the game's action lines, a frame already run on a guess starts the rollback at once instead of when the confirmed pad comes. Above about 41 ms one way the early pad arrives after its frame ran, so prediction alone never uses it; this is how it still counts there: the correction comes sooner and goes back fewer frames.
 
 ## Tests
 

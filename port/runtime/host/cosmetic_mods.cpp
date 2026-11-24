@@ -8,6 +8,7 @@
 #include "stage_dat_safety.h"
 #include "stage_read_pin.h"
 #include "stage_graft.h"
+#include "stage_floor_fit.h"
 
 #include "host.h"
 #include "updater.h"
@@ -31,6 +32,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -134,6 +136,7 @@ struct RuntimeAsset {
   // replay needs the original's gameplay (its meshes drawn over the original stage, stage_graft.h),
   // the same length as `bytes`. Offline the skin itself is served. Null for everything else.
   std::shared_ptr<const std::vector<uint8_t>> online_bytes;
+  bool lacks_texture_anim = false;   // a costume a mod's own costume setup gets the disc's costume for
 };
 
 constexpr const char* kVoiceKind = "voice_bank";
@@ -1549,19 +1552,47 @@ constexpr uint32_t kVisualFlags = 0x1u | 0x2u | 0x4u | 0x8u | 0x10u | 0x20u | 0x
 // are compared as numbers with a small tolerance; a real change of a joint is far larger.
 // Returns which parts of the rest pose differ (0 when none do), so the reason can say what changed.
 constexpr uint32_t kRestRotated = 1, kRestResized = 2, kRestMoved = 4;
+// The game builds a joint's rotation from its three angles as Rz * Ry * Rx (HSD_MtxSRT). One
+// rotation has more than one set of angles: (x+pi, pi-y, z+pi) and +-pi are the same turn, and model
+// tools pick either when they export. Comparing the angles called such a skin "rotated" (a Falco
+// skin, 11-23); the rotation matrices are what the bones get, so those are compared.
+inline void rest_rotation(float x, float y, float z, double m[9]) {
+  const double cx = std::cos(x), sx = std::sin(x), cy = std::cos(y), sy = std::sin(y), cz = std::cos(z), sz = std::sin(z);
+  m[0] = cy * cz; m[1] = cz * sx * sy - cx * sz; m[2] = cx * cz * sy + sx * sz;
+  m[3] = cy * sz; m[4] = cx * cz + sx * sy * sz; m[5] = cx * sy * sz - cz * sx;
+  m[6] = -sy;     m[7] = cy * sx;                m[8] = cx * cy;
+}
 inline uint32_t rest_pose_difference(const uint8_t* p, const uint8_t* q) {
   uint32_t differs = 0;
-  for (int i = 0; i < 9; ++i) {
+  {
+    float a[3], b[3];
+    bool finite = true, same = true;
+    for (int i = 0; i < 3; ++i) {
+      uint32_t ua = be32(p + i * 4), ub = be32(q + i * 4);
+      std::memcpy(&a[i], &ua, 4); std::memcpy(&b[i], &ub, 4);
+      finite = finite && std::isfinite(a[i]) && std::isfinite(b[i]);
+      same = same && ua == ub;
+    }
+    if (!same) {
+      if (!finite) differs |= kRestRotated;
+      else {
+        double ma[9], mb[9];
+        rest_rotation(a[0], a[1], a[2], ma);
+        rest_rotation(b[0], b[1], b[2], mb);
+        // The first three values are the rest rotation, which a fighter's animations replace on every
+        // frame, so an exporter's rounding there gets more room than in scale and translation.
+        for (int i = 0; i < 9; ++i) if (std::fabs(ma[i] - mb[i]) > 1e-2) { differs |= kRestRotated; break; }
+      }
+    }
+  }
+  for (int i = 3; i < 9; ++i) {
     uint32_t ua = be32(p + i * 4), ub = be32(q + i * 4);
     float fa, fb; std::memcpy(&fa, &ua, 4); std::memcpy(&fb, &ub, 4);
     if (ua == ub) continue;
     const uint32_t part = i < 3 ? kRestRotated : i < 6 ? kRestResized : kRestMoved;
     if (!std::isfinite(fa) || !std::isfinite(fb)) { differs |= part; continue; }
     const float scale = std::max(1.0f, std::max(std::fabs(fa), std::fabs(fb)));
-    // The first three values are the rest rotation, which a fighter's animations replace on every
-    // frame, so an exporter's rounding there gets more room than in scale and translation.
-    const float tolerance = i < 3 ? 1e-2f : 1e-3f;
-    if (std::fabs(fa - fb) > tolerance * scale) differs |= part;
+    if (std::fabs(fa - fb) > 1e-3f * scale) differs |= part;
   }
   return differs;
 }
@@ -1747,6 +1778,70 @@ uint32_t copy_rest_pose(const std::vector<uint8_t>& a, uint32_t asize, uint32_t 
 }
 }  // namespace skeleton
 
+namespace texanims {
+// Which of a costume's textures have an animation, in the order the game counts them: ftParts_80075240
+// walks the fighter's DObjs (the joint tree depth first, each joint's DObjs in order) and each one's
+// TObjs, and ftAnim_80070200 needs the TObj at every index the fighter's data lists to have one. A
+// TObj is animated when its DObj's MatAnim (the _matanim_joint tree, walked alongside) has a TexAnim
+// with the TObj's texture map id and an animation. JObjDesc: flags 0x4, child 0x8, next 0xC, DObj 0x10
+// (unless a particle or spline joint); DObjDesc next 0x4, MObj 0x8; MObjDesc TObj 0x8; TObjDesc next
+// 0x4, id 0x8; MatAnimJoint child 0x0, next 0x4, MatAnim 0x8; MatAnim next 0x0, TexAnim 0x8; TexAnim
+// next 0x0, id 0x4, animation 0x8. Empty when the file has no such trees.
+struct Walk {
+  const std::vector<uint8_t>& b; uint32_t size; const std::vector<uint32_t>& rel;
+  std::vector<bool> out; int budget = 4096;
+  uint32_t ptr(uint32_t at, uint32_t field) const {   // the pointer stored at data offset at+field, or ~0
+    const uint64_t slot = (uint64_t)at + field;
+    if (slot + 4 > size || !skeleton::is_pointer(rel, (uint32_t)slot)) return ~0u;
+    const uint32_t v = be32(b.data() + 0x20 + slot);
+    return v < size ? v : ~0u;
+  }
+  uint32_t word(uint32_t at, uint32_t field) const {
+    const uint64_t slot = (uint64_t)at + field;
+    return slot + 4 <= size ? be32(b.data() + 0x20 + slot) : 0;
+  }
+  bool animated(uint32_t texanim, uint32_t id) {
+    for (int n = 0; texanim != ~0u && n < 64; ++n, texanim = ptr(texanim, 0x0))
+      if (word(texanim, 0x4) == id && ptr(texanim, 0x8) != ~0u) return true;
+    return false;
+  }
+  void joint(uint32_t j, uint32_t mj) {
+    for (; j != ~0u && --budget > 0; j = ptr(j, 0xC), mj = mj == ~0u ? ~0u : ptr(mj, 0x4)) {
+      if (!(word(j, 0x4) & 0x4020)) {
+        uint32_t matanim = mj == ~0u ? ~0u : ptr(mj, 0x8);
+        for (uint32_t d = ptr(j, 0x10); d != ~0u && --budget > 0; d = ptr(d, 0x4)) {
+          const uint32_t mobj = ptr(d, 0x8), texanim = matanim == ~0u ? ~0u : ptr(matanim, 0x8);
+          for (uint32_t t = mobj == ~0u ? ~0u : ptr(mobj, 0x8); t != ~0u && --budget > 0; t = ptr(t, 0x4))
+            out.push_back(animated(texanim, word(t, 0x8)));
+          matanim = matanim == ~0u ? ~0u : ptr(matanim, 0x0);
+        }
+      }
+      joint(ptr(j, 0x8), mj == ~0u ? ~0u : ptr(mj, 0x0));
+    }
+  }
+};
+std::vector<bool> of(const std::vector<uint8_t>& bytes) {
+  uint32_t size = 0, root = 0; std::vector<uint32_t> rel; std::string unused;
+  if (!skeleton::share_joint_root(bytes, &size, &root, &rel, &unused) || size + 0x20ull > bytes.size()) return {};
+  const uint64_t relocations = be32(bytes.data() + 8), roots = be32(bytes.data() + 12), references = be32(bytes.data() + 16);
+  const uint64_t root_table = 0x20ull + size + relocations * 4ull, strings = root_table + (roots + references) * 8ull;
+  uint32_t matanim = ~0u;
+  for (uint64_t i = 0; i < roots && strings <= bytes.size(); ++i) {
+    const uint8_t* record = &bytes[(size_t)(root_table + i * 8)];
+    const uint64_t name = strings + be32(record + 4);
+    if (name >= bytes.size()) continue;
+    const char* t = (const char*)&bytes[(size_t)name];
+    const size_t n = strnlen(t, bytes.size() - (size_t)name);
+    static constexpr char suffix[] = "_matanim_joint";
+    if (n >= sizeof suffix - 1 && std::memcmp(t + n - (sizeof suffix - 1), suffix, sizeof suffix - 1) == 0 && be32(record) < size)
+      matanim = be32(record);
+  }
+  Walk w{bytes, size, rel};
+  w.joint(root, matanim);
+  return w.out;
+}
+}  // namespace texanims
+
 // The served copy of an online-allowed costume skin gets the standard costume's joint rest pose
 // (skeleton::copy_rest_pose). Returns how many joints differed; 0 when nothing had to change.
 uint32_t costume_take_standard_bones(const std::vector<uint8_t>& clean, std::vector<uint8_t>& served) {
@@ -1761,6 +1856,20 @@ uint32_t costume_take_standard_bones(const std::vector<uint8_t>& clean, std::vec
 }
 
 }  // namespace
+
+// Public: the first texture the disc's own costume animates and `candidate` does not (its index as the
+// game counts textures), or -1. The game's own costume setup stops on such a costume ("can't find
+// fighter texture anim!"); both engines' versions of it let that texture stay still instead, but a mod
+// disc's own copy of the setup keeps the stop (Akaneia with Diet Melee 64's Falco, 1.0.19 report).
+int costume_missing_texture_anim(const std::vector<uint8_t>& clean, const std::vector<uint8_t>& candidate) {
+  const std::vector<bool> want = texanims::of(clean), have = texanims::of(candidate);
+  for (size_t i = 0; i < want.size(); ++i)
+    if (want[i] && (i >= have.size() || !have[i])) return (int)i;
+  return -1;
+}
+bool (*g_strict_texture_anims)() = nullptr;
+void set_strict_texture_anims(bool (*fn)()) { g_strict_texture_anims = fn; }
+
 
 // Public: whether the game can draw this costume at all. Offline and online alike, unlike the
 // skeleton comparison below: a file that fails here stops the game on any machine.
@@ -6017,6 +6126,7 @@ static void publish_locked(uint8_t* fst, uint32_t fst_size, const std::string* o
       std::vector<uint8_t> served = bytes;   // per disc file: the online rule and the length below are per file
       std::vector<uint8_t> online_form;      // a stage skin's online form, when it differs from `served`
       bool online_allowed = true;
+      bool lacks_texture_anim = false;
       std::string online_reason;   // kept for the Mods tab: the verdict is never only in the log
       if (asset->info.kind == "stage_visual") {
         // A selected skin needs readable gameplay tables offline too. An old explicit selection
@@ -6029,6 +6139,27 @@ static void publish_locked(uint8_t* fst, uint32_t fst_size, const std::string* o
                     disc_file.path.c_str());
           runtime_errors.push_back(asset->info.name + ": malformed stage tables; using the standard stage.");
           continue;
+        }
+        // Fewer collision lines or groups than the original: the stage's own code finds its lines and
+        // groups by number (Pokemon Stadium's transformations, moving platforms), and one that is not
+        // there stops the game ("mplib.c: not found lineID=140", a Stadium skin with its own collision
+        // on the Melee 3D disc). Offline too, that skin gives way to the standard stage.
+        if (clean_read) {
+          stage_safety::Archive o{clean}, k{served};
+          if (o.parse() && k.parse() && o.roots.count("coll_data") && k.roots.count("coll_data")) {
+            const uint32_t co = o.roots.at("coll_data"), ck = k.roots.at("coll_data");
+            if (o.bounds(co, 0x30) && k.bounds(ck, 0x30)) {
+              const uint32_t lines_o = o.get(co + 0x0C), lines_k = k.get(ck + 0x0C);
+              const uint32_t groups_o = o.get(co + 0x28), groups_k = k.get(ck + 0x28);
+              if (lines_k < lines_o || groups_k < groups_o) {
+                host::log("cosmetics: stage %s rejected: the skin's collision has %u lines and %u groups, the stage's "
+                          "own code needs the original's %u and %u; using the standard stage",
+                          disc_file.path.c_str(), lines_k, groups_k, lines_o, groups_o);
+                runtime_errors.push_back(asset->info.name + ": its collision is missing parts the stage needs; using the standard stage.");
+                continue;
+              }
+            }
+          }
         }
         std::string validation_error;
         // A skin that does not match the original as it is: offline it is served as it is, and
@@ -6103,13 +6234,17 @@ static void publish_locked(uint8_t* fst, uint32_t fst_size, const std::string* o
         host::log("cosmetics: costume %s %s online (%s)", disc_file.path.c_str(),
                   online_allowed ? "allowed" : "uses vanilla", validation_error.c_str());
         online_reason = online_reason_short(validation_error);
+        lacks_texture_anim = costume_missing_texture_anim(clean, served) >= 0;
+        if (lacks_texture_anim)
+          host::log("cosmetics: costume %s lacks texture animation %d of the disc's costume; a mod's own costume setup gets the disc's costume",
+                    disc_file.path.c_str(), costume_missing_texture_anim(clean, served));
         // The skin is drawn; the bones the game simulates with are the standard costume's.
         if (online_allowed)
           if (const uint32_t moved = costume_take_standard_bones(clean, served))
             host::log("cosmetics: costume %s: %u joints take the standard costume's rest pose (the skin's differed)",
                       disc_file.path.c_str(), moved);
       }
-      if (!online_allowed) {
+      if (!online_allowed || lacks_texture_anim) {
         // This file is the override offline and the disc's own file online, and the game sees one
         // length for it (the FST is patched once). The game also checks that an archive's own
         // length field equals the file's length (HSD_ArchiveParse) and stops when they differ.
@@ -6136,6 +6271,7 @@ static void publish_locked(uint8_t* fst, uint32_t fst_size, const std::string* o
       RuntimeAsset active{asset->info.id, asset->info.target_path,
                           std::make_shared<const std::vector<uint8_t>>(std::move(served)),
                           disc_file.size, online_allowed, asset->info.kind, std::move(online_reason)};
+      active.lacks_texture_anim = lacks_texture_anim;
       if (!online_form.empty()) active.online_bytes = std::make_shared<const std::vector<uint8_t>>(std::move(online_form));
       next->by_start[disc_file.start] = std::move(active);
       host::log("cosmetics: %s -> %s at %08X (%u vanilla bytes, %zu override bytes)",
@@ -6711,6 +6847,14 @@ RepublishResult republish_stage(uint8_t* fst, uint32_t fst_size, const std::stri
   return result;
 }
 
+bool file_textures_only(const std::vector<uint8_t>& clean, const std::vector<uint8_t>& candidate, std::string* detail) {
+  std::string local;
+  if (!detail) detail = &local;
+  if (!visual_dat_only(clean, candidate, detail)) return false;
+  *detail = "textures only";
+  return true;
+}
+
 bool stage_gameplay_matches(const std::vector<uint8_t>& clean, const std::vector<uint8_t>& candidate,
                             std::string* detail) {
   std::string local;
@@ -6723,7 +6867,16 @@ bool stage_online_form(const std::vector<uint8_t>& clean, const std::vector<uint
                        std::vector<uint8_t>* online, std::string* detail, const std::string& stage_file) {
   std::string local;
   if (!detail) detail = &local;
-  if (stage_gameplay_matches(clean, skin, detail)) { if (online) online->clear(); return true; }
+  // Every form served online also draws its floors where the collision is (stage_floor_fit.h): 20XX's
+  // tilting Battlefield drew sloped platforms over flat ones online (CHARA, 11-23). A form that does
+  // not is passed over; with none left the standard stage is served online, as for any refused skin.
+  std::string floor_note;
+  bool floor_refused = false;   // a form was passed over for its floors: that is the reason given
+  if (stage_gameplay_matches(clean, skin, detail)) {
+    if (stage_safety::floor_art_fits(clean, skin, &floor_note)) { if (online) online->clear(); return true; }
+    *detail = floor_note;
+    return false;
+  }
   const std::string as_is = *detail;
   std::string note;
   // The skin's gameplay values put back to the original's (stage_safety::restore_gameplay): a skin
@@ -6736,9 +6889,13 @@ bool stage_online_form(const std::vector<uint8_t>& clean, const std::vector<uint
   // skins that set the music table and rebuild the stage were all served as the original online).
   if (stage_safety::restore_gameplay(clean, skin, &restored, &note)) {
     if (stage_draw_safe(restored, &note)) {
-      *detail = "the skin with the original stage's gameplay values";
-      if (online) *online = std::move(restored);
-      return true;
+      if (stage_safety::floor_art_fits(clean, restored, &floor_note)) {
+        *detail = "the skin with the original stage's gameplay values";
+        if (online) *online = std::move(restored);
+        return true;
+      }
+      note = floor_note;
+      floor_refused = true;
     }
   }
   // A copy restore_gameplay could only partly repair is still tried first, as 0.9.13 did.
@@ -6750,15 +6907,19 @@ bool stage_online_form(const std::vector<uint8_t>& clean, const std::vector<uint
     if (base->empty()) continue;
     std::string try_note;
     std::vector<uint8_t> out;
-    if (!stage_safety::graft_visuals(clean, *base, &out, &try_note, stage_safety::visual_only_models(stage_file))) {
+    if (!stage_safety::graft_visuals(clean, *base, &out, &try_note, stage_safety::visual_only_models(stage_file),
+                                      stage_safety::same_motion_models(stage_file))) {
       if (!drawn) note = try_note;
       continue;
     }
     if (!stage_draw_safe(out, &try_note)) { note = "drawn over the original: " + try_note; continue; }
+    if (!stage_safety::floor_art_fits(clean, out, &floor_note)) {
+      note = "drawn over the original: " + floor_note; floor_refused = true; continue;
+    }
     grafted = std::move(out); note = try_note; drawn = true;
     break;
   }
-  if (!drawn) { *detail = as_is + "; " + note; return false; }
+  if (!drawn) { *detail = floor_refused ? floor_note : as_is + "; " + note; return false; }
   *detail = "drawn over the original stage's gameplay (" + note + ")";
   if (online) *online = std::move(grafted);
   return true;
@@ -7052,7 +7213,8 @@ OverrideRead read(uint32_t vanilla_file_start, uint32_t file_offset, void* dst, 
     return OverrideRead::Success;
   }
   const bool online_now = online_active();
-  if (!found->second.online_allowed && online_now) {
+  const bool mod_setup = found->second.lacks_texture_anim && g_strict_texture_anims && g_strict_texture_anims();
+  if ((!found->second.online_allowed && online_now) || mod_setup) {
     const uint32_t vanilla_size = found->second.vanilla_size;
     const uint64_t exposed_size = std::max<size_t>(vanilla_size, found->second.bytes->size());
     if (file_offset > exposed_size || (uint64_t)file_offset + size > exposed_size + 31)
@@ -7283,7 +7445,15 @@ std::string retail_disc_problem(const fs::path& path) {
   const uint64_t size = fs::file_size(path, ec);
   char head[8]{};
   std::ifstream file(path, std::ios::binary);
-  if (ec || !file || !file.read(head, sizeof head)) return "The game disc file could not be read.";
+  if (ec || !file || !file.read(head, sizeof head)) {
+    // Which file and why (a report said only "could not be read", 11-22): the path the game was given and
+    // Windows' own reason, so the next report names the cause.
+    const std::string why = ec ? ec.message() : std::generic_category().message(errno);
+    host::log("cosmetics: the game disc %s could not be read for the looks (%s)", path.u8string().c_str(), why.c_str());
+    if (path.empty()) return "The game disc file could not be read: this game was started without one.";
+    return "The game disc file could not be read (" + path.filename().u8string() + ": " + why + "). Check that it is still "
+           "there, then choose it again on the launcher's Play page.";
+  }
   if (std::memcmp(head, "GALE01", 6) != 0) {
     if (size != kRetailSize)
       return "The game disc is a compressed or trimmed copy. These looks need the full 1.36 GB .iso: convert it to a "

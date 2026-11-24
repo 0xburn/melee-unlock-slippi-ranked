@@ -49,6 +49,7 @@
 #include "native_practice.h"
 #endif
 #include "practice_cpu.h"
+#include "practice_ghosts.h"
 #include "window.h"
 #include "audio.h"
 #include "host.h"
@@ -62,6 +63,7 @@
 namespace gecko { int option_screen_shake_percent = 100; }
 #include "lag_test_codes.h"
 #include "gecko_data.h"
+#include "looks_disc.h"
 #include <chrono>
 #include "hid_pad.h"
 #include "phob_menu.h"
@@ -96,6 +98,7 @@ static bool arena_capture() { return false; }
 static uint16_t arena_withheld() { return 0; }
 #endif
 #include "practice_menu.h"
+#include "settings_chord.h"
 // Lab view: the release ships its silhouette packs in Lab\ (tools/build_lab_assets.py), on both engines.
 constexpr bool kLabViewAvailable = true;
 #ifndef MELEE_PORT_VERSION
@@ -156,6 +159,17 @@ static void apply_rtx_preset(RenderOptions& o) {
   o.rtx_skin = o.rtx_stage_shade = true;
   o.rtx_glossy_floors = p.floor > 0;
   if (o.rtx_preset == 4) o.rtx_photo_mode = true;
+}
+// The disc a looks install patches: the game's own, else (Settings opened alone from the launcher,
+// with no disc) the one the launcher plays with. looks_disc.h has the order.
+static std::string settings_looks_disc() {
+  std::filesystem::path exe_dir, local;
+#ifdef _WIN32
+  wchar_t exe[MAX_PATH] = {};
+  if (GetModuleFileNameW(nullptr, exe, MAX_PATH)) exe_dir = std::filesystem::path(exe).parent_path();
+  if (const wchar_t* l = _wgetenv(L"LOCALAPPDATA")) local = l;
+#endif
+  return ::host::looks_disc::pick(host::options.mod_base_iso, host::options.iso, exe_dir, local);
 }
 namespace {
 std::atomic<uint32_t> g_guest_options_selection{0};
@@ -414,12 +428,18 @@ static void draw_combo_counter() {
   draw->PopClipRect();
 }
 
+// A player's local player tag Gecko code (user_gecko::hand_ports_of_codes), set by the game thread.
+std::atomic<bool> g_code_tag_on{false};
+std::mutex g_code_tag_mutex;
+std::string g_code_tag_text;
+bool g_code_tag_arrow = false;
 // Community codes drawn over the match (HUD tab), from what the native game reports each drawn frame
 // (host API 24), in the game's font. Nana's percent: under each Ice Climbers player's damage, while
 // Nana is in play. Ally markers (online, as the code has them): YOU over your own fighter, a heart
 // over your teammate in a teams match.
 static void draw_community_code_overlays() {
-  const uint32_t codes = host::g_community_codes.load(std::memory_order_relaxed);
+  const uint32_t codes = host::g_community_codes.load(std::memory_order_relaxed) |
+                         (g_code_tag_on.load(std::memory_order_relaxed) ? MU_DISPLAY_OPTION_ALLY_INDICATORS : 0u);
   if (!g_hud_match || !(codes & (MU_DISPLAY_OPTION_NANA_PERCENT | MU_DISPLAY_OPTION_ALLY_INDICATORS))) return;
   const OverlayBounds bounds = overlay_bounds();
   const float width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
@@ -454,11 +474,35 @@ static void draw_community_code_overlays() {
       const bool mine = slot == me, ally = !mine && p.team >= 0 && p.team == g_hud_players[me].team;
       if (!p.present || (!mine && !ally)) continue;
       if (!std::isfinite(p.tag_x) || !std::isfinite(p.tag_y) || p.tag_y <= 0.0f) continue;
-      const char* label = mine ? "YOU" : "\xE2\x99\xA5";
-      const float w = practice_menu::text_width(px, label);
-      const float x = at_x(p.tag_x) - w * 0.5f;
-      const float y = bounds.top + p.tag_y / 480.0f * height - px * 2.2f;
-      practice_menu::text(draw, x, y, px, mine ? colors[slot] : IM_COL32(255, 90, 140, 255), label, 0.0f, true);
+      const float cx = at_x(p.tag_x), y = bounds.top + p.tag_y / 480.0f * height - px * 2.2f;
+      const ImU32 heart_colour = IM_COL32(255, 90, 140, 255);
+      std::string own_text;
+      bool arrow = false;
+      {
+        std::lock_guard<std::mutex> lock(g_code_tag_mutex);
+        own_text = g_code_tag_text;
+        arrow = g_code_tag_arrow;
+      }
+      if (mine && arrow) {   // a pointer down at the fighter, with a dark edge like the letters
+        const float s = px * 0.55f, top = y + px * 0.15f;
+        draw->AddTriangleFilled(ImVec2(cx - s - 1.5f, top - 1.5f), ImVec2(cx + s + 1.5f, top - 1.5f),
+                                ImVec2(cx, top + s * 1.3f + 2.0f), IM_COL32(0, 0, 0, 200));
+        draw->AddTriangleFilled(ImVec2(cx - s, top), ImVec2(cx + s, top), ImVec2(cx, top + s * 1.3f), colors[slot]);
+      } else if (mine) {
+        const char* label = own_text.empty() ? "YOU" : own_text.c_str();
+        const float w = practice_menu::text_width(px, label);
+        practice_menu::text(draw, cx - w * 0.5f, y, px, colors[slot], label, 0.0f, true);
+      } else {   // a heart: two circles over a point
+        const float r = px * 0.26f, cy = y + px * 0.45f;
+        for (int pass = 0; pass < 2; ++pass) {
+          const float e = pass == 0 ? 1.5f : 0.0f;
+          const ImU32 col = pass == 0 ? IM_COL32(0, 0, 0, 200) : heart_colour;
+          draw->AddCircleFilled(ImVec2(cx - r * 0.95f, cy), r + e, col, 16);
+          draw->AddCircleFilled(ImVec2(cx + r * 0.95f, cy), r + e, col, 16);
+          draw->AddTriangleFilled(ImVec2(cx - r * 1.95f - e, cy + r * 0.2f), ImVec2(cx + r * 1.95f + e, cy + r * 0.2f),
+                                  ImVec2(cx, cy + r * 2.4f + e), col);
+        }
+      }
     }
   }
   draw->PopClipRect();
@@ -906,7 +950,9 @@ static void draw_input_overlay(int port, int row, bool lone, bool editable, bool
     auto text = [&](float x, int8_t sx, int8_t sy, ImU32 colour) {
       float fx = sx / 80.f, fy = sy / 80.f;
       const float mag = std::sqrt(fx * fx + fy * fy);
-      if (mag > 1.f) { fx /= mag; fy /= mag; }
+      // Past the rim the game pulls the stick back to length 80 and drops the fraction (HSD_PadClamp), so
+      // a full diagonal is 56, 56: 0.7000 0.7000. Without that last step it read 0.7071 (player report 11-23).
+      if (mag > 1.f) { fx = std::trunc(fx / mag * 80.f) / 80.f; fy = std::trunc(fy / mag * 80.f) / 80.f; }
       char s[32];
       std::snprintf(s, sizeof s, "%.4f %.4f", fx, fy);
       dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * k, P(x, 134), colour, s);
@@ -1046,6 +1092,10 @@ static std::string binding_source_label(host::CaptureDevice kind, int action, ui
 
 static std::string binding_label(host::CaptureDevice kind, int index, int action) {
   const uint32_t v = binding_get(kind, index, action);
+  // A HID pad's sticks are read from its own axes, not bound: these rows are only for a box that sends
+  // directions as buttons. "Not bound" there read as a broken stick (B0XX reports 11-22).
+  if (!v && kind == host::CaptureDevice::HidPad && (host::is_stick_action(action) || host::is_cstick_action(action)))
+    return host::is_stick_action(action) ? "Controller's stick" : "Controller's C-stick";
   if (!v && (host::is_trigger_action(action) || host::is_analog_action(action))) {
     // A box's own trigger axis has no source to bind: it always feeds the travel.
     if (kind == host::CaptureDevice::HidPad && host::is_analog_action(action)) return "Device axis";
@@ -2235,8 +2285,10 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   options.freeze_fd = false;
   options.hide_ko_explosions = false;
   options.hide_hud_emblems = false;
+  options.hide_percents = false;
   options.community_codes = 0;
   options.pro_ai_stronger = 0;   // a file without the key: ask
+  options.pro_ai_extra_delay = 0;
   options.unlock_all = true;   // a file without the key: on
   options.results_screen = true;
   options.training_hud = true;
@@ -2248,7 +2300,7 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   // off, so every later launch booted to an FFA character select that rumbled and turned the picture
   // black and white on X and A. That old key is read as off.
   options.lossless_lag_test = false;
-  options.early_inputs = false;   // a file without the key: off (1.0.2 on)
+  options.early_inputs = true;   // a file without the key: on
 #ifndef MELEE_NO_SLIPPI   // the spectator server is part of the Slippi layer
   options.slippi_spectator = true;   // a file without the key: on, as in Slippi Dolphin
   options.slippi_spectator_port = 51441;
@@ -2314,6 +2366,19 @@ void load_pc_settings(RenderOptions& options, int& volume) {
     value = first == std::string::npos ? std::string() : value.substr(first);
     while (!value.empty() && (value.back() == '\r' || value.back() == ' ' || value.back() == '\t')) value.pop_back();
     if (key == "truewsfit") { truewsfit_seen = true; continue; }
+    // Read outside the long else-if chain below: one more branch there is past MSVC's nesting limit (C1061).
+    if (key == "proaireaction") { options.pro_ai_extra_delay = std::clamp(std::atoi(value.c_str()), 0, phillip_ai::kMaxExtraDelay); continue; }
+    if (key == "practicechord") {
+      const int chord = (int)std::strtol(value.c_str(), nullptr, 16);
+      if (host::settings_shortcut::valid_practice_chord((uint16_t)chord)) options.practice_chord = chord;
+      continue;
+    }
+    if (key == "vspro") {
+      int v[4] = {-1, -1, -1, -1};
+      std::sscanf(value.c_str(), "%d,%d,%d,%d", &v[0], &v[1], &v[2], &v[3]);
+      for (int i = 0; i < 4; ++i) options.vs_pro[i] = std::clamp(v[i], -1, 99);
+      continue;
+    }
     if (value.empty()) continue;
     if (source_port::mods::parse_choice(key, value, &options.mod_choices)) continue;
     if (load_rtx_key(key, value)) continue;
@@ -2399,12 +2464,12 @@ void load_pc_settings(RenderOptions& options, int& volume) {
         options.offline_delay_frames = std::clamp(std::stoi(value), 1, 9);
         offline_delay_frames_seen = true;
       }
-      // early_inputs, the old key saved on by default, is not read (render_options.h).
-      else if (key == "early_inputs2" || key == "early_inputs") { if (key == "early_inputs2") options.early_inputs = value == "1"; }
+      // early_inputs and early_inputs2, older keys (the second saved off for everyone), are not read.
+      else if (key == "early_inputs3" || key == "early_inputs2" || key == "early_inputs") { if (key == "early_inputs3") options.early_inputs = value != "0"; }
       else if (key == "performance") options.performance_overlay = value == "1";
       else if (key == "showfps") options.show_fps = value == "1";
       else if (key == "showvram") options.show_vram = value == "1";
-      else if (key == "showping") options.show_ping = value == "1";
+      else if (key == "showping" || key == "liveping") (key == "showping" ? options.show_ping : options.live_ping) = value == "1";
       else if (key == "netoverlay") net_overlay::set_enabled(value == "1");
       // Diagnostic, off unless someone is hunting a one-frame glitch: see RenderOptions::flicker_scan.
       // Settings-file only rather than a control in the panel, because it costs a readback on every
@@ -2515,7 +2580,8 @@ void load_pc_settings(RenderOptions& options, int& volume) {
       else if (key == "cpu_20xx") options.cpu_20xx = value == "1";
       else if (key == "freeze_fd") options.freeze_fd = value == "1";
       else if (key == "hide_ko_explosions") options.hide_ko_explosions = value == "1";
-      else if (key == "hide_hud_emblems") options.hide_hud_emblems = value == "1";
+      else if (key == "hide_hud_emblems" || key == "hide_percents")
+        (key == "hide_percents" ? options.hide_percents : options.hide_hud_emblems) = value == "1";
       else if (key == "proaistronger") options.pro_ai_stronger = std::clamp(std::atoi(value.c_str()), 0, 2);
       else if (key == "community_codes") options.community_codes = (uint32_t)std::strtoul(value.c_str(), nullptr, 16) & (MU_DISPLAY_OPTION_CODES_ALL | MU_DISPLAY_OPTION_OFFLINE_CODES);
       else if (key == "unlock_all") options.unlock_all = value != "0";
@@ -2688,7 +2754,18 @@ void load_pc_settings(RenderOptions& options, int& volume) {
         if (us != std::string::npos) {
           int idx = std::stoi(key.substr(3, us - 3));
           std::string action = key.substr(us + 1);
-          if (idx >= 0 && idx < 4)
+          // The invert switches were written as "hid<n>_invert" and only ever read back as "pad<n>_invert":
+          // they came back off after every restart.
+          if (idx >= 0 && idx < 4 && action == "invert") host::g_hid_stick_invert[idx] = (uint8_t)(std::stoi(value) & 15);
+          else if (idx >= 0 && idx < 4 && action == "axes") {
+            std::istringstream list(value);
+            for (int r = 0; r < host::HID_ROLE_COUNT; ++r) {
+              int axis = -1;
+              if (!(list >> axis)) break;
+              host::g_hid_axis_role[idx][r] = axis >= 0 && axis < 7 ? (uint8_t)axis : host::kHidAxisAuto;
+            }
+          }
+          else if (idx >= 0 && idx < 4)
             for (int i = 0; i < (int)host::BindAction::Count; ++i)
               if (action == kActionNames[i]) host::g_hid_bindings[idx].mask[i] = (uint32_t)std::stoul(value);
         }
@@ -2778,8 +2855,12 @@ void load_pc_settings(RenderOptions& options, int& volume) {
   host::g_freeze_fd.store(options.freeze_fd, std::memory_order_relaxed);
   host::g_hide_ko_explosions.store(options.hide_ko_explosions, std::memory_order_relaxed);
   host::g_hide_hud_emblems.store(options.hide_hud_emblems, std::memory_order_relaxed);
+  gx::set_hide_percents(options.hide_percents);
   host::g_community_codes.store(options.community_codes, std::memory_order_relaxed);
   phillip_ai::set_stronger_choice(options.pro_ai_stronger);
+  host::settings_shortcut::practice_chord().store((uint16_t)options.practice_chord, std::memory_order_relaxed);
+  phillip_ai::set_extra_delay(options.pro_ai_extra_delay);
+  for (int port = 0; port < 4; ++port) practice_cpu::set_vs_pro(port, options.vs_pro[port]);
   RenderOptions::live_unlock_all() = options.unlock_all;
   RenderOptions::live_zelda_as_sheik() = options.zelda_as_sheik;
   RenderOptions::live_results_screen() = options.results_screen;
@@ -3998,7 +4079,7 @@ static void apply_practice_tools(RenderOptions& options) {
 static bool draw_practice_cpu_tabs(RenderOptions& options, int tab) {
   using namespace practice_ui;
   MuPcConfig c = practice_cpu::config();
-  bool changed = false;
+  bool changed = false, pro_changed = false;
   switch (tab) {
   case 1: {
     bool on = c.enabled != 0;
@@ -4023,7 +4104,18 @@ static bool draw_practice_cpu_tabs(RenderOptions& options, int tab) {
     heading("Style");
     changed |= percent_row("Aggression", &c.aggression, "How often it attacks (rather than moves) when you are in range.");
     changed |= number_row("Attack range", &c.attack_range, 10, 80, "%d units", "How close you must be before it attacks.");
-    changed |= number_row("Reaction time", &c.reaction_frames, 0, 40, "%d frames", "Frames before it answers an attack. People react in 15 to 25.");
+    if (practice_menu::pro_active(c)) {
+      // A pro in use: its reaction, not the practice CPU's, so changing it keeps the pro (Wens, 11-23).
+      uint8_t extra = (uint8_t)options.pro_ai_extra_delay;
+      if (number_row("Pro reaction", &extra, 0, phillip_ai::kMaxExtraDelay, "+%d frames",
+                     "Frames added to the pro's own reaction (18 for most). 0 plays as it was trained; more reacts later.")) {
+        options.pro_ai_extra_delay = extra;
+        phillip_ai::set_extra_delay(extra);
+        pro_changed = true;
+      }
+    } else {
+      changed |= number_row("Reaction time", &c.reaction_frames, 0, 40, "%d frames", "Frames before it answers an attack. People react in 15 to 25.");
+    }
     changed |= number_row("CPU delay", &c.act_delay, 0, 30, "%d frames", "Frames it waits before it acts out of shield, getting up and leaving hitstun.");
     {
       static const char* const respawn[MU_PC_RESPAWN_COUNT] = {"Wait", "Get off at once", "Mix"};
@@ -4223,7 +4315,7 @@ static bool draw_practice_cpu_tabs(RenderOptions& options, int tab) {
     practice_cpu::set_config(c);
     apply_practice_tools(options);
   }
-  return changed;
+  return changed || pro_changed;
 }
 
 // An arena room's match window (host::options.spectate) picks how it shows the match: STANDARD,
@@ -4676,6 +4768,7 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     }
     if (r.changed) { state.dirty = true; apply_practice_tools(options); }
     if (r.stronger_changed) { options.pro_ai_stronger = phillip_ai::stronger_choice(); state.dirty = true; }
+    if (r.pro_reaction_changed) { options.pro_ai_extra_delay = phillip_ai::extra_delay(); state.dirty = true; }
     const auto close_menu = [&state]() { state.practice_open = false; state.practice_release_capture = true; };
     if (practice.can_start && (r.start_ranked || r.start_unranked)) {
       if (r.start_ranked) slippi::native_practice::submit_start_ranked();
@@ -4706,7 +4799,7 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
     practice_card_title(title, true);
     ImGui::TextDisabled("%s", matchmaking_state_text(practice.matchmaking_state));
     if (!practice.opponent.empty()) ImGui::TextDisabled("vs %s", practice.opponent.c_str());
-    ImGui::TextDisabled("Keep practicing. Tab or Start + D-pad Up + Z: search controls");
+    ImGui::TextDisabled("Keep practicing. Tab or %s: search controls", host::settings_shortcut::practice_chord_name().c_str());
     practice_card_end();
   }
 
@@ -4715,7 +4808,7 @@ static void draw_native_practice(SettingsState& state, RenderOptions& options,
       ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetTime() < 20.0 ? 1.0f : 0.5f);
       practice_card_begin("##native_practice_hint", ImVec2(screen.x - 12, 52), ImVec2(1, 0), false);
       practice_card_title("Find a match while you train", false);
-      ImGui::TextDisabled("Start + D-pad Up + Z (Tab on a keyboard), then Search");
+      ImGui::TextDisabled("%s (Tab on a keyboard), then Search", host::settings_shortcut::practice_chord_name().c_str());
       practice_card_end();
       ImGui::PopStyleVar();
     }
@@ -5046,7 +5139,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\naudio_mode " << options.audio_mode << "\naudio_buffer_ms " << options.audio_buffer_ms << "\naudio_device " << options.audio_device
        << "\naudio_asio_driver " << options.audio_asio_driver << "\naudio_asio_buffer " << options.audio_asio_buffer
        << "\nshowfps " << options.show_fps
-       << "\nshowvram " << (options.show_vram ? 1 : 0) << "\nshowping " << options.show_ping
+       << "\nshowvram " << (options.show_vram ? 1 : 0) << "\nshowping " << options.show_ping << "\nliveping " << (options.live_ping ? 1 : 0)
        << "\nnetoverlay " << (net_overlay::enabled() ? 1 : 0)
        << "\ndlss " << options.dlss_mode << "\nframegen " << options.frame_generation_mode
        << "\nfgmax " << options.fg_cached_max << "\nfgdynamic " << (options.fg_cached_dynamic ? 1 : 0)
@@ -5090,7 +5183,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nonlinedelayauto " << (slippi::online::config().auto_delay ? 1 : 0)
        << "\noffline_delay " << (options.offline_delay ? 1 : 0)
        << "\noffline_delay_frames " << options.offline_delay_frames
-       << "\nearly_inputs2 " << (options.early_inputs ? 1 : 0)
+       << "\nearly_inputs3 " << (options.early_inputs ? 1 : 0)
        << "\nquickchat " << slippi::online::config().chat
        << "\ndirectpause " << (slippi::online::config().direct_pause ? 1 : 0)
        << "\nportcolour1 " << slippi::online::config().port_colour[0]
@@ -5128,7 +5221,7 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nstockhudscale " << options.stock_hud_scale
        << "\ndamagehudscale " << options.damage_hud_scale
        << "\nplayernicknames " << (options.show_player_nicknames ? 1 : 0)
-       << "\nmatchmakinghint " << (options.matchmaking_hint ? 1 : 0) << "\npracticestyle " << options.practice_style << "\npracticeopens " << options.practice_opens
+       << "\nmatchmakinghint " << (options.matchmaking_hint ? 1 : 0) << "\npracticestyle " << options.practice_style << "\npracticechord " << std::hex << options.practice_chord << std::dec << "\npracticeopens " << options.practice_opens
        << "\ninputoverlay " << options.input_overlay << "\ninputoverlayports " << options.input_overlay_ports
        << "\nclean_replays " << (options.clean_replays ? 1 : 0)
        << "\nlabview " << options.lab_view << "\nlabskipscene " << options.lab_skip_scene
@@ -5193,8 +5286,11 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\nfreeze_fd " << (options.freeze_fd ? 1 : 0)
        << "\nhide_ko_explosions " << (options.hide_ko_explosions ? 1 : 0)
        << "\nhide_hud_emblems " << (options.hide_hud_emblems ? 1 : 0)
+       << "\nhide_percents " << (options.hide_percents ? 1 : 0)
        << "\ncommunity_codes " << std::hex << options.community_codes << std::dec
        << "\nproaistronger " << options.pro_ai_stronger
+       << "\nproaireaction " << options.pro_ai_extra_delay
+       << "\nvspro " << options.vs_pro[0] << "," << options.vs_pro[1] << "," << options.vs_pro[2] << "," << options.vs_pro[3]
        << "\nunlock_all " << (options.unlock_all ? 1 : 0)
        << "\nzelda_as_sheik " << (options.zelda_as_sheik ? 1 : 0)
        << "\nresults_screen " << (options.results_screen ? 1 : 0)
@@ -5279,6 +5375,13 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
       file << "\nhid" << idx << "_" << kActionNames[i] << " " << host::g_hid_bindings[idx].mask[i];
   for (int idx = 0; idx < 4; ++idx)
     if (host::g_hid_stick_invert[idx]) file << "\nhid" << idx << "_invert " << (int)host::g_hid_stick_invert[idx];
+  for (int idx = 0; idx < 4; ++idx) {
+    bool any = false;
+    for (const uint8_t axis : host::g_hid_axis_role[idx]) any = any || axis != host::kHidAxisAuto;
+    if (!any) continue;
+    file << "\nhid" << idx << "_axes";
+    for (const uint8_t axis : host::g_hid_axis_role[idx]) file << " " << (axis == host::kHidAxisAuto ? -1 : (int)axis);
+  }
   file << binding_levels_text();
   for (int n = 0; n < 4; ++n)
     file << "\nport" << n << " " << port_source_to_combo(host::g_port_sources[n]);
@@ -7217,7 +7320,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           } else {
             ImGui::BeginDisabled(s.any_busy);
             if (settings_widgets::Button("Install")) {
-              const std::string disc = host::options.mod_base_iso.empty() ? host::options.iso : host::options.mod_base_iso;
+              const std::string disc = settings_looks_disc();
               std::string tool;
 #ifdef _WIN32
               wchar_t exe[MAX_PATH] = {};
@@ -7412,7 +7515,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       if (settings_widgets::Button(building.load() ? "Preparing..." : "Prepare mod artwork")) {
         building = true;
         const std::string folder = patcher_folder;
-        const std::string disc = host::options.mod_base_iso.empty() ? host::options.iso : host::options.mod_base_iso;
+        const std::string disc = settings_looks_disc();
         std::string tool;
 #ifdef _WIN32
         wchar_t exe[MAX_PATH] = {};
@@ -9244,7 +9347,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           bool in_pick = pack.random;
           const std::string label = pack.name + ": " + std::to_string(pack.skins) +
               (pack.skins == 1 ? " stage skin" : " stage skins") + " for " + std::to_string(pack.stages) +
-              (pack.stages == 1 ? " stage" : " stages") + ", in the random pick";
+              (pack.stages == 1 ? " stage" : " stages") +
+              // What the box does now, not what ticking it would do: an unticked pack said "in the random pick" (11-23).
+              (in_pick ? ", in the random pick" : ", left out of the random pick");
           if (settings_checkbox(label.c_str(), &in_pick)) {
             std::string error;
             mod_message = host::cosmetics::set_stage_pack_random(pack.key, in_pick, &error) ?
@@ -9907,6 +10012,39 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetTooltip("When you pick Zelda, the match starts as Sheik, as holding A at the start does in Versus.\n"
                         "Works in every mode, rogueMelee included. Down B still changes between them.\n"
                         "Offline only: online, use Slippi's own character choice. Source Port only.");
+    {
+      // VS Mode CPU slots can be a Pro AI (owner 11-23: "vs mode slots and people add them in, not during
+      // unranked or ranked"). Offline VS only; the game library and the host both refuse it online.
+      ImGui::SeparatorText("Pro AI in VS Mode");
+      struct Choice { int pro; std::string name; };
+      static std::vector<Choice> choices;
+      if (choices.empty()) {
+        choices.push_back({-1, "Game CPU"});
+        const int count = (int)(sizeof practice_ghosts::kGhosts / sizeof practice_ghosts::kGhosts[0]);
+        for (int i = 0; i < count; ++i)
+          if (practice_ghosts::kReleased[i])
+            choices.push_back({i, std::string(practice_ghosts::kGhosts[i].name) + " (" + practice_ghosts::kGhosts[i].character + ")"});
+      }
+      static std::vector<const char*> labels;
+      if (labels.empty()) for (const Choice& c : choices) labels.push_back(c.name.c_str());
+      for (int port = 0; port < 4; ++port) {
+        int at = 0;
+        for (int i = 0; i < (int)choices.size(); ++i) if (choices[i].pro == options.vs_pro[port]) at = i;
+        char label[32];
+        std::snprintf(label, sizeof label, "P%d as a CPU plays", port + 1);
+        ImGui::SetNextItemWidth(220.0f);
+        if (settings_combo(label, &at, labels.data(), (int)labels.size())) {
+          options.vs_pro[port] = choices[at].pro;
+          practice_cpu::set_vs_pro(port, options.vs_pro[port]);
+          changed = true;
+        }
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("When this port is a CPU in VS Mode, the pro plays it instead of the game's CPU.\n"
+                            "Each pro plays the character shown beside its name; other characters stay the game's\n"
+                            "CPU. Two CPU ports set to pros fight each other. Offline VS only: never online, in\n"
+                            "Unranked or Ranked.");
+      }
+    }
     if (settings_toggle("Show results screen", &options.results_screen)) {
       RenderOptions::live_results_screen() = options.results_screen;
       changed = true;
@@ -9985,7 +10123,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       }
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Applies from the next online match. Higher delay can reduce rollbacks.\n"
-                          "Auto picks 2 to 6 frames from ping at match start and holds it for that match.\n"
+                          "Auto picks 2 to 4 frames from ping at match start and holds it for that match.\n"
                           "Without a ping measurement, Auto uses the last manual online value (%d frames).",
                           slippi::online::config().delay);
       if (online == 1)
@@ -10516,13 +10654,22 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetTooltip("No burst of colour when a fighter is KO'd off the side, top or bottom.\n"
                         "The match is exactly the same, so it also works online and in replays.\n"
                         "Picture only, yours alone. Both engines. Takes effect from the next KO.");
-    if (settings_toggle("Hide emblems behind percents", &options.hide_hud_emblems)) {
-      host::g_hide_hud_emblems.store(options.hide_hud_emblems, std::memory_order_relaxed);
-      changed = true;
+    {
+      // One row (owner 11-24: no more rows): the emblem switch, and UnclePunch's Hide HUD as "Hidden".
+      static const char* const kPercents[] = {"Shown", "Without emblems", "Hidden"};
+      int percents = options.hide_percents ? 2 : options.hide_hud_emblems ? 1 : 0;
+      if (settings_combo("Damage percents", &percents, kPercents, 3)) {
+        options.hide_hud_emblems = percents == 1;
+        options.hide_percents = percents == 2;
+        host::g_hide_hud_emblems.store(options.hide_hud_emblems, std::memory_order_relaxed);
+        gx::set_hide_percents(options.hide_percents);
+        changed = true;
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Without emblems: no character emblem behind each player's damage percent (both engines).\n"
+                          "Hidden: no damage percents at all, as UnclePunch's Hide HUD code (Source Port).\n"
+                          "Picture only, yours alone: the match is the same, online and in replays too.");
     }
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("No character emblem behind each player's damage percent.\n"
-                        "Picture only, yours alone: the match is the same, online and in replays too. Both engines.");
 
     // Community codes: players' favourite Gecko codes, built in (shim/mu_code_features.c). Picture and
     // sound only, so each is yours alone, online and in replays too.
@@ -11216,6 +11363,39 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
               }
             }
           }
+          // Which axis is which, chosen by moving it: a pad's own description does not say which axis is the
+          // C-stick and which a trigger, and a trigger on an axis nothing read could not be used at all.
+          if (!host::hidpad_frame1_dinput(tab_index)) {
+            static const char* const role_names[host::HID_ROLE_COUNT] = {"Stick left/right", "Stick up/down", "C-stick left/right",
+                                                                        "C-stick up/down", "L trigger", "R trigger"};
+            static const char* const role_asks[host::HID_ROLE_COUNT] = {"Push the stick right...", "Push the stick up...",
+                                                                       "Push the C-stick right...", "Push the C-stick up...",
+                                                                       "Press L or its light shield...", "Press R or its light shield..."};
+            static int wait_role = -1, wait_slot = -1;
+            static double wait_until = 0.0;
+            if (wait_role >= 0 && (wait_slot != tab_index || ImGui::GetTime() > wait_until)) wait_role = -1;
+            if (wait_role >= 0) {
+              const int axis = host::hidpad_axis_capture_poll(tab_index);
+              if (axis >= 0) { host::hidpad_assign_axis(tab_index, wait_role, axis); wait_role = -1; changed = true; }
+            }
+            ImGui::Spacing();
+            for (int r = 0; r < host::HID_ROLE_COUNT; ++r) {
+              const uint8_t axis = host::g_hid_axis_role[tab_index][r];
+              char label[96];
+              if (r == wait_role) std::snprintf(label, sizeof label, "%s##axisrole%d", role_asks[r], r);
+              else std::snprintf(label, sizeof label, "%s: %s##axisrole%d", role_names[r],
+                                 axis == host::kHidAxisAuto ? "Automatic" : host::hidpad_axis_name(tab_index, axis), r);
+              if (r % 2) ImGui::SameLine();
+              if (settings_widgets::Button(label)) {
+                if (r == wait_role) wait_role = -1;
+                else { host::hidpad_axis_capture_begin(tab_index); wait_role = r; wait_slot = tab_index; wait_until = ImGui::GetTime() + 8.0; }
+              }
+              if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && axis != host::kHidAxisAuto) {
+                host::g_hid_axis_role[tab_index][r] = host::kHidAxisAuto; wait_role = -1; changed = true;
+              }
+            }
+            settings_hint("A stick or trigger that reads wrong: click it here, then move it. Right-click for Automatic.");
+          }
           const host::HidPadAxes axes = host::hidpad_axes(tab_index);
           if (axes.count) {
             std::string line = "Axes:";
@@ -11240,6 +11420,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
               const float press_gap = press_w > 0.0f ? press_w + ImGui::GetStyle().ItemSpacing.x : 0.0f;
               if (settings_widgets::Selectable(row, i == waiting || i == hovered, ImGuiSelectableFlags_None, ImVec2(ImGui::GetContentRegionAvail().x - 58.0f - press_gap, 0))) begin_rebind(i);
               if (pressed_now) ImGui::PopStyleColor();
+              if (tab_kind == host::CaptureDevice::HidPad && (host::is_stick_action(i) || host::is_cstick_action(i)) && ImGui::IsItemHovered())
+                ImGui::SetTooltip("This controller's stick is read directly, with no binding needed. Bind this only for a box that\n"
+                                  "sends its directions as buttons. A direction the wrong way round: Box layouts > Invert.");
               if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) unbind(i);
               if (press_w > 0.0f) {
                 ImGui::SameLine();
@@ -11282,7 +11465,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
 #ifndef MELEE_NO_SLIPPI   // no matchmaking panel in the build without that layer
     changed |= settings_toggle("Show the Practice menu hint in Training", &options.matchmaking_hint);
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Start + D-pad Up + Z opens the Practice menu. The hint stops by itself once you have used it.");
+      ImGui::SetTooltip("%s opens the Practice menu. The hint stops by itself once you have used it.",
+                        host::settings_shortcut::practice_chord_name().c_str());
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Tab still opens matchmaking with it off.");
     {
       static const char* const looks[practice_menu::kStyleCount] = {
@@ -11292,14 +11476,71 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetNextItemWidth(260.0f);
       if (settings_combo("Practice menu look", &look, looks, practice_menu::kStyleCount)) { options.practice_style = look; changed = true; }
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("How the Practice menu (Start + D-pad Up + Z in Training) looks. All of them work with the controller;\n"
-                          "the window also works with the mouse.");
+        ImGui::SetTooltip("How the Practice menu (%s in Training) looks. All of them work with the controller;\n"
+                          "the window also works with the mouse.", host::settings_shortcut::practice_chord_name().c_str());
+    }
+    {
+      // The Practice menu's buttons, set by holding them: box controllers whose firmware makes the D-pad
+      // from other buttons could not press Start + D-pad Up + Z together (buro, 11-23).
+      namespace chord = host::settings_shortcut;
+      static int step = 0;        // 0 idle, 1 waiting for every button to be let go, 2 collecting
+      static uint16_t widest = 0;
+      static double started = 0.0;
+      static std::string note;
+      const double now = ImGui::GetTime();
+      ImGui::Text("Practice menu buttons: %s", chord::chord_name((uint16_t)options.practice_chord).c_str());
+      ImGui::SameLine();
+      if (step == 0 && settings_widgets::Button("Change##practicechord")) {
+        step = 1; widest = 0; started = now; note.clear();
+        chord::start_recording();
+      }
+      if (step == 0 && options.practice_chord != chord::kDefaultPracticeChord) {
+        ImGui::SameLine();
+        if (settings_widgets::Button("Default##practicechord")) {
+          options.practice_chord = chord::kDefaultPracticeChord;
+          chord::practice_chord().store(chord::kDefaultPracticeChord, std::memory_order_relaxed);
+          changed = true;
+        }
+      }
+      if (step != 0) {
+        const uint16_t held = chord::recorded_held().load(std::memory_order_relaxed);
+        if (step == 1 && held == 0) step = 2;
+        else if (step == 2) {
+          widest |= held;
+          if (held == 0 && widest) {
+            if (chord::valid_practice_chord(widest)) {
+              options.practice_chord = widest;
+              chord::practice_chord().store(widest, std::memory_order_relaxed);
+              changed = true;
+              note = "Set: " + chord::chord_name(widest);
+            } else {
+              note = chord::chord_name(widest) + " can't be used: hold two or more buttons that are not Start + D-pad Down + Z (settings).";
+            }
+            step = 0;
+          }
+        }
+        if (step != 0 && (now - started > 10.0 || !chord::recording_active())) { step = 0; note = "Nothing was set (10 seconds passed)."; }
+        if (step == 0) chord::recording().store(false, std::memory_order_relaxed);
+        else ImGui::TextDisabled("Hold the buttons together on your controller, then let go of all of them.");
+      }
+      if (step == 0 && !note.empty()) ImGui::TextDisabled("%s", note.c_str());
+      if (ImGui::IsItemHovered() || ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("The buttons held together that open the Practice menu in Training.");
     }
 #endif
     changed |= settings_toggle("Performance overlay", &options.performance_overlay);
     changed |= settings_toggle("FPS counter (top left)", &options.show_fps);
     // VRAM has its own line in the Video tab, right by the settings that move it; no overlay needed.
-    changed |= settings_toggle("Ping while online (under the FPS)", &options.show_ping);
+    {
+      // One row (owner 11-24: no more rows): off, the ping held a second at a time, or every reading.
+      static const char* const kPing[] = {"Off", "Once a second", "Live"};
+      int ping = !options.show_ping ? 0 : options.live_ping ? 2 : 1;
+      if (settings_combo("Ping while online (under the FPS)", &ping, kPing, 3)) {
+        options.show_ping = ping != 0;
+        if (ping) options.live_ping = ping == 2;
+        changed = true;
+      }
+    }
     {
       bool net = net_overlay::enabled();
       if (settings_toggle("Network and timing", &net)) { net_overlay::set_enabled(net); changed = true; }
@@ -11406,6 +11647,16 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         const char* built_in = user_gecko::native_equivalent(c);
         // The always-display hitbox code keeps its switch: on, it turns on the Arcade look's hitboxes.
         const bool arcade_code = built_in == user_gecko::kArcadeHitboxCodeLabel;
+        // A hand-ported code (user_gecko::hand_port) keeps its switch too: on, the native feature is on.
+        const char* hand = user_gecko::hand_port(c);
+        if (hand) {
+          if (settings_toggle(c.name.c_str(), &c.wanted)) { changed = true; g_gecko_chosen = true; }
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Coded natively: while it is on, \"%s\" is on.\n"
+                              "Picture only, drawn by your game alone, so it also works online.", hand);
+          ImGui::PopID();
+          continue;
+        }
         const bool runs_here = (c.supported && !built_in) || arcade_code;
         ImGui::BeginDisabled(!runs_here);
         if (settings_toggle(c.name.c_str(), &c.enabled) && runs_here) { c.wanted = c.enabled; changed = true; g_gecko_chosen = true; }
@@ -11443,6 +11694,16 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         // the rest keep the rule above.
         // The always-display hitbox code keeps its switch: on, it turns on the Arcade look's hitboxes.
         const bool arcade_code = built_in == user_gecko::kArcadeHitboxCodeLabel;
+        // A hand-ported code (user_gecko::hand_port) keeps its switch too: on, the native feature is on.
+        const char* hand = user_gecko::hand_port(c);
+        if (hand) {
+          if (settings_toggle(c.name.c_str(), &c.wanted)) { changed = true; g_gecko_chosen = true; }
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Coded natively: while it is on, \"%s\" is on.\n"
+                              "Picture only, drawn by your game alone, so it also works online.", hand);
+          ImGui::PopID();
+          continue;
+        }
         const bool runs_here = (c.supported && !built_in) || arcade_code;
         ImGui::BeginDisabled(!runs_here);
         // A code that cannot run here shows the switch it keeps for the Static Recomp.
@@ -11897,8 +12158,17 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           std::snprintf(lines[n++], sizeof lines[0], "FPS: %.0f", ImGui::GetIO().Framerate);
       }
       if (ping_line) {
-        // Teams: each other player's ping, in port order, as Slippi shows them.
-        const std::vector<int> pings = slippi::online::remote_pings_ms();
+        // Teams: each other player's ping, in port order, as Slippi shows them. The numbers are read once a
+        // second and held (lemon / owner 11-24: they changed several times a second and could not be read).
+        static std::vector<int> pings;
+        static int single_ping = 0;
+        static double read_at = -1.0;
+        const double now = ImGui::GetTime();
+        if (options.live_ping || read_at < 0.0 || now - read_at >= 1.0 || now < read_at) {
+          pings = slippi::online::remote_pings_ms();
+          single_ping = slippi::online::ping_ms();
+          read_at = now;
+        }
         if (pings.size() > 1) {
           int used = std::snprintf(lines[n], sizeof lines[0], "Ping:");
           for (size_t i = 0; i < pings.size() && used > 0 && used < (int)sizeof lines[0]; ++i)
@@ -11906,7 +12176,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           if (used > 0 && used < (int)sizeof lines[0]) std::snprintf(lines[n] + used, sizeof lines[0] - used, " ms");
           ++n;
         } else {
-          std::snprintf(lines[n++], sizeof lines[0], "Ping: %d ms", slippi::online::ping_ms());
+          std::snprintf(lines[n++], sizeof lines[0], "Ping: %d ms", single_ping);
         }
       }
       if (options.reflex_stats && streamline::reflex_latency_ms() > 0.0f && n < 3)
@@ -12276,3 +12546,13 @@ std::string rtx_renderer_status(int) { return {}; }
 bool hdr_display_available() { return false; }
 #endif
 }
+
+// The local player tag code (user_gecko::hand_ports_of_codes), from the game thread.
+namespace gx {
+void set_code_ally_tag(bool on, const std::string& text, bool arrow) {
+  g_code_tag_on.store(on, std::memory_order_relaxed);
+  std::lock_guard<std::mutex> lock(g_code_tag_mutex);
+  g_code_tag_text = text;
+  g_code_tag_arrow = arrow;
+}
+}  // namespace gx

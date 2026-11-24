@@ -298,6 +298,8 @@ int presented_test_fill();
 void set_hud_scales(int stocks_percent, int damage_percent, bool pal_stocks);
 // The same sizes for the native game (MuHostApi.hud_scales): stock | damage << 8, percent.
 uint32_t hud_scales_packed();
+// Damage percents: Hidden (Source Port): the players' percents and emblems are not drawn (bit 16 above).
+void set_hide_percents(bool on);
 // "Low poly fighters" (RenderOptions::low_poly_fighters), published the same way: the native game
 // reads it through MuHostApi.display_options, the Static Recomp's parts hook (host.cpp) reads it live.
 void set_low_poly_fighters(bool on);
@@ -342,6 +344,10 @@ template <class Options> uint32_t arcade_settings_bits(const Options& o) {
          (o.arcade_combo_counter ? kArcadeComboCounter : 0u) | (o.arcade_backdrop == 2 ? kArcadeGrid : 0u);
 }
 void set_arcade_display(ArcadeSource source, uint32_t bits);
+// A player's hand-ported Gecko codes (user_gecko::hand_ports_of_codes), from the game thread: the online
+// ally indicators with the code's own tag, and the PAL stock row (kept by the HUD size slider).
+void set_code_ally_tag(bool on, const std::string& text, bool arrow);
+void set_code_pal_stock(bool on);
 // Without the hitboxes and the combo counter while clean_replay_active(): the look's own picture
 // (its grid, its 2D camera) stays.
 uint32_t arcade_display();

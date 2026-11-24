@@ -53359,7 +53359,7 @@ index 64ba6ce21..eec263b13 100644
                      {
                          continue;
 diff --git a/src/melee/ft/ft_07C6.c b/src/melee/ft/ft_07C6.c
-index 917d69ac4..f635c8ffd 100644
+index 917d69ac4..1259f8697 100644
 --- a/src/melee/ft/ft_07C6.c
 +++ b/src/melee/ft/ft_07C6.c
 @@ -21,11 +21,12 @@ void ft_8007C630(Fighter_GObj* gobj)
@@ -53409,8 +53409,29 @@ index 917d69ac4..f635c8ffd 100644
          if (a == b) {
              var_r0 = 0;
          } else {
-@@ -104,19 +106,19 @@ void ft_8007C77C(Fighter_GObj* gobj)
+@@ -102,21 +104,49 @@ void ft_8007C77C(Fighter_GObj* gobj)
+             var_r29 = 1;
+         }
          if (!var_r29) {
++#ifdef MU_NATIVE
++            {
++                /* MELEE_TEST_COIN_LOG (tests only): a coin this fighter touches but may not collect, with
++                 * the coin's own flag byte (0x80 anyone may, 0x40 its owner may). */
++                extern const char* mu_test_getenv(const char* name);
++                static int log_refused = -1;
++                if (log_refused < 0) log_refused = mu_test_getenv("MELEE_TEST_COIN_LOG") != NULL;
++                if (log_refused) {
++                    Fighter_x1614_t probe = ip->xDD4_itemVar.unk4.xDF0;
++                    for (i = 0; i < 2; i++) {
++                        if (lbColl_80007B78(&probe, &fp->x1614[i], ip->scl, fp->x34_scale.y)) {
++                            OSReport("[coin] P%d touched a coin it may not collect (flags %02X, own %d)\n", fp->player_idx + 1,
++                                     (unsigned) ((u8*) &ip->xDD4_itemVar)[0x18], ftLib_80086FD4(gobj, ip->owner) != 0);
++                            break;
++                        }
++                    }
++                }
++            }
++#endif
              continue;
          }
 -        temp_r26 = ip->xDD4_itemVar.unk4.xDF0;
@@ -53429,6 +53450,15 @@ index 917d69ac4..f635c8ffd 100644
 -                                         Player_GetTotalCoins(fp->player_id));
 +                                         Player_GetTotalCoins(fp->player_idx));
                  lbAudioAx_80023870(0x93, 0x7F, 0x40, 0x1A);
++#ifdef MU_NATIVE
++                {
++                    /* MELEE_TEST_COIN_LOG (tests only): each coin a fighter collects. */
++                    extern const char* mu_test_getenv(const char* name);
++                    static int log_coins = -1;
++                    if (log_coins < 0) log_coins = mu_test_getenv("MELEE_TEST_COIN_LOG") != NULL;
++                    if (log_coins) OSReport("[coin] P%d collected %d (now %d)\n", fp->player_idx + 1, (int) temp_r29, Player_GetCoins(fp->player_idx));
++                }
++#endif
                  sp18 = 1.0f;
 -                efSync_Spawn(0x432, NULL, temp_r26[2], &sp18);
 +                efSync_Spawn(0x432, NULL, &temp_r26->x20, &sp18);
@@ -100763,7 +100793,7 @@ index bdc4d71b6..9df736bdd 100644
  typedef struct ChallengerData ChallengerData;
  typedef struct MatchEnd MatchEnd;
 diff --git a/src/melee/gm/gm_1601.c b/src/melee/gm/gm_1601.c
-index 7ad706ec1..40a270487 100644
+index 7ad706ec1..273c04e6a 100644
 --- a/src/melee/gm/gm_1601.c
 +++ b/src/melee/gm/gm_1601.c
 @@ -1,3 +1,7 @@
@@ -101921,7 +101951,7 @@ index 7ad706ec1..40a270487 100644
      if ((rules->score_display != 0) && (rules->mode == 0)) {
          vs_data->start.rules.x3_0 = 1;
          return;
-@@ -3715,6 +3907,16 @@ void gm_80167FC4(SSSData* arg0)
+@@ -3715,6 +3907,25 @@ void gm_80167FC4(SSSData* arg0)
      PAD_STACK(8);
  
      temp_r3 = gmMainLib_GetGameRules();
@@ -101929,6 +101959,15 @@ index 7ad706ec1..40a270487 100644
 +    {
 +        /* Test runs only: straight to the stage MELEE_TEST_VS_STAGE names. */
 +        const int test_stage = mu_test_vs_stage();
++        {
++            /* MELEE_TEST_VS_MODE=<0-3> (tests only): the VS rules' mode (0 time, 1 stock, 2 coin,
++             * 3 bonus), so a hidden run plays a Coin battle. */
++            extern const char* mu_test_getenv(const char* name);
++            const char* m = mu_test_getenv("MELEE_TEST_VS_MODE");
++            if (m != NULL && *m >= '0' && *m <= '3') {
++                temp_r3->mode = (u8) (*m - '0');
++            }
++        }
 +        if (test_stage >= 0) {
 +            arg0->force_stage_id = test_stage;
 +            return;
@@ -101938,7 +101977,7 @@ index 7ad706ec1..40a270487 100644
      if (temp_r3->stage_sel == 1) {
          arg0->force_stage_id = mnSelStageRandom();
          return;
-@@ -3850,54 +4052,69 @@ int gm_80168940(MatchEnd* match_end)
+@@ -3850,54 +4061,69 @@ int gm_80168940(MatchEnd* match_end)
  
  void gm_8016895C(HSD_JObj* arg0, DynamicModelDesc* arg1, int idx)
  {
@@ -102028,7 +102067,7 @@ index 7ad706ec1..40a270487 100644
      if (ckind == CKind_GKoops) {
          return 58.0F;
      }
-@@ -3930,11 +4147,51 @@ float gm_80168BF8(int arg0)
+@@ -3930,11 +4156,51 @@ float gm_80168BF8(int arg0)
  {
      CharacterKind ckind = Player_GetPlayerCharacter(arg0);
      u32 costume = Player_GetCostumeId(arg0);
@@ -102081,7 +102120,7 @@ index 7ad706ec1..40a270487 100644
      switch (arg0) {
      case 0:
          lbAudioAx_800243F4(0x7C830);
-@@ -4164,14 +4421,32 @@ u8 gm_GetNumCostumesForCKind(u8 ckind)
+@@ -4164,14 +4430,32 @@ u8 gm_GetNumCostumesForCKind(u8 ckind)
          HSD_Randi(0);
          HSD_Randi(0);
      }
@@ -102114,7 +102153,7 @@ index 7ad706ec1..40a270487 100644
      if (ckind >= ARRAY_SIZE(lbl_803D51A0)) {
          return 0;
      }
-@@ -4180,6 +4455,11 @@ u8 gm_80169264(u8 ckind)
+@@ -4180,6 +4464,11 @@ u8 gm_80169264(u8 ckind)
  
  u8 gm_80169290(u8 ckind)
  {
@@ -102126,7 +102165,7 @@ index 7ad706ec1..40a270487 100644
      if (ckind >= ARRAY_SIZE(lbl_803D51A0)) {
          return 0;
      }
-@@ -4188,6 +4468,11 @@ u8 gm_80169290(u8 ckind)
+@@ -4188,6 +4477,11 @@ u8 gm_80169290(u8 ckind)
  
  u8 gm_801692BC(u8 ckind)
  {
@@ -131898,7 +131937,7 @@ index e5ff149f4..6d9ac4ad2 100644
  
  bool grOnett_801E5768(Vec3* a, int b, HSD_JObj* jobj)
 diff --git a/src/melee/gr/ground.c b/src/melee/gr/ground.c
-index ad559ea8f..2085293c1 100644
+index ad559ea8f..9e40eacb5 100644
 --- a/src/melee/gr/ground.c
 +++ b/src/melee/gr/ground.c
 @@ -4,6 +4,10 @@
@@ -132217,7 +132256,7 @@ index ad559ea8f..2085293c1 100644
  /// extern s8 HSD_GObj_FogKind;
  /// extern float @330;
  
-@@ -1093,13 +1180,13 @@ static inline HSD_FogDesc* foo(void)
+@@ -1093,13 +1180,19 @@ static inline HSD_FogDesc* foo(void)
      grDatFiles_GetArchive();
      archive = grDatFiles_GetArchive();
      kind = stage_info.grkind;
@@ -132229,11 +132268,17 @@ index ad559ea8f..2085293c1 100644
          phi_r29 = &temp_r29[i];
          if (phi_r29->flags_b1 == 1) {
 -            return grDatFiles_801C6330(i)->unk4->unk8[i].x1C;
-+            return DP(DP(grDatFiles_801C6330(i)->unk4->unk8)[i].x1C);
++            /* Melee Unlocked: a modded stage file without this map (a custom disc's Stadium, 11-22) has no
++             * archive for it: no fog, rather than a read through a null archive. */
++            UnkArchiveStruct* fog_archive = grDatFiles_801C6330(i);
++            if (fog_archive == NULL || fog_archive->unk4 == NULL) {
++                return NULL;
++            }
++            return DP(DP(fog_archive->unk4->unk8)[i].x1C);
          }
      }
      return NULL;
-@@ -1175,13 +1262,13 @@ f32 Ground_801C20D0(void)
+@@ -1175,13 +1268,13 @@ f32 Ground_801C20D0(void)
  }
  
  typedef struct LightOverrideEntry {
@@ -132249,7 +132294,7 @@ index ad559ea8f..2085293c1 100644
  
  static inline bool find_light_override(UnkArchiveStruct* archive,
                                         HSD_LightDesc* desc, bool* b6, bool* b7,
-@@ -1193,8 +1280,8 @@ static inline bool find_light_override(UnkArchiveStruct* archive,
+@@ -1193,8 +1286,8 @@ static inline bool find_light_override(UnkArchiveStruct* archive,
  
      if (count != 0) {
          for (i = 0; i < count; i++) {
@@ -132260,7 +132305,7 @@ index ad559ea8f..2085293c1 100644
                  *b6 = arr[i].b;
                  *b7 = arr[i].a;
                  *b5 = arr[i].c;
-@@ -1216,8 +1303,8 @@ static inline bool find_light_override_in_dat(UnkStageDat* dat,
+@@ -1216,8 +1309,8 @@ static inline bool find_light_override_in_dat(UnkStageDat* dat,
      (void) dat;
      if (count != 0) {
          for (i = 0; i < count; i++) {
@@ -132271,7 +132316,7 @@ index ad559ea8f..2085293c1 100644
                  *b6 = arr[i].b;
                  *b7 = arr[i].a;
                  *b5 = arr[i].c;
-@@ -1228,21 +1315,22 @@ static inline bool find_light_override_in_dat(UnkStageDat* dat,
+@@ -1228,21 +1321,22 @@ static inline bool find_light_override_in_dat(UnkStageDat* dat,
      return false;
  }
  
@@ -132301,7 +132346,7 @@ index ad559ea8f..2085293c1 100644
                  0 &&
              (b6 != 0 || b7 != 0 || b5 != 0))
          {
-@@ -1257,11 +1345,10 @@ LightList** Ground_801C20E0(UnkArchiveStruct* archive, LightList** lightset)
+@@ -1257,11 +1351,10 @@ LightList** Ground_801C20E0(UnkArchiveStruct* archive, LightList** lightset)
      }
  
      out = lightset;
@@ -132316,7 +132361,7 @@ index ad559ea8f..2085293c1 100644
              dat = archive->unk4;
              if (find_light_override_in_dat(dat, archive->unk4, desc, &b6, &b7,
                                             &b5) == 0 ||
-@@ -1269,7 +1356,7 @@ LightList** Ground_801C20E0(UnkArchiveStruct* archive, LightList** lightset)
+@@ -1269,7 +1362,7 @@ LightList** Ground_801C20E0(UnkArchiveStruct* archive, LightList** lightset)
              {
                  clean = out;
                  do {
@@ -132325,7 +132370,7 @@ index ad559ea8f..2085293c1 100644
                          break;
                      }
                      clean++;
-@@ -1277,19 +1364,19 @@ LightList** Ground_801C20E0(UnkArchiveStruct* archive, LightList** lightset)
+@@ -1277,19 +1370,19 @@ LightList** Ground_801C20E0(UnkArchiveStruct* archive, LightList** lightset)
                  out--;
              } else {
                  if (b6) {
@@ -132351,7 +132396,7 @@ index ad559ea8f..2085293c1 100644
                  }
              }
          }
-@@ -1329,7 +1416,7 @@ HSD_Spline* Ground_801C247C(s32 arg0, s32 arg1)
+@@ -1329,7 +1422,7 @@ HSD_Spline* Ground_801C247C(s32 arg0, s32 arg1)
      UnkArchiveStruct* archive = grDatFiles_801C6330(arg0);
      HSD_ASSERT(2017, archive);
      if (archive->unk4 != NULL && arg1 < archive->unk4->unk14) {
@@ -132360,7 +132405,7 @@ index ad559ea8f..2085293c1 100644
      } else {
          return NULL;
      }
-@@ -1341,16 +1428,80 @@ static const int BGM_Undefined = -1;
+@@ -1341,16 +1434,80 @@ static const int BGM_Undefined = -1;
  
  static bool Ground_801C24F8(StKind stkind, u32 arg1, s32* arg2)
  {
@@ -132443,7 +132488,7 @@ index ad559ea8f..2085293c1 100644
              if (arg1 & 4) {
                  temp_r25 = arg1 & 0x40;
                  switch (phi_r30->x14) {
-@@ -1406,8 +1557,19 @@ static bool Ground_801C24F8(StKind stkind, u32 arg1, s32* arg2)
+@@ -1406,8 +1563,19 @@ static bool Ground_801C24F8(StKind stkind, u32 arg1, s32* arg2)
                      }
                      break;
                  case 6:
@@ -132463,7 +132508,7 @@ index ad559ea8f..2085293c1 100644
                      {
                          arg1 |= 2;
                      } else {
-@@ -1415,8 +1577,14 @@ static bool Ground_801C24F8(StKind stkind, u32 arg1, s32* arg2)
+@@ -1415,8 +1583,14 @@ static bool Ground_801C24F8(StKind stkind, u32 arg1, s32* arg2)
                      }
                      break;
                  case 7:
@@ -132478,7 +132523,7 @@ index ad559ea8f..2085293c1 100644
                      {
                          arg1 |= 2;
                      } else {
-@@ -1468,6 +1636,26 @@ static bool Ground_801C24F8(StKind stkind, u32 arg1, s32* arg2)
+@@ -1468,6 +1642,26 @@ static bool Ground_801C24F8(StKind stkind, u32 arg1, s32* arg2)
                      stage_info.unk8C.b0 = false;
                  }
              }
@@ -132505,7 +132550,7 @@ index ad559ea8f..2085293c1 100644
              break;
          }
      }
-@@ -1493,7 +1681,7 @@ static void panicMissingStageParam(StKind stkind, s32 count)
+@@ -1493,7 +1687,7 @@ static void panicMissingStageParam(StKind stkind, s32 count)
      OSReport("             check StageParam.csv or StageItem.csv, stdata.c\n");
      {
          ssize_t i;
@@ -132514,7 +132559,7 @@ index ad559ea8f..2085293c1 100644
          for (i = 0; i < count; i++, p++) {
              OSReport(" stageid=%d\n", p->stkind);
          }
-@@ -1504,7 +1692,7 @@ static void panicMissingStageParam(StKind stkind, s32 count)
+@@ -1504,7 +1698,7 @@ static void panicMissingStageParam(StKind stkind, s32 count)
  
  void Ground_801C28CC(s32* arg0, StKind stkind)
  {
@@ -132523,7 +132568,7 @@ index ad559ea8f..2085293c1 100644
      ssize_t count = stage_info.param->stage_param_count;
      ssize_t i;
  
-@@ -1512,14 +1700,33 @@ void Ground_801C28CC(s32* arg0, StKind stkind)
+@@ -1512,14 +1706,33 @@ void Ground_801C28CC(s32* arg0, StKind stkind)
          if (param->stkind == stkind) {
              s32 j;
              for (j = 0; 35 > j; j++) {
@@ -132557,7 +132602,7 @@ index ad559ea8f..2085293c1 100644
      panicMissingStageParam(stkind, count);
  }
  
-@@ -1530,7 +1737,7 @@ s32* Ground_801C2AD8(void)
+@@ -1530,7 +1743,7 @@ s32* Ground_801C2AD8(void)
  
  float Ground_801C2AE8(StKind stkind)
  {
@@ -132566,7 +132611,7 @@ index ad559ea8f..2085293c1 100644
      int i;
      for (i = 0; i < stage_info.param->stage_param_count; i++) {
          if (phi_r5->stkind == stkind) {
-@@ -1538,6 +1745,15 @@ float Ground_801C2AE8(StKind stkind)
+@@ -1538,6 +1751,15 @@ float Ground_801C2AE8(StKind stkind)
          }
          phi_r5 += 1;
      }
@@ -132582,7 +132627,7 @@ index ad559ea8f..2085293c1 100644
      OSReport("%s:%d: not found stage param in DAT\n", __FILE__, 0x927);
      while (1) {
      }
-@@ -1639,7 +1855,7 @@ bool Ground_801C2D24(enum_t arg0, Vec3* arg1)
+@@ -1639,7 +1861,7 @@ bool Ground_801C2D24(enum_t arg0, Vec3* arg1)
      return false;
  }
  
@@ -132591,7 +132636,7 @@ index ad559ea8f..2085293c1 100644
  {
      u8 _[4];
      bool result = false;
-@@ -1648,8 +1864,8 @@ bool Ground_801C2ED0(HSD_JObj* jobj, s32 arg1)
+@@ -1648,8 +1870,8 @@ bool Ground_801C2ED0(HSD_JObj* jobj, s32 arg1)
      int i;
      int max;
      if (temp_r3 != NULL) {
@@ -132602,7 +132647,7 @@ index ad559ea8f..2085293c1 100644
          for (i = 0; i < max; i++, cur++) {
              mpLib_800552B0(cur->x, jobj, cur->z);
              mpLib_80055E9C(cur->x);
-@@ -1657,8 +1873,8 @@ bool Ground_801C2ED0(HSD_JObj* jobj, s32 arg1)
+@@ -1657,8 +1879,8 @@ bool Ground_801C2ED0(HSD_JObj* jobj, s32 arg1)
              result = true;
          }
      }
@@ -132613,7 +132658,7 @@ index ad559ea8f..2085293c1 100644
      for (i = 0; i < max; i++, cur++) {
          if (cur->y == arg1) {
              mpLib_800552B0(cur->x, jobj, cur->z);
-@@ -1673,7 +1889,7 @@ bool Ground_801C2ED0(HSD_JObj* jobj, s32 arg1)
+@@ -1673,7 +1895,7 @@ bool Ground_801C2ED0(HSD_JObj* jobj, s32 arg1)
  
  static s16 Ground_804D6954;
  
@@ -132622,7 +132667,7 @@ index ad559ea8f..2085293c1 100644
  {
      StageData* stagedata;
      UnkArchiveStruct* archive;
-@@ -1696,7 +1912,7 @@ bool Ground_801C2FE0(Ground_GObj* arg0)
+@@ -1696,7 +1918,7 @@ bool Ground_801C2FE0(Ground_GObj* arg0)
  
          temp_r3 = mpGetGroundCollJoint();
          Ground_804D6954++;
@@ -132631,7 +132676,7 @@ index ad559ea8f..2085293c1 100644
          count = stagedata->joint_count;
          vec = stagedata->joints;
  
-@@ -1712,8 +1928,8 @@ bool Ground_801C2FE0(Ground_GObj* arg0)
+@@ -1712,8 +1934,8 @@ bool Ground_801C2FE0(Ground_GObj* arg0)
          if (archive != NULL) {
              int temp_r30;
  
@@ -132642,7 +132687,7 @@ index ad559ea8f..2085293c1 100644
              count = dat->unk24;
  
              for (i = 0; i < count; i++, vec++) {
-@@ -1742,8 +1958,8 @@ bool Ground_801C3128(int gobj_id, void (*arg1)(int))
+@@ -1742,8 +1964,8 @@ bool Ground_801C3128(int gobj_id, void (*arg1)(int))
          /// @todo @c cur cannot be swapped below @c max, hinting at a missing
          /// @c inline function.
          GrJoint* cur;
@@ -132653,7 +132698,7 @@ index ad559ea8f..2085293c1 100644
          {
              int i;
              for (i = 0; i < max; i++, cur++) {
-@@ -1755,8 +1971,8 @@ bool Ground_801C3128(int gobj_id, void (*arg1)(int))
+@@ -1755,8 +1977,8 @@ bool Ground_801C3128(int gobj_id, void (*arg1)(int))
              {
                  UnkArchiveStruct* tmp = grDatFiles_801C6330(gobj_id);
                  if (tmp != NULL) {
@@ -132664,7 +132709,7 @@ index ad559ea8f..2085293c1 100644
                      for (i = 0; i < max; i++, cur++) {
                          arg1(cur->x);
                          result = true;
-@@ -1802,8 +2018,8 @@ s32 Ground_801C32D4(s32 arg0, s32 arg1)
+@@ -1802,8 +2024,8 @@ s32 Ground_801C32D4(s32 arg0, s32 arg1)
      int i;
      mpGetGroundCollJoint();
      /// @todo Might be an @c inline starting here.
@@ -132675,7 +132720,7 @@ index ad559ea8f..2085293c1 100644
      result = -1;
      for (i = 0; i < max; cur++, i++) {
          if (cur->y == arg0 && cur->z == arg1) {
-@@ -1814,8 +2030,8 @@ s32 Ground_801C32D4(s32 arg0, s32 arg1)
+@@ -1814,8 +2036,8 @@ s32 Ground_801C32D4(s32 arg0, s32 arg1)
          UnkArchiveStruct* tmp;
          tmp = grDatFiles_801C6330(arg0);
          if (tmp != NULL) {
@@ -132686,7 +132731,7 @@ index ad559ea8f..2085293c1 100644
              for (i = 0; i < max; cur++, i++) {
                  if (cur->z == arg1) {
                      result = cur->x;
-@@ -1837,8 +2053,8 @@ s32 Ground_801C33C0(s32 arg0, s32 arg1)
+@@ -1837,8 +2059,8 @@ s32 Ground_801C33C0(s32 arg0, s32 arg1)
      int i;
      mpGetGroundCollJoint();
      /// @todo Might be an @c inline starting here.
@@ -132697,7 +132742,7 @@ index ad559ea8f..2085293c1 100644
      result = -1;
      for (i = 0; i < max; cur++, i++) {
          if (cur->y == arg0 && cur->x == arg1) {
-@@ -1849,8 +2065,8 @@ s32 Ground_801C33C0(s32 arg0, s32 arg1)
+@@ -1849,8 +2071,8 @@ s32 Ground_801C33C0(s32 arg0, s32 arg1)
          UnkArchiveStruct* tmp;
          tmp = grDatFiles_801C6330(arg0);
          if (tmp != NULL) {
@@ -132708,7 +132753,7 @@ index ad559ea8f..2085293c1 100644
              for (i = 0; i < max; cur++, i++) {
                  if (cur->x == arg1) {
                      result = cur->z;
-@@ -1906,12 +2122,12 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
+@@ -1906,12 +2128,12 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
      int entry_count;
      int i;
      struct {
@@ -132725,7 +132770,7 @@ index ad559ea8f..2085293c1 100644
      int prev_index;
      int target;
      int j;
-@@ -1933,10 +2149,10 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
+@@ -1933,10 +2155,10 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
          return;
      }
      i = 0;
@@ -132738,7 +132783,7 @@ index ad559ea8f..2085293c1 100644
                  break;
              }
          } else {
-@@ -1946,9 +2162,9 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
+@@ -1946,9 +2168,9 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
          i++;
      }
      count = entry->pair_count;
@@ -132750,7 +132795,7 @@ index ad559ea8f..2085293c1 100644
          if (prev_index > target || prev_index == -1) {
              jobj = root;
              i = 0;
-@@ -1981,7 +2197,7 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
+@@ -1981,7 +2203,7 @@ void Ground_801C34AC(s32 map_id, HSD_JObj* root, struct HSD_Joint* joint)
              i++;
          }
          prev_index = i;
@@ -132759,7 +132804,7 @@ index ad559ea8f..2085293c1 100644
          pair += 2;
      }
  }
-@@ -1993,9 +2209,9 @@ void Ground_801C36F4(int map_id, HSD_JObj* root, UNK_T joint)
+@@ -1993,9 +2215,9 @@ void Ground_801C36F4(int map_id, HSD_JObj* root, UNK_T joint)
      UnkArchiveStruct* archive;
      int entry_count;
      struct {
@@ -132771,7 +132816,7 @@ index ad559ea8f..2085293c1 100644
      int i;
      u32 unused[4];
  
-@@ -2012,21 +2228,19 @@ void Ground_801C36F4(int map_id, HSD_JObj* root, UNK_T joint)
+@@ -2012,21 +2234,19 @@ void Ground_801C36F4(int map_id, HSD_JObj* root, UNK_T joint)
          return;
      }
      i = 0;
@@ -132803,7 +132848,7 @@ index ad559ea8f..2085293c1 100644
      for (i = 0; i < 0x57 * 3; i++) {
          jobj = stage_info.x280[i];
          (void) jobj;
-@@ -2511,11 +2725,11 @@ bool Ground_801C43C4(void* arg0)
+@@ -2511,11 +2731,11 @@ bool Ground_801C43C4(void* arg0)
      struct GroundShadowEntry* phi_r4;
      int i;
      tmp = grDatFiles_GetArchive()->unk4;
@@ -132817,7 +132862,7 @@ index ad559ea8f..2085293c1 100644
                  if (phi_r4->flag) {
                      return true;
                  } else {
-@@ -2582,7 +2796,7 @@ static void Ground_801C461C(HSD_GObj* gobj)
+@@ -2582,7 +2802,7 @@ static void Ground_801C461C(HSD_GObj* gobj)
      Ground_801C445C(gobj->hsd_obj);
  }
  
@@ -132826,7 +132871,7 @@ index ad559ea8f..2085293c1 100644
  {
      HSD_LObj_803668EC(gobj->hsd_obj);
      HSD_LObjSetupInit(HSD_CObjGetCurrent());
-@@ -2595,12 +2809,12 @@ static void Ground_801C4640(HSD_GObj* gobj, int unused)
+@@ -2595,12 +2815,12 @@ static void Ground_801C4640(HSD_GObj* gobj, int unused)
      NULL,
  };
  
@@ -132843,7 +132888,7 @@ index ad559ea8f..2085293c1 100644
  
  /* 3E0680 */ static HSD_LightDesc Ground_803E0680 = {
      NULL,
-@@ -2608,9 +2822,9 @@ static void Ground_801C4640(HSD_GObj* gobj, int unused)
+@@ -2608,9 +2828,9 @@ static void Ground_801C4640(HSD_GObj* gobj, int unused)
      (1 << 0) | (1 << 2) | (1 << 3),
      0,
      { 0xFF, 0xFF, 0xFF, 0xFF },
@@ -132855,7 +132900,7 @@ index ad559ea8f..2085293c1 100644
  };
  
  /* 3E069C */ static HSD_LightAnim Ground_803E069C[] = { 0 };
-@@ -2619,27 +2833,27 @@ static void Ground_801C4640(HSD_GObj* gobj, int unused)
+@@ -2619,27 +2839,27 @@ static void Ground_801C4640(HSD_GObj* gobj, int unused)
  };
  
  /* 4D450C */ static LightList Ground_804D450C = {
@@ -132895,7 +132940,7 @@ index ad559ea8f..2085293c1 100644
          void* callback;
      } r28_carrier;
      Vec3 sp10; /* compiler-managed */
-@@ -2647,25 +2861,25 @@ void Ground_801C466C(void)
+@@ -2647,25 +2867,31 @@ void Ground_801C466C(void)
      int count;
      HSD_GObj* temp_r3;
      HSD_LObj* temp_r3_2;
@@ -132922,11 +132967,17 @@ index ad559ea8f..2085293c1 100644
          if (callbacks->flags_b0 == 1) {
              archive = grDatFiles_801C6330(i);
 -            selected = Ground_801C20E0(archive, archive->unk4->unk8[i].x18);
++            /* Melee Unlocked: a modded stage file without this map (a custom disc's Stadium, 11-22) has no
++             * archive for it: the stage's default lights, rather than a read through a null archive. */
++            if (archive == NULL || archive->unk4 == NULL) {
++                selected = NULL;
++                goto light_selected;
++            }
 +            selected = Ground_801C20E0(archive, DP(DP(archive->unk4->unk8)[i].x18));
              goto light_selected;
          }
          callbacks++;
-@@ -2720,10 +2934,10 @@ light_selected:
+@@ -2720,10 +2946,10 @@ light_selected:
                      AOBJ_ARG_AF, 1.0);
      var_r27_2 = r28_carrier.lights;
      var_r26_2 = temp_r3_2;
@@ -132939,7 +132990,7 @@ index ad559ea8f..2085293c1 100644
                  if (var_r26_2->aobj != NULL) {
                      HSD_AObjSetFlags(var_r26_2->aobj, AOBJ_LOOP);
                  }
-@@ -2763,7 +2977,7 @@ HSD_GObj* Ground_801C498C(void)
+@@ -2763,7 +2989,7 @@ HSD_GObj* Ground_801C498C(void)
      return gobj;
  }
  
@@ -132948,7 +132999,7 @@ index ad559ea8f..2085293c1 100644
  {
      UnkArchiveStruct* archive = grDatFiles_GetArchive();
      if (stage_info.map_plit != NULL) {
-@@ -2822,7 +3036,7 @@ void Ground_801C4A08(HSD_GObj* gobj)
+@@ -2822,7 +3048,7 @@ void Ground_801C4A08(HSD_GObj* gobj)
          archive = grDatFiles_801C6330(gp->map_id);
          if (archive != NULL) {
              Ground_801C36F4(gp->map_id, jobj,
@@ -132957,7 +133008,7 @@ index ad559ea8f..2085293c1 100644
          }
      }
      HSD_GObjFree(gobj);
-@@ -3041,7 +3255,7 @@ void Ground_801C4FAC(HSD_CObj* cobj)
+@@ -3041,7 +3267,7 @@ void Ground_801C4FAC(HSD_CObj* cobj)
                  dz = sp2C.z;
                  dz -= sp20.z;
                  dx2 = dx * dx;
@@ -132966,7 +133017,7 @@ index ad559ea8f..2085293c1 100644
                  dz2 = dz * dz;
                  phi_f30 = sqrtf_store(dx2 + dy2 + dz2, &sqrt_tmp[0]);
                  if (phi_f30 < 10) {
-@@ -3227,30 +3441,24 @@ s32 Ground_801C5840(void)
+@@ -3227,30 +3453,24 @@ s32 Ground_801C5840(void)
      return stage_info.x6E4[i];
  }
  
@@ -133006,7 +133057,7 @@ index ad559ea8f..2085293c1 100644
  
  Item_GObj* Ground_801C58E0(s32 arg0, s32 arg1)
  {
-@@ -3263,23 +3471,13 @@ Item_GObj* Ground_801C58E0(s32 arg0, s32 arg1)
+@@ -3263,23 +3483,13 @@ Item_GObj* Ground_801C58E0(s32 arg0, s32 arg1)
      return result;
  }
  
@@ -133032,7 +133083,7 @@ index ad559ea8f..2085293c1 100644
      int i, j, out_idx;
      UnkArchiveStruct* archive;
      const size_t vals_count = 32;
-@@ -3290,11 +3488,11 @@ int Ground_801C5940(void)
+@@ -3290,11 +3500,11 @@ int Ground_801C5940(void)
      if (archive->unk4->unk4 == 0) {
          return -1;
      }
@@ -133046,7 +133097,7 @@ index ad559ea8f..2085293c1 100644
              if (val >= 220 && val < 252 && (unsigned) out_idx < vals_count) {
                  vals[out_idx] = val;
                  out_idx++;
-@@ -3341,6 +3539,13 @@ bool Ground_801C5ABC(void)
+@@ -3341,6 +3551,13 @@ bool Ground_801C5ABC(void)
  
  u32 Ground_801C5AD0(s32 i)
  {
@@ -133060,7 +133111,7 @@ index ad559ea8f..2085293c1 100644
      return stage_datas[i]->flags2;
  }
  
-@@ -3360,3 +3565,19 @@ void Ground_801C5AEC(Vec3* v, Vec3* arg1, Vec3* arg2, Vec3* arg3)
+@@ -3360,3 +3577,19 @@ void Ground_801C5AEC(Vec3* v, Vec3* arg1, Vec3* arg2, Vec3* arg3)
  
  /// @todo Is this used by base pointer anywhere? Not stripped by mwcc.
  static int unused_ints[] = { 1, 1, 0, 0, 0, 180, 0, 0, 0 };
@@ -133179,7 +133230,7 @@ index 6cf45d12e..02e60aa67 100644
  /* 1C58E0 */ Item_GObj* Ground_801C58E0(s32, s32);
  /* 1C5940 */ int Ground_801C5940(void);
 diff --git a/src/melee/gr/grpstadium.c b/src/melee/gr/grpstadium.c
-index fb1668c71..0de95ec14 100644
+index fb1668c71..779601c1c 100644
 --- a/src/melee/gr/grpstadium.c
 +++ b/src/melee/gr/grpstadium.c
 @@ -15,7 +15,6 @@
@@ -133202,12 +133253,15 @@ index fb1668c71..0de95ec14 100644
  
  static struct grPStadium_YakumonoParam {
      int x0;
-@@ -62,13 +66,19 @@ static struct grPStadium_YakumonoParam {
+@@ -62,13 +66,22 @@ static struct grPStadium_YakumonoParam {
      s16 x4C;
      s16 x4E;
      s16 x50;
 -}* yakumono_param;
 +} DISC_STRUCT* yakumono_param;
++#ifdef MU_NATIVE
++static void mu_tmce_stadium_restore(void);
++#endif
  
  GrJoint grPs_803E1248[] = {
      { 1, 3, 0 }, { 2, 3, 0 }, { 3, 4, 0 },
@@ -133223,7 +133277,7 @@ index fb1668c71..0de95ec14 100644
  static StageCallbacks grPs_StageCallbacks[] = {
      {
          NULL,
-@@ -94,40 +104,40 @@ static StageCallbacks grPs_StageCallbacks[] = {
+@@ -94,40 +107,40 @@ static StageCallbacks grPs_StageCallbacks[] = {
      {
          grStadium_801D1840,
          grStadium_801D19D0,
@@ -133270,11 +133324,26 @@ index fb1668c71..0de95ec14 100644
          grStadium_801D1E10,
          grStadium_801D1E18,
          grStadium_801D1E1C,
-@@ -163,6 +173,11 @@ void grStadium_OnDemoInit(int unused) {}
+@@ -163,6 +176,26 @@ void grStadium_OnDemoInit(int unused) {}
  void grStadium_OnInit(void)
  {
      yakumono_param = Ground_GetYakumonoParam();
 +#ifdef MU_NATIVE
++    /* The lab's Stadium option rewrites three of the stage file's timers (mu_tmce_stadium_transform).
++     * A stage file still in memory would bring them into the next match: every match starts from
++     * the file's own (GitHub #135). */
++    mu_tmce_stadium_restore();
++    {
++        /* MELEE_TEST_PS_LAB_LEFTOVER=<0-3> (tests only): as if TM-CE's lab had picked that
++         * transformation earlier in the session, so a hidden online pair proves the pick stays the
++         * game's own outside a TM-CE event. */
++        extern const char* mu_test_getenv(const char* name);
++        const char* v = mu_test_getenv("MELEE_TEST_PS_LAB_LEFTOVER");
++        if (v != NULL && *v >= '0' && *v <= '3') {
++            mu_tmce_stadium_override = 1;
++            mu_tmce_stadium_transformation = *v - '0';
++        }
++    }
 +    /* 20XX Hack Pack "Stage Swap Engine", its stage file patch (80018130): a fixed transformation
 +     * stage reads its transformation timings as zero, so it transforms at once. */
 +    yakumono_param = (void*) mu_hp_stadium_param(yakumono_param, sizeof(*yakumono_param));
@@ -133282,7 +133351,7 @@ index fb1668c71..0de95ec14 100644
  
      stage_info.unk8C.b4 = false;
      stage_info.unk8C.b5 = true;
-@@ -289,15 +304,15 @@ void fn_801D13C8(Ground_GObj* gobj)
+@@ -289,15 +322,15 @@ void fn_801D13C8(Ground_GObj* gobj)
      gp->u.stadium.xC4_b0 = false;
  }
  
@@ -133307,7 +133376,7 @@ index fb1668c71..0de95ec14 100644
  
  void grStadium_801D13E0(Ground_GObj* gobj)
  {
-@@ -308,7 +323,7 @@ void grStadium_801D13E0(Ground_GObj* gobj)
+@@ -308,7 +341,7 @@ void grStadium_801D13E0(Ground_GObj* gobj)
      Ground* gr = GET_GROUND(gobj);
      HSD_JObj* jobj = GET_JOBJ(gobj);
  
@@ -133316,7 +133385,7 @@ index fb1668c71..0de95ec14 100644
      grAnime_801C8138(gobj, gr->map_id, 0);
      mobj = lbDvd_GetPreloadedArchive(0x7D5);
      gr->u.stadium.xCC = mobj;
-@@ -332,6 +347,9 @@ void grStadium_801D13E0(Ground_GObj* gobj)
+@@ -332,6 +365,9 @@ void grStadium_801D13E0(Ground_GObj* gobj)
          var_r27 += randi(temp_r28 - var_r27);
      }
      gr->u.stadium.xD8 = var_r27;
@@ -133326,7 +133395,7 @@ index fb1668c71..0de95ec14 100644
      gr->x11_flags.b012 = 1;
      mpLib_800575B0(0x55);
      mpLib_800575B0(0x6F);
-@@ -347,11 +365,20 @@ bool grStadium_801D1518(Ground_GObj* gobj)
+@@ -347,11 +383,20 @@ bool grStadium_801D1518(Ground_GObj* gobj)
  void grStadium_801D1520(Ground_GObj* gobj)
  {
      Ground* gp = GET_GROUND(gobj);
@@ -133349,7 +133418,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  void grStadium_801D156C(Ground_GObj* gobj) {}
-@@ -360,7 +387,7 @@ void grStadium_801D1570(Ground_GObj* gobj)
+@@ -360,7 +405,7 @@ void grStadium_801D1570(Ground_GObj* gobj)
  {
      Ground* gp = GET_GROUND(gobj);
      HSD_JObj* jobj = GET_JOBJ(gobj);
@@ -133358,7 +133427,7 @@ index fb1668c71..0de95ec14 100644
      Ground_801C3214(gp->map_id);
      mpJointListAdd(4);
      grAnime_801C8138(gobj, gp->map_id, 0);
-@@ -374,9 +401,9 @@ bool grStadium_801D15FC(Ground_GObj* gobj)
+@@ -374,9 +419,9 @@ bool grStadium_801D15FC(Ground_GObj* gobj)
      return false;
  }
  
@@ -133370,7 +133439,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  void grStadium_801D1624(Ground_GObj* gobj)
-@@ -388,7 +415,7 @@ void grStadium_801D1648(Ground_GObj* gobj)
+@@ -388,7 +433,7 @@ void grStadium_801D1648(Ground_GObj* gobj)
  {
      Ground* gp = GET_GROUND(gobj);
      HSD_JObj* jobj = GET_JOBJ(gobj);
@@ -133379,7 +133448,7 @@ index fb1668c71..0de95ec14 100644
      Ground_801C3214(gp->map_id);
      mpJointListAdd(3);
      grAnime_801C8138(gobj, gp->map_id, 0);
-@@ -402,9 +429,9 @@ bool grStadium_801D16D4(Ground_GObj* gobj)
+@@ -402,9 +447,9 @@ bool grStadium_801D16D4(Ground_GObj* gobj)
      return false;
  }
  
@@ -133391,7 +133460,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  void grStadium_801D16FC(Ground_GObj* gobj)
-@@ -420,7 +447,7 @@ void grStadium_801D1720(Ground_GObj* gobj)
+@@ -420,7 +465,7 @@ void grStadium_801D1720(Ground_GObj* gobj)
      Ground* gp = GET_GROUND(gobj);
      HSD_JObj* jobj = GET_JOBJ(gobj);
  
@@ -133400,7 +133469,7 @@ index fb1668c71..0de95ec14 100644
      Ground_801C3214(gp->map_id);
      mpJointListAdd(5);
      grAnime_801C8138(gobj, gp->map_id, 0);
-@@ -436,9 +463,9 @@ bool grStadium_801D17E0(Ground_GObj* gobj)
+@@ -436,9 +481,9 @@ bool grStadium_801D17E0(Ground_GObj* gobj)
      return false;
  }
  
@@ -133412,7 +133481,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  void grStadium_801D1808(Ground_GObj* gobj)
-@@ -463,7 +490,7 @@ void grStadium_801D1840(Ground_GObj* gobj)
+@@ -463,7 +508,7 @@ void grStadium_801D1840(Ground_GObj* gobj)
      Ground* gp = GET_GROUND(gobj);
      HSD_JObj* jobj = GET_JOBJ(gobj);
  
@@ -133421,7 +133490,7 @@ index fb1668c71..0de95ec14 100644
      Ground_801C3214(gp->map_id);
      mpJointListAdd(1);
      mpJointListAdd(2);
-@@ -507,9 +534,9 @@ bool grStadium_801D19D0(Ground_GObj* gobj)
+@@ -507,9 +552,9 @@ bool grStadium_801D19D0(Ground_GObj* gobj)
      return false;
  }
  
@@ -133433,7 +133502,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  void grStadium_801D19F8(Ground_GObj* gobj)
-@@ -533,7 +560,7 @@ void grStadium_801D1A38(Ground_GObj* gobj)
+@@ -533,7 +578,7 @@ void grStadium_801D1A38(Ground_GObj* gobj)
      gp = GET_GROUND(gobj);
      jobj = GET_JOBJ(gobj);
  
@@ -133442,7 +133511,7 @@ index fb1668c71..0de95ec14 100644
      Ground_801C3214(gp->map_id);
      mpJointListAdd(7);
      grAnime_801C8138(gobj, gp->map_id, 0);
-@@ -586,7 +613,7 @@ void grStadium_801D1B48(Ground_GObj* gobj)
+@@ -586,7 +631,7 @@ void grStadium_801D1B48(Ground_GObj* gobj)
          mpLib_80057BC0(0);
      }
  
@@ -133451,7 +133520,7 @@ index fb1668c71..0de95ec14 100644
      mpLib_8005667C(0);
  }
  
-@@ -606,10 +633,9 @@ void grStadium_801D1D84(Ground_GObj* gobj)
+@@ -606,10 +651,9 @@ void grStadium_801D1D84(Ground_GObj* gobj)
      mpLib_80057BC0(7);
  }
  
@@ -133464,7 +133533,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  bool grStadium_801D1E10(Ground_GObj* gobj)
-@@ -837,6 +863,21 @@ void grStadium_801D2278(Ground_GObj* gobj)
+@@ -837,6 +881,21 @@ void grStadium_801D2278(Ground_GObj* gobj)
      grStadium_801D2528(gobj, 0, 0);
  }
  
@@ -133486,7 +133555,7 @@ index fb1668c71..0de95ec14 100644
  void grStadium_801D2344(Ground_GObj* g)
  {
      Ground_GObj* gobj = g;
-@@ -906,7 +947,12 @@ void grStadium_801D2344(Ground_GObj* g)
+@@ -906,7 +965,12 @@ void grStadium_801D2344(Ground_GObj* g)
          temp_r3_8->flag = 0;
          if (gp->u.display.xDC == NULL ||
              Player_GetEntity(gp->u.display.xEE) == NULL ||
@@ -133500,7 +133569,7 @@ index fb1668c71..0de95ec14 100644
          {
              grStadium_801D2A60(gobj);
          }
-@@ -1165,8 +1211,8 @@ static HSD_CameraDescPerspective grPs_803E14FC = {
+@@ -1165,8 +1229,8 @@ static HSD_CameraDescPerspective grPs_803E14FC = {
      1,
      { 0, 0xFA, 0, 0xA0 },
      { 0, 0xFA, 0, 0xA0 },
@@ -133511,7 +133580,7 @@ index fb1668c71..0de95ec14 100644
      0.0F,
      NULL,
      0.1F,
-@@ -1236,7 +1282,7 @@ HSD_GObj* grStadium_801D2E24(void)
+@@ -1236,7 +1300,7 @@ HSD_GObj* grStadium_801D2E24(void)
      return gobj;
  }
  
@@ -133520,7 +133589,7 @@ index fb1668c71..0de95ec14 100644
  {
      ImageDescWrapper* wrapper;
      Ground* gp2;
-@@ -1261,7 +1307,7 @@ void fn_801D2ED0(HSD_GObj* gobj, int unused)
+@@ -1261,7 +1325,7 @@ void fn_801D2ED0(HSD_GObj* gobj, int unused)
      gp2->u.display.xF8_0 = true;
  }
  
@@ -133529,7 +133598,7 @@ index fb1668c71..0de95ec14 100644
  {
      HSD_GObj* vision_gobj;
      Ground* gp2;
-@@ -1281,7 +1327,7 @@ void grStadium_801D2FD0(Ground_GObj* gobj, int unused)
+@@ -1281,7 +1345,7 @@ void grStadium_801D2FD0(Ground_GObj* gobj, int unused)
      }
  }
  
@@ -133538,7 +133607,7 @@ index fb1668c71..0de95ec14 100644
  {
      void* new_var2; // Permuter slop
      ImageDescWrapper* wrapper = GET_WRAPPER(gobj);
-@@ -1304,30 +1350,6 @@ void grStadium_801D3084(HSD_GObj* gobj, int unused)
+@@ -1304,30 +1368,6 @@ void grStadium_801D3084(HSD_GObj* gobj, int unused)
  
  /// @todo these are commonly used inlines; they should be moved to jobj.h
  
@@ -133569,7 +133638,7 @@ index fb1668c71..0de95ec14 100644
  HSD_TObj* grStadium_801D3138(Ground_GObj* gobj, HSD_ImageDesc* desc,
                               HSD_MObj** arg2)
  {
-@@ -1355,24 +1377,24 @@ HSD_TObj* grStadium_801D3138(Ground_GObj* gobj, HSD_ImageDesc* desc,
+@@ -1355,24 +1395,24 @@ HSD_TObj* grStadium_801D3138(Ground_GObj* gobj, HSD_ImageDesc* desc,
              }
          }
  
@@ -133602,7 +133671,7 @@ index fb1668c71..0de95ec14 100644
          }
      }
      return NULL;
-@@ -1435,7 +1457,7 @@ bool grStadium_801D32D0(Ground_GObj* gobj)
+@@ -1435,7 +1475,7 @@ bool grStadium_801D32D0(Ground_GObj* gobj)
  
  static const GXColor grPs_804DAF3C = { 0xFF, 0xFF, 0xFF, 0xFF };
  
@@ -133611,7 +133680,7 @@ index fb1668c71..0de95ec14 100644
  static u8 grPs_8049F040[0x100];
  
  void grStadium_801D3460(Ground_GObj* gobj)
-@@ -1466,7 +1488,7 @@ void grStadium_801D3460(Ground_GObj* gobj)
+@@ -1466,7 +1506,7 @@ void grStadium_801D3460(Ground_GObj* gobj)
      HSD_SisLib_803A7664(gp2->win_dynamic_p);
      temp_r29 = GET_GROUND(Ground_GetMapGObj(2));
  
@@ -133620,7 +133689,7 @@ index fb1668c71..0de95ec14 100644
  
      HSD_SisLib_803A6530(1, 5, 6);
      temp_r0 = temp_r29->u.stadium.xDE;
-@@ -1706,8 +1728,7 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
+@@ -1706,8 +1746,7 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
      gp2 = text_gobj->user_data;
      HSD_ASSERT(0x884, gp2->win_static_p);
      HSD_ASSERT(0x885, gp2->win_dynamic_p);
@@ -133630,7 +133699,7 @@ index fb1668c71..0de95ec14 100644
          if ((Player_GetPlayerSlotType(player_index) != Gm_PKind_NA) &&
              (Player_8003219C(player_index) == 0))
          {
-@@ -1716,8 +1737,7 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
+@@ -1716,8 +1755,7 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
                  player_num += 1;
              }
          }
@@ -133640,7 +133709,7 @@ index fb1668c71..0de95ec14 100644
      HSD_SisLib_803A7664(gp2->win_dynamic_p);
  
      if (player_num == 1) {
-@@ -1747,10 +1767,15 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
+@@ -1747,10 +1785,15 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
          gp2->win_dynamic_p->default_kerning = 1;
      }
      colors.s.presets = grPs_803B7F8C;
@@ -133659,7 +133728,7 @@ index fb1668c71..0de95ec14 100644
          if (Player_GetPlayerSlotType(player_num) != Gm_PKind_NA &&
              Player_8003219C(player_num) == 0)
          {
-@@ -1778,8 +1803,7 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
+@@ -1778,8 +1821,7 @@ void grStadium_801D3BBC(Ground_GObj* arg0)
                  text_offset += 0x20;
              }
          }
@@ -133669,7 +133738,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  const StadiumAlphaPresets grPs_803B7F8C = { {
-@@ -1867,7 +1891,7 @@ void grStadium_801D4194(Ground_GObj* arg0)
+@@ -1867,7 +1909,7 @@ void grStadium_801D4194(Ground_GObj* arg0)
  }
  
  /// HSD_DevComCallback
@@ -133678,7 +133747,7 @@ index fb1668c71..0de95ec14 100644
  {
      Ground_GObj* map_gobj;
      Ground* gp;
-@@ -1880,29 +1904,25 @@ static void fn_801D4220(int dcreq, int args, void* buf, bool cancelflag)
+@@ -1880,29 +1922,25 @@ static void fn_801D4220(int dcreq, int args, void* buf, bool cancelflag)
      gp->u.stadium.xC4_b1 = false;
  }
  
@@ -133715,7 +133784,7 @@ index fb1668c71..0de95ec14 100644
  
  Ground* grStadium_801D4354(Ground_GObj* gobj)
  {
-@@ -1916,6 +1936,46 @@ char* datfiles[] = {
+@@ -1916,6 +1954,46 @@ char* datfiles[] = {
      "GrPs4.dat",
  };
  
@@ -133762,7 +133831,7 @@ index fb1668c71..0de95ec14 100644
  static struct VecScalar {
      Vec3 vec;
      float scalar;
-@@ -2006,162 +2066,207 @@ void grStadium_801D435C(Ground_GObj* arg0)
+@@ -2006,162 +2084,211 @@ void grStadium_801D435C(Ground_GObj* arg0)
  
  void grStadium_801D4548(Ground_GObj* gobj)
  {
@@ -133823,16 +133892,16 @@ index fb1668c71..0de95ec14 100644
 +    gp = GET_GROUND(gobj);
 +    scale = Ground_801C0498();
 +    if (gm_8018841C()) {
-+        return;
-+    }
+         return;
+     }
 +#ifdef MU_NATIVE
 +    /* IngameCheckIfFrozen: a frozen Stadium never transforms. With the Slippi menus on it runs on
 +     * every match, as in Legacy's netplay build (the toggle comes from the SSS). */
 +    if ((mu_replay_code(MU_RC_PS_FROZEN_CHECK) || mu_slippi_menus_enabled()) &&
 +        mu_ps_frozen_toggle())
 +    {
-         return;
-     }
++        return;
++    }
 +#endif
  
      if (Stage_80225194() == 0xF0) {
@@ -133910,8 +133979,12 @@ index fb1668c71..0de95ec14 100644
 +                        kind = kinds[r];
 +                        break;
 +                    }
-+                    /* Training Mode CE's lab picks the transformation (mu_tmce_stadium_transform) */
-+                    if (mu_tmce_stadium_override) {
++                    /* Training Mode CE's lab picks the transformation (mu_tmce_stadium_transform).
++                     * Only in a TM-CE event: the lab's switch is never cleared, and read anywhere else
++                     * (an online match after the lab, GitHub #135) it skipped the random pick the other
++                     * player's game makes, so every later Stadium match desynced at its first change. */
++                    if (mu_tmce_stadium_override && mu_tmce_active() &&
++                        gm_GetCurrentGameMode() == GM_EVENT) {
 +                        r = mu_tmce_stadium_transformation;
 +                        kind = kinds[r];
 +                        break;
@@ -134086,7 +134159,7 @@ index fb1668c71..0de95ec14 100644
                  mpLib_80057528(0x55);
                  mpLib_80057528(0x6F);
              }
-@@ -2170,68 +2275,73 @@ void grStadium_801D4548(Ground_GObj* gobj)
+@@ -2170,68 +2297,73 @@ void grStadium_801D4548(Ground_GObj* gobj)
          Camera_RequestQuake(QuakeKind_Loop, NULL);
          return;
      case 5:
@@ -134204,7 +134277,7 @@ index fb1668c71..0de95ec14 100644
  }
  
  /**
-@@ -2253,7 +2363,7 @@ bool grStadium_801D4FF8(int pl_slot)
+@@ -2253,7 +2385,7 @@ bool grStadium_801D4FF8(int pl_slot)
      return false;
  }
  
@@ -134213,7 +134286,7 @@ index fb1668c71..0de95ec14 100644
  {
      grStadium_801D1EF8(gobj);
      grDisplay_801C5DB0(gobj, arg1);
-@@ -2290,3 +2400,28 @@ void grStadium_801D511C(void)
+@@ -2290,3 +2422,45 @@ void grStadium_801D511C(void)
  
      lbDvd_80017740(0, 0x7D5, 4, 4, 0x50000, 0, 7, 0x10, 0);
  }
@@ -134232,9 +134305,26 @@ index fb1668c71..0de95ec14 100644
 + * choice; natively the same fields are set here and the pick reads mu_tmce_stadium_transformation. */
 +int mu_tmce_stadium_override;
 +int mu_tmce_stadium_transformation;
++static void* mu_tmce_stadium_saved_at;   /* the stage data whose timers the lab changed */
++static u32 mu_tmce_stadium_saved[3];
++static void mu_tmce_stadium_restore(void)
++{
++    if (mu_tmce_stadium_saved_at != NULL && mu_tmce_stadium_saved_at == (void*) yakumono_param) {
++        yakumono_param->x8 = mu_tmce_stadium_saved[0];
++        yakumono_param->xC = mu_tmce_stadium_saved[1];
++        yakumono_param->x10 = mu_tmce_stadium_saved[2];
++    }
++    mu_tmce_stadium_saved_at = NULL;
++}
 +void mu_tmce_stadium_transform(HSD_GObj* map_gobj, int transformation_id)
 +{
 +    Ground* gp = GET_GROUND(map_gobj);
++    if (mu_tmce_stadium_saved_at != (void*) yakumono_param) {
++        mu_tmce_stadium_saved_at = yakumono_param;
++        mu_tmce_stadium_saved[0] = yakumono_param->x8;
++        mu_tmce_stadium_saved[1] = yakumono_param->xC;
++        mu_tmce_stadium_saved[2] = yakumono_param->x10;
++    }
 +    gp->u.stadium.xD8 = -1;             /* transform now */
 +    yakumono_param->x8 = 0x1000001;     /* max transformation length */
 +    yakumono_param->xC = 0x1000000;     /* default transformation length */
@@ -145360,7 +145450,7 @@ index 8020cdad3..413b811a1 100644
          HSD_SisLib_803A62A0(2, "SdPrize.usd", "SIS_PrizeData");
      } else {
 diff --git a/src/melee/if/ifstatus.c b/src/melee/if/ifstatus.c
-index a6068103c..d612b4a8f 100644
+index a6068103c..c6e8250d2 100644
 --- a/src/melee/if/ifstatus.c
 +++ b/src/melee/if/ifstatus.c
 @@ -26,29 +26,9 @@
@@ -145596,13 +145686,18 @@ index a6068103c..d612b4a8f 100644
                  ifStatus_802F6948((s8) p->player_slot);
              }
          }
-@@ -639,9 +615,12 @@ static inline IfDamageState* getPlayerByHUDParent(HSD_GObj* parent)
+@@ -639,9 +615,17 @@ static inline IfDamageState* getPlayerByHUDParent(HSD_GObj* parent)
      return NULL;
  }
  
 -void ifStatus_802F5DE0(HSD_GObj* player, s32 arg1)
 +void ifStatus_802F5DE0(HSD_GObj* player, intptr_t arg1)
  {
++#ifdef MU_NATIVE
++    if (mu_hud_percents_hidden()) {   /* Damage percents: Hidden (only the draw) */
++        return;
++    }
++#endif
      if (!getPlayerByHUDParent(player)->flags.hide_all_digits) {
 +#ifdef MU_NATIVE
 +        mu_hud_scale(player, 0);   /* damage number size (settings panel) */
@@ -145610,7 +145705,7 @@ index a6068103c..d612b4a8f 100644
          HSD_GObj_JObjCallback(player, arg1);
      }
  }
-@@ -657,9 +636,17 @@ static inline IfDamageState* getPlayerByNext(HSD_GObj* gobj)
+@@ -657,9 +641,17 @@ static inline IfDamageState* getPlayerByNext(HSD_GObj* gobj)
      return NULL;
  }
  
@@ -145621,7 +145716,7 @@ index a6068103c..d612b4a8f 100644
 +#ifdef MU_NATIVE
 +    /* "Hide emblems behind percents": only the draw is left out; the emblem is still made and
 +     * animated, so nothing else in the game changes. */
-+    if (mu_hud_emblems_hidden()) {
++    if (mu_hud_emblems_hidden() || mu_hud_percents_hidden()) {
 +        return;
 +    }
 +    mu_hud_fade(gobj);   /* HUD Transparency (community code) */
@@ -145629,7 +145724,7 @@ index a6068103c..d612b4a8f 100644
      if (!player->flags.hide_all_digits) {
          HSD_GObj_JObjCallback(gobj, arg1);
      }
-@@ -667,19 +654,19 @@ void ifStatus_802F5E50(HSD_GObj* gobj, s32 arg1)
+@@ -667,19 +659,19 @@ void ifStatus_802F5E50(HSD_GObj* gobj, s32 arg1)
  
  static inline HSD_JObj* ifStatus_GetDamageJObj(HSD_JObj* jobj, s32 i)
  {
@@ -145653,7 +145748,7 @@ index a6068103c..d612b4a8f 100644
      HSD_JObj* jobj;
      Vec3* vec;
      HSD_TObj* tobj;
-@@ -690,8 +677,7 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
+@@ -690,8 +682,7 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
          gobj = GObj_Create(0xE, 0xF, 0);
          jobj = ifStatus_LoadDamageJObj(hud);
          HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
@@ -145663,7 +145758,7 @@ index a6068103c..d612b4a8f 100644
          HSD_GObj_SetupProc(gobj, ifStatus_802F5B48, 0x11);
          HSD_GObj_SetupProc(gobj, ifStatus_802F4EDC, 0x11);
          state->HUD_parent_entity = gobj;
-@@ -700,10 +686,9 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
+@@ -700,10 +691,9 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
      }
      state->flags.animation_status_id = 0;
      HSD_JObjRemoveAnim(jobj);
@@ -145677,7 +145772,7 @@ index a6068103c..d612b4a8f 100644
      HSD_JObjReqAnimAll(jobj, 0.0f);
      HSD_JObjAnimAll(jobj);
      vec = ifAll_GetPlayerHUDPosition((u8) player_idx);
-@@ -716,8 +701,7 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
+@@ -716,8 +706,7 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
      if (state->jobjs[3] != NULL) {
          tobj = state->jobjs[3]->u.dobj->mobj->tobj;
          HSD_TObjAddAnimAll(
@@ -145687,7 +145782,7 @@ index a6068103c..d612b4a8f 100644
          if (Player_GetMoreFlagsBit2((s8) state->player_slot) != 0) {
              HSD_TObjReqAnimAll(tobj, 1.0f);
          } else {
-@@ -733,11 +717,11 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
+@@ -733,11 +722,11 @@ HSD_GObj* ifStatus_802F5EC0(IfDamageState* state, s32 player_idx)
      return state->HUD_parent_entity;
  }
  
@@ -145703,7 +145798,7 @@ index a6068103c..d612b4a8f 100644
      s32 i;
      if ((node == NULL) || (n < 0)) {
          return NULL;
-@@ -745,32 +729,21 @@ HSD_GObj* ifStatus_802F6194(HSD_GObj* node, s32 n)
+@@ -745,32 +734,21 @@ HSD_GObj* ifStatus_802F6194(HSD_GObj* node, s32 n)
      if (node == NULL) {
          gx_head = NULL;
      } else {
@@ -145745,7 +145840,7 @@ index a6068103c..d612b4a8f 100644
  {
      *gobj = GObj_Create(0xE, 0xF, 0);
  }
-@@ -803,34 +776,55 @@ HSD_GObj* ifStatus_802F61FC(IfDamageState* state, s32 player_idx)
+@@ -803,34 +781,55 @@ HSD_GObj* ifStatus_802F61FC(IfDamageState* state, s32 player_idx)
              HSD_ASSERTREPORT(0x30A, 0,
                               "Error : gobj dont't get (ifAddMark)\n");
          }
@@ -145808,7 +145903,7 @@ index a6068103c..d612b4a8f 100644
      mobj = HSD_JObjGetChild(jobj)->u.dobj->mobj;
      mobj->mat->diffuse.r = color.r;
      mobj->mat->diffuse.g = color.g;
-@@ -885,6 +879,11 @@ void ifStatus_802F665C(int arg0)
+@@ -885,6 +884,11 @@ void ifStatus_802F665C(int arg0)
      for (i = 0; i < 6; i++) {
          ifStatus_802F6508(i);
      }
@@ -145820,7 +145915,7 @@ index a6068103c..d612b4a8f 100644
  }
  
  void ifStatus_802F66A4(void)
-@@ -892,27 +891,27 @@ void ifStatus_802F66A4(void)
+@@ -892,27 +896,27 @@ void ifStatus_802F66A4(void)
      HudIndex* hud = ifStatus_GetHUDInfo();
      s32 pad0;
      s32 pad1;
@@ -145860,7 +145955,7 @@ index a6068103c..d612b4a8f 100644
  #ifdef MUST_MATCH
          }
      }
-@@ -940,8 +939,7 @@ void ifStatus_802F6804(void)
+@@ -940,8 +944,7 @@ void ifStatus_802F6804(void)
      s32 i;
      IfDamageState* v;
  
@@ -145870,7 +145965,7 @@ index a6068103c..d612b4a8f 100644
          v = &ifStatus_GetHUDInfo()->players[i & 0xFF];
          if (v->HUD_parent_entity != NULL) {
              HSD_GObjFree(v->HUD_parent_entity);
-@@ -952,8 +950,7 @@ void ifStatus_802F6804(void)
+@@ -952,8 +955,7 @@ void ifStatus_802F6804(void)
              v->next = NULL;
          }
          ifStock_802FB650((s8) i & 0xFF);
@@ -145880,7 +145975,7 @@ index a6068103c..d612b4a8f 100644
  }
  
  /// Hide Percentage Digits
-@@ -1002,8 +999,8 @@ static inline void ifStatus_TriggerStockLoss(s32 player_idx,
+@@ -1002,8 +1004,8 @@ static inline void ifStatus_TriggerStockLoss(s32 player_idx,
      struct StartMeleeRules* small_thing;
      IfDamageFlags* hud_player_flags;
  
@@ -145891,7 +145986,7 @@ index a6068103c..d612b4a8f 100644
      small_thing = gm_GetStartMeleeRules();
      hud_player = &ifStatus_GetHUDInfo()->players[player_idx];
      hud_player_flags = &hud_player->flags;
-@@ -1033,7 +1030,7 @@ void ifStatus_802F69C0(s32 player_idx, s32 arg1)
+@@ -1033,7 +1035,7 @@ void ifStatus_802F69C0(s32 player_idx, s32 arg1)
  {
      VsSceneController* big_thing;
  
@@ -150002,7 +150097,7 @@ index 4dfb2105f..61a5cfcfa 100644
  {
      ip->entered_hitlag = efLib_PauseAll;
 diff --git a/src/melee/it/itCharItems.h b/src/melee/it/itCharItems.h
-index 3650dc522..a448a82be 100644
+index 3650dc522..2bbbbe7c5 100644
 --- a/src/melee/it/itCharItems.h
 +++ b/src/melee/it/itCharItems.h
 @@ -10,6 +10,7 @@
@@ -150310,7 +150405,7 @@ index 3650dc522..a448a82be 100644
  ASSERT_SIZE(struct itSeakChain_Attrs, 0x6C);
  
  typedef struct itClimbersString_ItemVars {
-@@ -827,13 +828,13 @@ typedef struct itZeldaDinFireExplodeAttributes {
+@@ -827,13 +828,18 @@ typedef struct itZeldaDinFireExplodeAttributes {
      /* +8 */ f32 x8;
      /* +C */ f32 xC;
      /* +10 */ f32 x10;
@@ -150319,14 +150414,21 @@ index 3650dc522..a448a82be 100644
  
  typedef struct itUnk4_ItemVars {
      /*  +0 ip+DD4 */ u8 pad[0x18];
-     /*  +18 ip+DEC */ u8 xDEC_b0 : 1;
-     /*  +18 ip+DEC */ u8 xDEC_b1 : 1;
+-    /*  +18 ip+DEC */ u8 xDEC_b0 : 1;
+-    /*  +18 ip+DEC */ u8 xDEC_b1 : 1;
 -    /*  +1C ip+DF0 */ Mtx xDF0;
++    /* The coin's own code writes these two through UnkFlagStruct (it_2E5A_ItemVars.x18), whose bits
++     * are laid out as on the console. Declared plainly here, a PC build put them at the other end
++     * of the byte: a fighter never saw a coin as collectable (Coin Mode, the Spare Change event). */
++    struct {
++        /*  +18 ip+DEC */ u8 xDEC_b0 : 1;
++        /*  +18 ip+DEC */ u8 xDEC_b1 : 1;
++    } DISC_STRUCT;
 +    /*  +1C ip+DF0 */ Fighter_x1614_t xDF0;
  } itUnk4_ItemVars;
  
  typedef struct itGamewatchchef_ItemVars {
-@@ -847,19 +848,19 @@ typedef struct itGamewatchchefAttrEntry {
+@@ -847,19 +853,19 @@ typedef struct itGamewatchchefAttrEntry {
      /* +8 */ f32 x8;
      /* +C */ f32 xC;
      /* +10 */ f32 x10;
@@ -150351,7 +150453,7 @@ index 3650dc522..a448a82be 100644
  
  typedef struct itHinoarashi_ItemVars {
      /* xDD4 */ u8 _0[0x60 - 0x0];
-@@ -878,7 +879,7 @@ typedef struct itHinoarashiAttributes {
+@@ -878,7 +884,7 @@ typedef struct itHinoarashiAttributes {
      /* +C */ u8 _pad[0x10 - 0xC];
      /* +10 */ f32 x10;
      /* +14 */ f32 x14;
@@ -150360,7 +150462,7 @@ index 3650dc522..a448a82be 100644
  
  typedef struct itTools_ItemVars {
      /* +0 ip+DD4 */ s32 x0;
-@@ -892,7 +893,7 @@ typedef struct itToolsMotionAttrs {
+@@ -892,7 +898,7 @@ typedef struct itToolsMotionAttrs {
      /* +10 */ f32 x10;
      /* +14 */ f32 x14;
      /* +18 */ f32 x18;
@@ -150369,7 +150471,7 @@ index 3650dc522..a448a82be 100644
  
  typedef struct itToolsAttributes {
      /* +00 */ f32 x0;
-@@ -900,7 +901,7 @@ typedef struct itToolsAttributes {
+@@ -900,7 +906,7 @@ typedef struct itToolsAttributes {
      /* +08 */ f32 x8;
      /* +0C */ s32 xC;
      /* +10 */ itToolsMotionAttrs motions[1];
@@ -169466,7 +169568,7 @@ index 8fd62df97..4f317c78a 100644
              if (dist_squared_12 > threshold_squared) {
                  return 1;
 diff --git a/src/melee/lb/lb_00F9.c b/src/melee/lb/lb_00F9.c
-index 80f2c5b55..6fa0e0943 100644
+index 80f2c5b55..fd8a08e65 100644
 --- a/src/melee/lb/lb_00F9.c
 +++ b/src/melee/lb/lb_00F9.c
 @@ -26,13 +26,30 @@
@@ -169537,7 +169639,52 @@ index 80f2c5b55..6fa0e0943 100644
  
  static inline bool approximatelyZeroVec3(Vec3 vec)
  {
-@@ -657,9 +668,9 @@ void lb_8001044C(DynamicsDesc* desc, void* colliders_raw, int num_colliders,
+@@ -450,10 +461,44 @@ void lb_8001044C(DynamicsDesc* desc, void* colliders_raw, int num_colliders,
+     {
+         s32 i;
+         for (i = 0; i < (s32) part; i++) {
++#ifdef MU_NATIVE
++            if (cur == NULL) {
++                return;
++            }
++#endif
+             cur = cur->next;
+             loop_index++;
+         }
+     }
++#ifdef MU_NATIVE
++    /* A chain with a bone missing (a node past the end of the list, a node with no joint, or a
++     * joint with no child where the loop reads the child's position) is left as it is this frame:
++     * those reads stopped the game (a Jigglypuff with a borrowed Build-A-Melee move, online, both
++     * players at the same frame, 11-23). */
++    {
++        extern const char* mu_test_getenv(const char* name);
++        /* MELEE_TEST_DYNAMICS_NO_BONE=1 (tests only): every chain's first joint reads as missing,
++         * the case above, so a hidden run can show the match goes on. */
++        static int no_bone = -1;
++        const struct DynamicsData* c = cur;
++        HSD_JObj* j;
++        if (no_bone < 0) {
++            no_bone = mu_test_getenv("MELEE_TEST_DYNAMICS_NO_BONE") != NULL;
++        }
++        if (no_bone) {
++            return;
++        }
++        if (c == NULL || (j = c->desc.lb_unk0.jobj) == NULL) {
++            return;
++        }
++        for (; c->next != NULL; c = c->next) {
++            if (j == NULL || j->child == NULL) {
++                return;
++            }
++            j = j->child;
++        }
++    }
++#endif
+ 
+     parent_jobj = cur->desc.lb_unk0.jobj->parent;
+     (void) parent_jobj;
+@@ -657,9 +702,9 @@ void lb_8001044C(DynamicsDesc* desc, void* colliders_raw, int num_colliders,
                              collider->position.z - cur->desc.lb_unk0.unk_2C.z;
  
                          {
@@ -169550,7 +169697,7 @@ index 80f2c5b55..6fa0e0943 100644
  
                              if (coll_dist > collider->radius &&
                                  lbColl_80005C44(
-@@ -806,8 +817,8 @@ void lb_8001044C(DynamicsDesc* desc, void* colliders_raw, int num_colliders,
+@@ -806,8 +851,8 @@ void lb_8001044C(DynamicsDesc* desc, void* colliders_raw, int num_colliders,
                                      groundHeight(cur, &floor_point2);
                                  f32 horiz_dist =
                                      sqrtf(-(height_diff * height_diff -
@@ -169561,7 +169708,7 @@ index 80f2c5b55..6fa0e0943 100644
                                  f32 ground_angle =
                                      ABS(atan2f(horiz_dist, height_diff));
                                  PSVECCrossProduct(&gnd_norm2, &link_dir,
-@@ -991,9 +1002,9 @@ void lb_800115F4(void)
+@@ -991,9 +1036,9 @@ void lb_800115F4(void)
      lb_804D63B4 = 0;
  }
  
@@ -169573,7 +169720,7 @@ index 80f2c5b55..6fa0e0943 100644
      struct DynamicsData* data1;
      int i;
  
-@@ -1001,17 +1012,17 @@ void lb_80011710(DynamicsDesc* arg0, DynamicsDesc* arg1)
+@@ -1001,17 +1046,17 @@ void lb_80011710(DynamicsDesc* arg0, DynamicsDesc* arg1)
      arg1->pos.y = arg0->pos.y;
      arg1->pos.z = arg0->pos.z;
      data1 = arg1->data;

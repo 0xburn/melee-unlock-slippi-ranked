@@ -172,13 +172,13 @@ int main() {
   const char* check_string = "123456789";
   CHECK(launcher::crash::crc32((const uint8_t*)check_string, 9) == 0xCBF43926u);
   CHECK(reference_crc32((const uint8_t*)check_string, 9) == 0xCBF43926u);
-  CHECK(std::size(launcher::crash::kParts) == 6);   // crash text, the last session, the one before it, Linux error output, the lobby,
+  CHECK(std::size(launcher::crash::kParts) == 7);
   CHECK(launcher::crash::kMaxZipBytes == 8 * MB);
 
   const fs::path root = fs::temp_directory_path() /
       ("melee-crash-zip-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-  const std::string game = root.u8string() + "\\game-jugador-\xc3\xb1";
-  const std::string launcher_dir = root.u8string() + "\\launcher-\xed\x95\x9c";
+  const std::string game = root.u8string() + "/game-jugador-\xc3\xb1";
+  const std::string launcher_dir = root.u8string() + "/launcher-\xed\x95\x9c";
   std::error_code ec;
   const std::string guest_fault = "FATAL: guest fault: call to unmapped guest address (0000D899) in ftCo_800C0658 (800C0658); "
                                   "lr=8035E3F8 r1=804EE740, version 0.8.62\n";
@@ -194,14 +194,14 @@ int main() {
                         "[game] Cannot find symbol itPublicData.\n"
                         "  80360DE4 HSD_Index2TexCoord\n"
                         "  stack: melee_game.dll+0x14982F\n");
-  put(game + "\\melee_port_crash.txt", error);
-  put(game + "\\melee_port.log", log);
-  put(game + "\\melee_port_crash.dmp", text("PrivateTesterAlpha PRIVATE_BINARY C:/Users/PrivateTesterBeta/secret"));
-  put(launcher_dir + "\\lobby.log", text("profile PrivateTesterAlpha id PRIVATE_ID connected 192.168.1.44\n"));
-  put(game + "\\settings.ini", text("PRIVATE_SETTINGS"));
+  put(game + "/melee_port_crash.txt", error);
+  put(game + "/melee_port.log", log);
+  put(game + "/melee_port_crash.dmp", text("PrivateTesterAlpha PRIVATE_BINARY C:/Users/PrivateTesterBeta/secret"));
+  put(launcher_dir + "/lobby.log", text("profile PrivateTesterAlpha id PRIVATE_ID connected 192.168.1.44\n"));
+  put(game + "/settings.ini", text("PRIVATE_SETTINGS"));
   // The launcher log can include local install paths. Check that reports remove
   // the player's own folders.
-  put(launcher_dir + "\\launcher.log", text("2026-11-20 16:40:01 Launch failed: Windows error 5; executable=C:\\Users\\PrivateTesterDelta\\HiddenBuild\\game.exe; directory=C:\\Users\\PrivateTesterDelta\\HiddenBuild\\MeleeUnlocked\n"));
+  put(launcher_dir + "/launcher.log", text("2026-11-20 16:40:01 Launch failed: Windows error 5; executable=C:\\Users\\PrivateTesterDelta\\HiddenBuild\\game.exe; directory=C:\\Users\\PrivateTesterDelta\\HiddenBuild\\MeleeUnlocked\n"));
   auto files = launcher::crash::collect(game, launcher_dir);
   const std::vector<std::string> expected = {"melee_port_crash.txt", "melee_port.log", "lobby.log", "launcher.log"};
   CHECK(names(files) == expected);
@@ -220,6 +220,29 @@ int main() {
         CHECK(body.find("PrivateTesterAlpha") == std::string::npos && body.find("scene: major 02") != std::string::npos);
       }
     std::remove((game + "/melee_port.prev.log").c_str());
+  }
+  {
+    // Send logs: when neither of the two newest sessions played online, the newest older one that did
+    // travels too (a ranked report sent after two Training sessions, 11-22); an offline one never does.
+    put(game + "/melee_port.prev.log", text("scene: major 1C minor 02 (frame 94)\n"));
+    put(game + "/melee_port.prev.2.log", text("scene: major 02 minor 02 (frame 94)\n"));
+    put(game + "/melee_port.prev.3.log", text("slippi: online frame 270 wall 1.0 s retrace 2 rollbacks 0\n"));
+    put(game + "/melee_port.prev.4.log", text("slippi: online frame 30 wall 1.0 s retrace 2 rollbacks 0\n"));
+    auto sent = launcher::crash::collect_logs(game, launcher_dir, {}, false);
+    std::vector<std::string> sent_names = names(sent);
+    CHECK(std::count(sent_names.begin(), sent_names.end(), std::string("melee_port.prev.3.log")) == 1);
+    CHECK(std::count(sent_names.begin(), sent_names.end(), std::string("melee_port.prev.2.log")) == 0);
+    CHECK(std::count(sent_names.begin(), sent_names.end(), std::string("melee_port.prev.4.log")) == 0);
+    std::vector<Entry> older_report;
+    CHECK(read_zip(launcher::crash::capped_zip(sent), older_report));
+    CHECK(names(older_report) == sent_names);
+    // The newest log played online itself: nothing older is added.
+    put(game + "/melee_port.prev.log", text("slippi: online frame 60 wall 1.0 s retrace 2 rollbacks 0\n"));
+    sent = launcher::crash::collect_logs(game, launcher_dir, {}, false);
+    sent_names = names(sent);
+    CHECK(std::count(sent_names.begin(), sent_names.end(), std::string("melee_port.prev.3.log")) == 0);
+    for (const char* f : {"/melee_port.prev.log", "/melee_port.prev.2.log", "/melee_port.prev.3.log", "/melee_port.prev.4.log"})
+      std::remove((game + f).c_str());
   }
   auto zip = launcher::crash::capped_zip(files);
   std::vector<Entry> entries;

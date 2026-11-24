@@ -8,13 +8,13 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-UPSTREAM = 'MeleeUnlocked-1.0.5'
+UPSTREAM = 'MeleeUnlocked-1.0.22'
 REPO = 'Hero88go/melee-unlocked'
 # These hashes pin the inputs approved for this upstream revision. An upstream
 # tag or asset replacement must never silently change a rebuild of the fork.
 ASSETS = {
-    UPSTREAM + '-win64.zip': ('v1.0.5', '95454dc94077053d19c1d796b8a55b6f9429f8fa151f040695a6944fa6856276'),
-    UPSTREAM + '-RTX-Pack.zip': ('parts-1.0.5', 'f1c8248936560aefafe2fed6dbcef030334c89b73824e2a307544cfd241f9cb6'),
+    UPSTREAM + '-win64.zip': ('v1.0.22', '38698ed2ab32be2a45f3c9ee6c333f6965fc150eb707e7b9f5f242e5bd60fd1f'),
+    UPSTREAM + '-RTX-Pack.zip': ('parts-1.0.22', 'f1c8248936560aefafe2fed6dbcef030334c89b73824e2a307544cfd241f9cb6'),
     'MeleeUnlocked-XeSS.zip': ('v0.9.98', '2b170a5334c80d843afb7bc002e186991155d79f4a6d54131d1f762d96d5229e'),
     'MeleeUnlocked-DLSS5-Model.zip': ('v0.9.57', '2b5753872c281ec65276dda263f80e510b04328e33ff7d85fc4adba063a74fb7'),
     'MeleeUnlocked-Lab.zip': ('content-1', '6fcb60586ee0b73a42b3b7521546b554d3b105299bc97d74720b849075febb75'),
