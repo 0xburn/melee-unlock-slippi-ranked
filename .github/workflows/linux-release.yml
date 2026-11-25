@@ -1,0 +1,32 @@
+name: Build Linux release
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-14 g++-14 ninja-build libsdl2-dev libglew-dev libusb-1.0-0-dev libcurl4-openssl-dev libssl-dev libavformat-dev libavcodec-dev libswscale-dev libswresample-dev libavutil-dev glslang-tools spirv-cross patchelf 7zip xdelta3
+      - name: Build and package both CPU versions
+        env:
+          CMAKE_IGNORE_PREFIX_PATH: /usr/local
+        run: bash tools/build_linux_release.sh
+      - name: Test extracted release
+        run: |
+          version=$(cat VERSION)
+          tar -xf "release/MeleeUnlocked-$version-linux-x86_64.tar.gz" -C "$RUNNER_TEMP"
+          folder="$RUNNER_TEMP/MeleeUnlocked-$version"
+          for engine in melee_source melee_source_compat; do
+            test "$("$folder/$engine" --version)" = "$version"
+          done
+          python3 port/tests/linux_launcher_quick_play_test.py "$folder/MeleeUnlocked"
+          test -z "$(find "$folder" -iname '*yougame*' -o -iname '*.iso' -o -name user.json)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Melee-Unlocked-Linux-x86_64
+          path: release/*-linux-x86_64.tar.gz
+          if-no-files-found: error
